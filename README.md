@@ -4,7 +4,8 @@ Local-first voice cloning studio. Models run on your own computer; a phone
 on the same network will later be able to connect as a remote control.
 
 Status: **MVP**. One engine (ZipVoice, Chinese/English zero-shot cloning),
-one local HTTP server with an embedded web UI.
+one local HTTP server with an embedded web UI, and a saved-voice library so
+a reference clip only has to be recorded once.
 
 ## Architecture (target)
 
@@ -45,7 +46,11 @@ synthesize, and press generate.
 |---|---|---|
 | GET | `/api/health` | service status |
 | GET | `/api/engines` | registered engines and defaults |
-| POST | `/api/engines/:id/synthesize` | multipart `text`, `prompt` (WAV), `prompt_text`, optional `speed`, `num_steps` → WAV |
+| POST | `/api/engines/:id/synthesize` | multipart `text` + either `profile_id` or (`prompt` WAV + `prompt_text`), optional `speed`, `num_steps` → WAV |
+| GET | `/api/profiles` | saved voices (metadata only) |
+| POST | `/api/profiles` | multipart `name`, `prompt_text`, `prompt` (WAV) → saved voice |
+| GET | `/api/profiles/:id/audio` | reference clip of a saved voice |
+| DELETE | `/api/profiles/:id` | delete a saved voice |
 
 Example:
 
@@ -64,6 +69,7 @@ curl -X POST http://127.0.0.1:8787/api/engines/sherpa-onnx-zipvoice-distill-int8
 | `LAVEROCK_HOST` | `127.0.0.1` | bind address (loopback only until pairing/TLS lands) |
 | `LAVEROCK_PORT` | `8787` | port |
 | `LAVEROCK_MODELS_DIR` | `models` | directory scanned for `*/engine.json` |
+| `LAVEROCK_DATA_DIR` | `data` | saved voices are stored under `<data>/profiles/<id>/` |
 
 ## Model credits
 

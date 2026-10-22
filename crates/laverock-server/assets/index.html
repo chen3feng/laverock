@@ -64,6 +64,18 @@
   </div>
 
   <div class="card">
+    <label for="profile">声音库（已保存的参考声音）</label>
+    <div class="prompt-box">
+      <select id="profile" style="flex:1">
+        <option value="">— 临时录音 / 上传 —</option>
+      </select>
+      <button class="ghost" id="preview" type="button" disabled>试听</button>
+      <button class="ghost" id="delprofile" type="button" disabled>删除</button>
+    </div>
+    <div class="hint" id="profilehint">选择一个已保存的声音，或使用下方的临时录音。</div>
+  </div>
+
+  <div class="card" id="adhoc">
     <label>参考声音（3–10 秒干净人声 WAV）</label>
     <div class="prompt-box">
       <input type="file" id="file" accept="audio/wav,.wav" style="display:none" />
@@ -76,6 +88,14 @@
       <label for="prompt_text">参考音频对应文字（必填 — 需与录音内容一致）</label>
       <input type="text" id="prompt_text" placeholder="例如：那还是三十六年前，一九八七年。" />
       <div class="hint">ZipVoice 需要参考文本才能对齐音色与韵律。录音说了什么就填什么，中英文均可。</div>
+    </div>
+    <div style="margin-top:14px">
+      <label for="profilename">保存到声音库（可选，便于下次直接复用）</label>
+      <div class="prompt-box">
+        <input type="text" id="profilename" placeholder="给这个声音起个名字，例如：新闻女声" style="flex:1" />
+        <button class="ghost" id="saveprofile" type="button">保存声音</button>
+      </div>
+      <div class="hint" id="savehint"></div>
     </div>
   </div>
 
@@ -99,11 +119,93 @@
     <span id="status"></span>
   </div>
   <audio id="player" controls style="display:none"></audio>
+  <audio id="previewer" style="display:none"></audio>
 </div>
 
 <script>
 const $ = (id) => document.getElementById(id);
 let promptBlob = null, promptName = null, mediaRecorder_state = null;
+let profiles = [];
+
+function selectedProfile() {
+  return profiles.find(p => p.id === $('profile').value) || null;
+}
+
+function syncProfileUI() {
+  const p = selectedProfile();
+  $('adhoc').style.display = p ? 'none' : 'block';
+  $('preview').disabled = !p;
+  $('delprofile').disabled = !p;
+  $('profilehint').textContent = p
+    ? `使用「${p.name}」· 参考文本：${p.prompt_text}`
+    : '选择一个已保存的声音，或使用下方的临时录音。';
+}
+
+async function loadProfiles() {
+  const res = await fetch('/api/profiles');
+  profiles = await res.json();
+  const sel = $('profile');
+  const current = sel.value;
+  sel.innerHTML = '<option value="">— 临时录音 / 上传 —</option>';
+  for (const p of profiles) {
+    const o = document.createElement('option');
+    o.value = p.id;
+    o.textContent = p.name;
+    sel.appendChild(o);
+  }
+  if (profiles.some(p => p.id === current)) sel.value = current;
+  syncProfileUI();
+}
+
+$('profile').onchange = syncProfileUI;
+
+$('preview').onclick = () => {
+  const p = selectedProfile();
+  if (!p) return;
+  $('previewer').src = `/api/profiles/${p.id}/audio`;
+  $('previewer').play();
+};
+
+$('delprofile').onclick = async () => {
+  const p = selectedProfile();
+  if (!p) return;
+  if (!confirm(`删除声音「${p.name}」？此操作不可撤销。`)) return;
+  const res = await fetch(`/api/profiles/${p.id}`, { method: 'DELETE' });
+  if (res.ok) {
+    $('profilehint').textContent = `已删除「${p.name}」`;
+    await loadProfiles();
+  } else {
+    $('profilehint').textContent = '删除失败';
+  }
+};
+
+$('saveprofile').onclick = async () => {
+  const name = $('profilename').value.trim();
+  const ptext = $('prompt_text').value.trim();
+  if (!promptBlob) { $('savehint').textContent = '请先选择或录制参考声音'; return; }
+  if (!name) { $('savehint').textContent = '请给声音起个名字'; return; }
+  if (!ptext) { $('savehint').textContent = '请填写参考音频对应的文字'; return; }
+
+  const fd = new FormData();
+  fd.append('name', name);
+  fd.append('prompt_text', ptext);
+  fd.append('prompt', promptBlob, promptName || 'reference.wav');
+  const engine = $('engine').value;
+  if (engine) fd.append('engine_id', engine);
+
+  const res = await fetch('/api/profiles', { method: 'POST', body: fd });
+  if (!res.ok) {
+    const msg = await res.json().then(j => j.error).catch(() => res.statusText);
+    $('savehint').textContent = '保存失败：' + msg;
+    return;
+  }
+  const meta = await res.json();
+  $('profilename').value = '';
+  $('savehint').textContent = `已保存「${meta.name}」，下次可直接选用`;
+  await loadProfiles();
+  $('profile').value = meta.id;
+  syncProfileUI();
+};
 
 async function loadEngines() {
   const res = await fetch('/api/engines');
@@ -207,16 +309,23 @@ function encodeWav(samples, sr) {
 
 $('go').onclick = async () => {
   const status = $('status');
-  if (!promptBlob) { status.className = 'err'; status.textContent = '请先选择或录制参考声音'; return; }
+  const saved = selectedProfile();
+  if (!saved && !promptBlob) {
+    status.className = 'err'; status.textContent = '请选择一个已保存的声音，或录制/上传参考声音'; return;
+  }
   const text = $('text').value.trim();
   if (!text) { status.className = 'err'; status.textContent = '请输入要合成的文字'; return; }
-  const pt = $('prompt_text').value.trim();
-  if (!pt) { status.className = 'err'; status.textContent = '请填写参考音频对应的文字'; return; }
 
   const fd = new FormData();
   fd.append('text', text);
-  fd.append('prompt', promptBlob, promptName);
-  fd.append('prompt_text', pt);
+  if (saved) {
+    fd.append('profile_id', saved.id);
+  } else {
+    const pt = $('prompt_text').value.trim();
+    if (!pt) { status.className = 'err'; status.textContent = '请填写参考音频对应的文字'; return; }
+    fd.append('prompt', promptBlob, promptName);
+    fd.append('prompt_text', pt);
+  }
   fd.append('speed', $('speed').value);
   fd.append('num_steps', $('steps').value);
 
@@ -243,6 +352,7 @@ $('go').onclick = async () => {
 };
 
 loadEngines();
+loadProfiles();
 </script>
 </body>
 </html>

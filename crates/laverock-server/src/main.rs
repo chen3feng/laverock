@@ -4,25 +4,33 @@
 //!   GET  /                    embedded web UI
 //!   GET  /api/health          service + engine count
 //!   GET  /api/engines         registered engines
-//!   POST /api/engines/:id/synthesize   multipart: text + prompt WAV -> WAV
+//!   POST /api/engines/:id/synthesize   multipart: text + prompt/profile -> WAV
+//!   GET  /api/profiles        saved voices
+//!   POST /api/profiles        multipart: name + prompt_text + reference WAV
+//!   GET  /api/profiles/:id/audio        reference clip
+//!   DELETE /api/profiles/:id
 //!
 //! Phone/LAN access (pairing, TLS, device tokens) comes later; until
 //! then the server binds loopback only.
+
+mod profiles;
 
 use axum::{
     extract::{Multipart, Path, State},
     http::{header, StatusCode},
     response::{Html, IntoResponse, Response},
-    routing::get,
+    routing::{delete, get, post},
     Json, Router,
 };
 use laverock_core::{decode_wav, encode_wav, Audio, CoreError, EngineManager, SynthRequest};
+use profiles::ProfileStore;
 use std::{net::SocketAddr, sync::Arc};
 use tracing::error;
 
 #[derive(Clone)]
 struct AppState {
     manager: Arc<EngineManager>,
+    profiles: Arc<ProfileStore>,
 }
 
 /// Error type mapping core errors to HTTP.
@@ -46,7 +54,7 @@ impl From<CoreError> for ApiError {
         match err {
             CoreError::NotFound(id) => Self {
                 status: StatusCode::NOT_FOUND,
-                message: format!("engine not found: {id}"),
+                message: format!("not found: {id}"),
             },
             CoreError::Wav(msg) => Self {
                 status: StatusCode::BAD_REQUEST,
@@ -88,6 +96,101 @@ async fn engines(State(state): State<AppState>) -> impl IntoResponse {
     Json(state.manager.list())
 }
 
+async fn list_profiles(
+    State(state): State<AppState>,
+) -> Result<Json<Vec<profiles::ProfileMeta>>, ApiError> {
+    Ok(Json(state.profiles.list()?))
+}
+
+async fn create_profile(
+    State(state): State<AppState>,
+    mut multipart: Multipart,
+) -> Result<Json<profiles::ProfileMeta>, ApiError> {
+    let mut name = None;
+    let mut prompt_text = None;
+    let mut engine_id = None;
+    let mut wav: Option<Vec<u8>> = None;
+
+    while let Some(field) = multipart
+        .next_field()
+        .await
+        .map_err(|e| ApiError::bad_request(format!("malformed multipart: {e}")))?
+    {
+        match field.name() {
+            Some("name") => {
+                name = Some(
+                    field
+                        .text()
+                        .await
+                        .map_err(|e| ApiError::bad_request(format!("bad name: {e}")))?,
+                )
+            }
+            Some("prompt_text") => {
+                prompt_text = Some(
+                    field
+                        .text()
+                        .await
+                        .map_err(|e| ApiError::bad_request(format!("bad prompt_text: {e}")))?,
+                )
+            }
+            Some("engine_id") => {
+                let raw = field
+                    .text()
+                    .await
+                    .map_err(|e| ApiError::bad_request(format!("bad engine_id: {e}")))?;
+                if !raw.trim().is_empty() {
+                    engine_id = Some(raw);
+                }
+            }
+            Some("prompt") => {
+                wav = Some(
+                    field
+                        .bytes()
+                        .await
+                        .map_err(|e| ApiError::bad_request(format!("bad prompt upload: {e}")))?
+                        .to_vec(),
+                );
+            }
+            _ => {}
+        }
+    }
+
+    let name = name.ok_or_else(|| ApiError::bad_request("missing required field: name"))?;
+    let prompt_text =
+        prompt_text.ok_or_else(|| ApiError::bad_request("missing required field: prompt_text"))?;
+    let wav = wav
+        .filter(|b| !b.is_empty())
+        .ok_or_else(|| ApiError::bad_request("missing required field: prompt (WAV reference)"))?;
+
+    Ok(Json(state.profiles.create(
+        &name,
+        &prompt_text,
+        engine_id,
+        &wav,
+    )?))
+}
+
+async fn delete_profile(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<StatusCode, ApiError> {
+    state.profiles.delete(&id)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn profile_audio(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Response, ApiError> {
+    let (_, wav) = state.profiles.get(&id)?;
+    Ok((
+        StatusCode::OK,
+        [(header::CONTENT_TYPE, "audio/wav".to_string())],
+        wav,
+    )
+        .into_response())
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn synthesize(
     Path(engine_id): Path<String>,
@@ -97,6 +200,7 @@ async fn synthesize(
     let mut text: Option<String> = None;
     let mut prompt_bytes: Option<Vec<u8>> = None;
     let mut prompt_text: Option<String> = None;
+    let mut profile_id: Option<String> = None;
     let mut speed: Option<f32> = None;
     let mut num_steps: Option<i32> = None;
 
@@ -131,6 +235,15 @@ async fn synthesize(
                     prompt_text = Some(raw);
                 }
             }
+            Some("profile_id") => {
+                let raw = field
+                    .text()
+                    .await
+                    .map_err(|e| ApiError::bad_request(format!("bad profile_id: {e}")))?;
+                if !raw.trim().is_empty() {
+                    profile_id = Some(raw.trim().to_string());
+                }
+            }
             Some("speed") => {
                 let raw = field
                     .text()
@@ -153,19 +266,26 @@ async fn synthesize(
         .map(|t| t.trim().to_string())
         .filter(|t| !t.is_empty())
         .ok_or_else(|| ApiError::bad_request("missing required field: text"))?;
-    let prompt_bytes = prompt_bytes
-        .filter(|b| !b.is_empty())
-        .ok_or_else(|| ApiError::bad_request("missing required field: prompt (WAV reference)"))?;
-    // ZipVoice requires the transcript of the reference clip; without it
-    // sherpa-onnx logs "reference_text is empty" and returns no audio.
-    let prompt_text = prompt_text
-        .map(|t| t.trim().to_string())
-        .filter(|t| !t.is_empty())
-        .ok_or_else(|| {
-            ApiError::bad_request(
-                "missing required field: prompt_text (transcript of the reference audio)",
-            )
+    // A saved voice takes precedence over an ad-hoc upload.
+    let (prompt_bytes, prompt_text) = if let Some(id) = profile_id {
+        let (meta, wav) = state.profiles.get(&id)?;
+        (wav, Some(meta.prompt_text))
+    } else {
+        let wav = prompt_bytes.filter(|b| !b.is_empty()).ok_or_else(|| {
+            ApiError::bad_request("missing required field: prompt (WAV reference) or profile_id")
         })?;
+        // ZipVoice requires the transcript of the reference clip; without it
+        // sherpa-onnx logs "reference_text is empty" and returns no audio.
+        let text = prompt_text
+            .map(|t| t.trim().to_string())
+            .filter(|t| !t.is_empty())
+            .ok_or_else(|| {
+                ApiError::bad_request(
+                    "missing required field: prompt_text (transcript of the reference audio)",
+                )
+            })?;
+        (wav, Some(text))
+    };
 
     // Defaults come from the engine manifest.
     let defaults = state.manager.manifest_defaults(&engine_id)?;
@@ -176,7 +296,7 @@ async fn synthesize(
 
     let request = SynthRequest {
         text,
-        prompt_text: Some(prompt_text),
+        prompt_text,
         prompt_samples,
         prompt_sr,
         speed: speed.unwrap_or(defaults.speed),
@@ -225,11 +345,14 @@ async fn main() {
         .and_then(|v| v.parse().ok())
         .unwrap_or(8787);
     let models_dir = std::env::var("LAVEROCK_MODELS_DIR").unwrap_or_else(|_| "models".to_string());
+    let data_dir = std::env::var("LAVEROCK_DATA_DIR").unwrap_or_else(|_| "data".to_string());
 
     let manager = Arc::new(EngineManager::open(&models_dir).expect("scan models dir"));
+    let profiles = Arc::new(ProfileStore::open(&data_dir).expect("open data dir"));
     tracing::info!(
         dir = %models_dir,
         engines = manager.len(),
+        data = %data_dir,
         "engine registry ready"
     );
 
@@ -237,11 +360,11 @@ async fn main() {
         .route("/", get(index))
         .route("/api/health", get(health))
         .route("/api/engines", get(engines))
-        .route(
-            "/api/engines/{id}/synthesize",
-            axum::routing::post(synthesize),
-        )
-        .with_state(AppState { manager });
+        .route("/api/engines/{id}/synthesize", post(synthesize))
+        .route("/api/profiles", get(list_profiles).post(create_profile))
+        .route("/api/profiles/{id}", delete(delete_profile))
+        .route("/api/profiles/{id}/audio", get(profile_audio))
+        .with_state(AppState { manager, profiles });
 
     let addr: SocketAddr = format!("{host}:{port}")
         .parse()

@@ -53,6 +53,31 @@ code=$(curl -s -o /dev/null -w '%{http_code}' -X POST \
   -F 'text=no transcript' -F "prompt=@$DIR/test_wavs/leijun-1.wav")
 [ "$code" = "400" ] && ok "missing prompt_text -> 400" || bad "missing prompt_text -> $code"
 
+echo "profiles"
+pid=$(curl -s -X POST "$BASE/api/profiles" \
+  -F 'name=smoke-test-voice' \
+  -F 'prompt_text=那还是36年前, 1987年. 我呢考上了武汉大学的计算机系.' \
+  -F "prompt=@$DIR/test_wavs/leijun-1.wav" \
+  | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')
+[ -n "$pid" ] && ok "create profile ($pid)" || bad "create profile"
+
+curl -sf "$BASE/api/profiles" | grep -q "$pid" \
+  && ok "profile listed" || bad "profile not listed"
+curl -sf "$BASE/api/profiles/$pid/audio" -o "$OUT/ref.wav" \
+  && head -c 4 "$OUT/ref.wav" | grep -q RIFF \
+  && ok "profile audio" || bad "profile audio"
+
+code=$(curl -s -o "$OUT/from-profile.wav" -w '%{http_code}' -X POST \
+  "$BASE/api/engines/$MODEL/synthesize" \
+  -F 'text=你好，我是 Laverock。' -F "profile_id=$pid")
+[ "$code" = "200" ] && head -c 4 "$OUT/from-profile.wav" | grep -q RIFF \
+  && ok "synthesize from profile" || bad "synthesize from profile (HTTP $code)"
+
+code=$(curl -s -o /dev/null -w '%{http_code}' -X DELETE "$BASE/api/profiles/$pid")
+[ "$code" = "204" ] && ok "delete profile" || bad "delete profile -> $code"
+curl -sf "$BASE/api/profiles" | grep -q "$pid" \
+  && bad "deleted profile still listed" || ok "profile removed"
+
 echo
 echo "passed: $pass  failed: $fail"
 [ "$fail" -eq 0 ]
