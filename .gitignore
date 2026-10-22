@@ -1,0 +1,16 @@
+/target
+**/target/
+
+# Downloaded engine models (each model dir carries an engine.json manifest)
+/models/*
+!/models/.gitkeep
+
+# Local data
+/data
+/.env
+*.tar.bz2
+
+# OS/editor
+.DS_Store
+.idea/
+.vscode/

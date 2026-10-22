@@ -1,0 +1,248 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="color-scheme" content="dark" />
+<title>Laverock</title>
+<style>
+  :root {
+    --bg: #0e0f13; --panel: #171922; --panel2: #1e2130; --line: #2a2e3f;
+    --text: #e8eaf2; --muted: #9aa0b5; --accent: #7cc4ff; --accent2: #5b8def;
+    --danger: #ff6b6b; --ok: #5dd39e;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 15px/1.5 -apple-system, "SF Pro Text", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  }
+  .wrap { max-width: 760px; margin: 0 auto; padding: 32px 20px 80px; }
+  h1 { font-size: 22px; margin: 0 0 4px; letter-spacing: 0.5px; }
+  .sub { color: var(--muted); font-size: 13px; margin-bottom: 28px; }
+  .card {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 14px;
+    padding: 20px; margin-bottom: 16px;
+  }
+  label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 8px; }
+  select, textarea, input[type="text"] {
+    width: 100%; background: var(--panel2); color: var(--text);
+    border: 1px solid var(--line); border-radius: 9px; padding: 10px 12px;
+    font: inherit; outline: none;
+  }
+  textarea { min-height: 110px; resize: vertical; }
+  select:focus, textarea:focus { border-color: var(--accent2); }
+  .row { display: flex; gap: 14px; flex-wrap: wrap; }
+  .row > div { flex: 1; min-width: 140px; }
+  button {
+    background: var(--accent2); color: white; border: 0; border-radius: 10px;
+    padding: 11px 20px; font: inherit; font-weight: 600; cursor: pointer;
+  }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+  button.ghost { background: var(--panel2); border: 1px solid var(--line); color: var(--text); }
+  button.rec { background: #3a2030; border: 1px solid #6e3040; color: #ffb3c0; }
+  button.rec.on { background: var(--danger); color: #fff; border-color: var(--danger); }
+  .prompt-box { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .fileinfo { font-size: 12.5px; color: var(--muted); }
+  .actions { display: flex; gap: 12px; align-items: center; margin-top: 4px; }
+  #status { font-size: 13px; color: var(--muted); min-height: 20px; }
+  #status.err { color: var(--danger); }
+  #status.ok { color: var(--ok); }
+  audio { width: 100%; margin-top: 14px; }
+  .badge { display: inline-block; font-size: 11px; color: var(--muted);
+    border: 1px solid var(--line); border-radius: 999px; padding: 1px 8px; margin-left: 8px; }
+  .hint { font-size: 12px; color: var(--muted); margin-top: 6px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Laverock <span class="badge">MVP · ZipVoice zh/en</span></h1>
+  <div class="sub">本地语音克隆合成 — 所有处理都在这台电脑上完成</div>
+
+  <div class="card">
+    <label for="engine">引擎</label>
+    <select id="engine"></select>
+  </div>
+
+  <div class="card">
+    <label>参考声音（3–10 秒干净人声 WAV）</label>
+    <div class="prompt-box">
+      <input type="file" id="file" accept="audio/wav,.wav" style="display:none" />
+      <button class="ghost" id="pick" type="button">选择文件</button>
+      <button class="rec" id="rec" type="button">● 录音</button>
+      <span class="fileinfo" id="promptinfo">未选择</span>
+    </div>
+    <div class="hint">录音会在浏览器内重采样为 24kHz 单声道 WAV；也可以上传 wav/mp3 转码后的 wav。</div>
+    <div style="margin-top:14px">
+      <label for="prompt_text">参考音频对应文字（必填 — 需与录音内容一致）</label>
+      <input type="text" id="prompt_text" placeholder="例如：那还是三十六年前，一九八七年。" />
+      <div class="hint">ZipVoice 需要参考文本才能对齐音色与韵律。录音说了什么就填什么，中英文均可。</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <label for="text">要合成的文字</label>
+    <textarea id="text" placeholder="输入中文或 English 文本……"></textarea>
+    <div class="row" style="margin-top:14px">
+      <div>
+        <label for="speed">语速 <span id="speedv">1.0</span></label>
+        <input type="range" id="speed" min="0.5" max="2" step="0.1" value="1" style="width:100%" />
+      </div>
+      <div>
+        <label for="steps">扩散步数 <span id="stepsv">4</span>（越多越稳、越慢）</label>
+        <input type="range" id="steps" min="1" max="16" step="1" value="4" style="width:100%" />
+      </div>
+    </div>
+  </div>
+
+  <div class="actions">
+    <button id="go" type="button">生成语音</button>
+    <span id="status"></span>
+  </div>
+  <audio id="player" controls style="display:none"></audio>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let promptBlob = null, promptName = null, mediaRecorder_state = null;
+
+async function loadEngines() {
+  const res = await fetch('/api/engines');
+  const engines = await res.json();
+  const sel = $('engine');
+  sel.innerHTML = '';
+  if (!engines.length) {
+    sel.innerHTML = '<option>未发现模型 — 运行 scripts/download-model.sh</option>';
+    $('go').disabled = true;
+    return;
+  }
+  for (const e of engines) {
+    const o = document.createElement('option');
+    o.value = e.id;
+    o.textContent = `${e.name} (${e.languages.join('/') || '?'})`;
+    sel.appendChild(o);
+  }
+  $('steps').value = engines[0].defaults?.num_steps ?? 4;
+  $('stepsv').textContent = $('steps').value;
+}
+
+$('speed').oninput = (e) => $('speedv').textContent = e.target.value;
+$('steps').oninput = (e) => $('stepsv').textContent = e.target.value;
+
+$('pick').onclick = () => $('file').click();
+$('file').onchange = () => {
+  const f = $('file').files[0];
+  if (!f) return;
+  promptBlob = f; promptName = f.name;
+  $('promptinfo').textContent = `${f.name} · ${(f.size/1024/1024).toFixed(2)} MB`;
+};
+
+// ---- Mic -> 24kHz mono WAV (no MediaRecorder/webm dependency) ----
+$('rec').onclick = async () => {
+  const btn = $('rec');
+  if (mediaRecorder_state) {
+    mediaRecorder_state.stop();
+    return;
+  }
+  const stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1 } });
+  const ctx = new AudioContext();
+  const src = ctx.createMediaStreamSource(stream);
+  const TARGET = 24000;
+  const ratio = ctx.sampleRate / TARGET;
+  const chunks = [];
+  const node = ctx.createScriptProcessor(4096, 1, 1);
+  node.onaudioprocess = (e) => chunks.push(new Float32Array(e.inputBuffer.getChannelData(0)));
+  src.connect(node); node.connect(ctx.destination);
+  btn.classList.add('on'); btn.textContent = '■ 停止';
+  $('promptinfo').textContent = '录音中……';
+
+  mediaRecorder_state = {
+    stop() {
+      node.disconnect(); src.disconnect(); stream.getTracks().forEach(t => t.stop());
+      ctx.close();
+      const raw = concatFloat(chunks);
+      const down = downsample(raw, ratio);
+      promptBlob = new Blob([encodeWav(down, TARGET)], { type: 'audio/wav' });
+      promptName = 'mic-reference.wav';
+      const sec = (down.length / TARGET).toFixed(1);
+      $('promptinfo').textContent = `麦克风录音 · ${sec}s`;
+      btn.classList.remove('on'); btn.textContent = '● 录音';
+      mediaRecorder_state = null;
+    }
+  };
+};
+
+function concatFloat(arrs) {
+  const n = arrs.reduce((a, b) => a + b.length, 0);
+  const out = new Float32Array(n);
+  let o = 0;
+  for (const a of arrs) { out.set(a, o); o += a.length; }
+  return out;
+}
+function downsample(input, ratio) {
+  const outLen = Math.floor(input.length / ratio);
+  const out = new Float32Array(outLen);
+  for (let i = 0; i < outLen; i++) {
+    const start = Math.floor(i * ratio), end = Math.floor((i + 1) * ratio);
+    let sum = 0;
+    for (let j = start; j < end && j < input.length; j++) sum += input[j];
+    out[i] = sum / Math.max(1, end - start);
+  }
+  return out;
+}
+function encodeWav(samples, sr) {
+  const buf = new ArrayBuffer(44 + samples.length * 2);
+  const v = new DataView(buf);
+  const wstr = (o, s) => { for (let i = 0; i < s.length; i++) v.setUint8(o + i, s.charCodeAt(i)); };
+  wstr(0, 'RIFF'); v.setUint32(4, 36 + samples.length * 2, true); wstr(8, 'WAVE');
+  wstr(12, 'fmt '); v.setUint32(16, 16, true); v.setUint16(20, 1, true);
+  v.setUint16(22, 1, true); v.setUint32(24, sr, true);
+  v.setUint32(28, sr * 2, true); v.setUint16(32, 2, true); v.setUint16(34, 16, true);
+  wstr(36, 'data'); v.setUint32(40, samples.length * 2, true);
+  let o = 44;
+  for (const s of samples) {
+    v.setInt16(o, Math.max(-1, Math.min(1, s)) * 0x7fff, true); o += 2;
+  }
+  return buf;
+}
+
+$('go').onclick = async () => {
+  const status = $('status');
+  if (!promptBlob) { status.className = 'err'; status.textContent = '请先选择或录制参考声音'; return; }
+  const text = $('text').value.trim();
+  if (!text) { status.className = 'err'; status.textContent = '请输入要合成的文字'; return; }
+  const pt = $('prompt_text').value.trim();
+  if (!pt) { status.className = 'err'; status.textContent = '请填写参考音频对应的文字'; return; }
+
+  const fd = new FormData();
+  fd.append('text', text);
+  fd.append('prompt', promptBlob, promptName);
+  fd.append('prompt_text', pt);
+  fd.append('speed', $('speed').value);
+  fd.append('num_steps', $('steps').value);
+
+  $('go').disabled = true;
+  status.className = ''; status.textContent = '合成中（首次加载模型需要几秒）……';
+  const t0 = performance.now();
+  try {
+    const res = await fetch(`/api/engines/${$('engine').value}/synthesize`, { method: 'POST', body: fd });
+    if (!res.ok) {
+      const msg = await res.json().then(j => j.error).catch(() => res.statusText);
+      throw new Error(msg);
+    }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const p = $('player');
+    p.src = url; p.style.display = 'block'; p.play();
+    status.className = 'ok';
+    status.textContent = `完成 · ${(blob.size/1024).toFixed(0)} KB · ${((performance.now()-t0)/1000).toFixed(1)}s`;
+  } catch (e) {
+    status.className = 'err'; status.textContent = '失败：' + e.message;
+  } finally {
+    $('go').disabled = false;
+  }
+};
+
+loadEngines();
+</script>
+</body>
+</html>
