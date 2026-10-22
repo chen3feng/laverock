@@ -536,7 +536,7 @@ $('lanToggle').onchange = async () => {
   $('qr').style.display = 'none';
   $('pairInfo').textContent = '';
   $('lanHint').textContent = enabled
-    ? `同一 Wi-Fi 下的手机可访问 ${body.url || ''}`
+    ? `${body.url || ''}${body.fingerprint ? '  ·  证书指纹 ' + body.fingerprint.slice(0, 17) + '…' : ''}`
     : '开启后，同一 Wi-Fi 下的手机经配对即可访问同一套界面';
   if (!enabled) $('deviceList').textContent = '暂无';
   else loadDevices();
@@ -553,7 +553,8 @@ $('pairBtn').onclick = async () => {
   $('qr').innerHTML = body.qr_svg;
   $('qr').style.display = 'block';
   $('pairInfo').textContent = `配对码 ${body.code}`;
-  $('pairHint').textContent = '手机扫码，或在这台电脑的浏览器中输入配对码。5 分钟内有效。';
+  $('pairHint').textContent = '手机扫码即可打开 https 链接；首次访问会提示证书不受信任，请选择「高级 → 继续前往」以允许使用麦克风（证书指纹 ' +
+    (body.fingerprint ? body.fingerprint.slice(0, 17) + '…' : '') + '）。5 分钟内有效。';
 };
 
 async function loadDevices() {

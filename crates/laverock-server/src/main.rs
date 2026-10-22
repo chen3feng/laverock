@@ -220,6 +220,7 @@ async fn get_lan(
     Ok(Json(serde_json::json!({
         "enabled": state.remote.lan_enabled(),
         "url": if state.remote.lan_enabled() { remote::lan_url(state.port) } else { None },
+        "fingerprint": state.remote.fingerprint(),
     })))
 }
 
@@ -243,23 +244,32 @@ async fn set_lan(
             .await
             .map_err(|_| ApiError::internal("LAN supervisor dropped"))?
         {
-            Ok(_) => state.remote.set_lan_enabled(true)?,
+            Ok(info) => {
+                state.remote.set_lan_enabled(true)?;
+                state.remote.set_fingerprint(Some(info.fingerprint.clone()));
+                return Ok(Json(serde_json::json!({
+                    "enabled": true,
+                    "url": info.url,
+                    "fingerprint": info.fingerprint,
+                })));
+            }
             Err(e) => return Err(ApiError::bad_request(e)),
         }
-    } else {
-        let (tx, rx) = tokio::sync::oneshot::channel();
-        state
-            .lan
-            .send(LanCmd::Stop(tx))
-            .await
-            .map_err(|_| ApiError::internal("LAN supervisor stopped"))?;
-        let _ = rx.await;
-        state.remote.set_lan_enabled(false)?;
     }
 
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    state
+        .lan
+        .send(LanCmd::Stop(tx))
+        .await
+        .map_err(|_| ApiError::internal("LAN supervisor stopped"))?;
+    let _ = rx.await;
+    state.remote.set_lan_enabled(false)?;
+    state.remote.set_fingerprint(None);
+
     Ok(Json(serde_json::json!({
-        "enabled": body.enabled,
-        "url": if body.enabled { remote::lan_url(state.port) } else { None },
+        "enabled": false,
+        "url": null,
     })))
 }
 
@@ -284,6 +294,7 @@ async fn start_pairing(
         "url": url,
         "expires_at": expires_at,
         "qr_svg": qr_svg,
+        "fingerprint": state.remote.fingerprint(),
     })))
 }
 
@@ -633,7 +644,12 @@ async fn main() {
 
     // The supervisor owns the router so the LAN listener can be started
     // and stopped at runtime.
-    let lan_supervisor = tokio::spawn(remote::lan_supervisor(lan_rx, app.clone(), port));
+    let lan_supervisor = tokio::spawn(remote::lan_supervisor(
+        lan_rx,
+        app.clone(),
+        port,
+        std::path::PathBuf::from(&data_dir).join("tls"),
+    ));
 
     let addr: SocketAddr = format!("{host}:{port}")
         .parse()
@@ -645,7 +661,10 @@ async fn main() {
         let (tx, rx) = tokio::sync::oneshot::channel();
         if boot_lan.send(LanCmd::Start(tx)).await.is_ok() {
             match rx.await {
-                Ok(Ok(url)) => tracing::info!(%url, "LAN access enabled"),
+                Ok(Ok(info)) => {
+                    remote.set_fingerprint(Some(info.fingerprint.clone()));
+                    tracing::info!(url = %info.url, "LAN access enabled");
+                }
                 Ok(Err(e)) => tracing::warn!("LAN access enabled but listener failed: {e}"),
                 Err(_) => tracing::warn!("LAN supervisor dropped the start request"),
             }

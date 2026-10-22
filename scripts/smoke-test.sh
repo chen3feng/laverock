@@ -87,16 +87,16 @@ if [ -n "$LAN_IP" ]; then
     -d '{"enabled":true}' >/dev/null
   sleep 0.5
 
-  code=$(curl -s -o /dev/null -w '%{http_code}' "http://$LAN_IP:$PORT/api/engines")
+  code=$(curl -sk -o /dev/null -w '%{http_code}' "https://$LAN_IP:$PORT/api/engines")
   [ "$code" = "401" ] && ok "LAN requires pairing" || bad "LAN without token -> $code"
 
   pair=$(curl -s -X POST "$BASE/api/pair/start")
   pcode=$(echo "$pair" | sed -n 's/.*"code":"\([0-9]*\)".*/\1/p')
   jar=$(mktemp)
-  curl -s -c "$jar" -X POST "http://$LAN_IP:$PORT/api/pair/claim" \
+  curl -sk -c "$jar" -X POST "https://$LAN_IP:$PORT/api/pair/claim" \
     -H 'Content-Type: application/json' \
     -d "{\"code\":\"$pcode\",\"device_name\":\"smoke-test\"}" >/dev/null
-  code=$(curl -s -b "$jar" -o /dev/null -w '%{http_code}' "http://$LAN_IP:$PORT/api/engines")
+  code=$(curl -sk -b "$jar" -o /dev/null -w '%{http_code}' "https://$LAN_IP:$PORT/api/engines")
   [ "$code" = "200" ] && ok "paired LAN access" || bad "paired LAN access -> $code"
   rm -f "$jar"
 

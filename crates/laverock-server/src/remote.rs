@@ -19,7 +19,7 @@ use std::{
     sync::Mutex,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
-use tokio::{net::TcpListener, sync::oneshot, task::JoinHandle};
+use tokio::{sync::oneshot, task::JoinHandle};
 
 const PAIR_TTL: Duration = Duration::from_secs(5 * 60);
 const MAX_PAIR_FAILURES: u32 = 8;
@@ -66,10 +66,19 @@ impl From<&Device> for DeviceView {
     }
 }
 
+/// Information returned when the LAN listener starts.
+#[derive(Debug, Clone, Serialize)]
+pub struct LanInfo {
+    pub url: String,
+    /// SHA-256 of the certificate DER, uppercase colon-separated.
+    pub fingerprint: String,
+}
+
 pub struct RemoteState {
     path: PathBuf,
     config: Mutex<RemoteConfig>,
     pair: Mutex<Option<PairSession>>,
+    fingerprint: Mutex<Option<String>>,
 }
 
 impl RemoteState {
@@ -84,7 +93,16 @@ impl RemoteState {
             path,
             config: Mutex::new(config),
             pair: Mutex::new(None),
+            fingerprint: Mutex::new(None),
         })
+    }
+
+    pub fn fingerprint(&self) -> Option<String> {
+        self.fingerprint.lock().expect("fingerprint lock").clone()
+    }
+
+    pub fn set_fingerprint(&self, value: Option<String>) {
+        *self.fingerprint.lock().expect("fingerprint lock") = value;
     }
 
     pub fn lan_enabled(&self) -> bool {
@@ -181,24 +199,35 @@ impl RemoteState {
 }
 
 pub enum LanCmd {
-    Start(oneshot::Sender<Result<String, String>>),
+    Start(oneshot::Sender<Result<LanInfo, String>>),
     Stop(oneshot::Sender<()>),
 }
 
 /// Owns the optional LAN listener. The router is moved in here so it can
 /// be cloned for each listener without creating a state cycle.
+///
+/// The LAN listener speaks HTTPS with a self-signed certificate whose SAN
+/// covers the current LAN address; browsers require a secure context for
+/// microphone access and PWA installation.
 pub async fn lan_supervisor(
     mut rx: tokio::sync::mpsc::Receiver<LanCmd>,
     app: axum::Router,
     port: u16,
+    tls_dir: PathBuf,
 ) {
-    let mut current: Option<(SocketAddr, oneshot::Sender<()>, JoinHandle<()>)> = None;
+    use axum_server::Handle;
+
+    let mut current: Option<(SocketAddr, axum_server::Handle<SocketAddr>, JoinHandle<()>)> = None;
 
     while let Some(cmd) = rx.recv().await {
         match cmd {
             LanCmd::Start(reply) => {
                 if let Some((addr, ..)) = &current {
-                    let _ = reply.send(Ok(format!("http://{addr}")));
+                    let fingerprint = fingerprint_for(&tls_dir, addr.ip()).unwrap_or_default();
+                    let _ = reply.send(Ok(LanInfo {
+                        url: format!("https://{addr}"),
+                        fingerprint,
+                    }));
                     continue;
                 }
                 let Some(ip) = discover_lan_ip() else {
@@ -206,35 +235,47 @@ pub async fn lan_supervisor(
                     continue;
                 };
                 let addr = SocketAddr::new(ip, port);
-                match TcpListener::bind(addr).await {
-                    Ok(listener) => {
-                        tracing::info!(%addr, "LAN listener started");
-                        let (shutdown_tx, shutdown_rx) = oneshot::channel();
-                        let app = app.clone();
-                        let handle = tokio::spawn(async move {
-                            let _ = axum::serve(
-                                listener,
-                                app.into_make_service_with_connect_info::<SocketAddr>(),
-                            )
-                            .with_graceful_shutdown(async {
-                                let _ = shutdown_rx.await;
-                            })
-                            .await;
-                        });
-                        current = Some((addr, shutdown_tx, handle));
-                        let _ = reply.send(Ok(format!("http://{addr}")));
-                    }
+
+                let (cert, key, fingerprint) = match ensure_cert(&tls_dir, ip) {
+                    Ok(v) => v,
                     Err(e) => {
-                        tracing::warn!(%addr, error = %e, "cannot bind LAN listener");
-                        let _ = reply.send(Err(format!("无法监听 {addr}: {e}")));
+                        let _ = reply.send(Err(format!("生成证书失败: {e}")));
+                        continue;
                     }
-                }
+                };
+                rustls::crypto::ring::default_provider()
+                    .install_default()
+                    .ok();
+                let tls = match axum_server::tls_rustls::RustlsConfig::from_pem(cert, key).await {
+                    Ok(c) => c,
+                    Err(e) => {
+                        let _ = reply.send(Err(format!("加载证书失败: {e}")));
+                        continue;
+                    }
+                };
+
+                let handle = Handle::new();
+                let server_handle = handle.clone();
+                let app = app.clone();
+                let join = tokio::spawn(async move {
+                    let _ = axum_server::bind_rustls(addr, tls)
+                        .handle(server_handle)
+                        .serve(app.into_make_service_with_connect_info::<SocketAddr>())
+                        .await;
+                });
+
+                tracing::info!(%addr, "LAN listener started (https)");
+                current = Some((addr, handle, join));
+                let _ = reply.send(Ok(LanInfo {
+                    url: format!("https://{addr}"),
+                    fingerprint,
+                }));
             }
             LanCmd::Stop(reply) => {
-                if let Some((addr, tx, handle)) = current.take() {
+                if let Some((addr, handle, join)) = current.take() {
                     tracing::info!(%addr, "LAN listener stopped");
-                    let _ = tx.send(());
-                    let _ = handle.await;
+                    handle.graceful_shutdown(Some(Duration::from_secs(1)));
+                    let _ = join.await;
                 }
                 let _ = reply.send(());
             }
@@ -242,9 +283,113 @@ pub async fn lan_supervisor(
     }
 }
 
+/// Generate (or reuse) a self-signed certificate for `ip`.
+fn ensure_cert(dir: &Path, ip: IpAddr) -> Result<(Vec<u8>, Vec<u8>, String), String> {
+    fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    let cert_path = dir.join("cert.pem");
+    let key_path = dir.join("key.pem");
+    let ip_path = dir.join("ip.txt");
+
+    let same_ip = fs::read_to_string(&ip_path)
+        .map(|s| s.trim() == ip.to_string())
+        .unwrap_or(false);
+    if same_ip && cert_path.is_file() && key_path.is_file() {
+        if let Ok(cert) = fs::read(&cert_path) {
+            if let Ok(key) = fs::read(&key_path) {
+                let fingerprint = fingerprint_pem(&cert);
+                return Ok((cert, key, fingerprint));
+            }
+        }
+    }
+
+    let mut params =
+        rcgen::CertificateParams::new(vec!["localhost".to_string()]).map_err(|e| e.to_string())?;
+    params.subject_alt_names.push(rcgen::SanType::IpAddress(ip));
+    params
+        .distinguished_name
+        .push(rcgen::DnType::CommonName, format!("Laverock on {ip}"));
+    let key_pair = rcgen::KeyPair::generate().map_err(|e| e.to_string())?;
+    let cert = params.self_signed(&key_pair).map_err(|e| e.to_string())?;
+
+    let cert_pem = cert.pem().into_bytes();
+    let key_pem = key_pair.serialize_pem().into_bytes();
+    let fingerprint = fingerprint_der(cert.der());
+
+    fs::write(&cert_path, &cert_pem).map_err(|e| e.to_string())?;
+    fs::write(&key_path, &key_pem).map_err(|e| e.to_string())?;
+    fs::write(&ip_path, ip.to_string()).map_err(|e| e.to_string())?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = fs::set_permissions(&key_path, fs::Permissions::from_mode(0o600));
+    }
+
+    Ok((cert_pem, key_pem, fingerprint))
+}
+
+fn fingerprint_for(dir: &Path, ip: IpAddr) -> Option<String> {
+    let same_ip = fs::read_to_string(dir.join("ip.txt"))
+        .map(|s| s.trim() == ip.to_string())
+        .unwrap_or(false);
+    if !same_ip {
+        return None;
+    }
+    fs::read(dir.join("cert.pem"))
+        .ok()
+        .map(|pem| fingerprint_pem(&pem))
+}
+
+/// SHA-256 of the certificate DER, formatted as `AA:BB:…`.
+fn fingerprint_der(der: &[u8]) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(der);
+    fingerprint_hex(&hasher.finalize())
+}
+
+/// Best effort for a PEM file: hash the decoded base64 body.
+fn fingerprint_pem(pem: &[u8]) -> String {
+    let text = String::from_utf8_lossy(pem);
+    let body: String = text.lines().filter(|l| !l.starts_with("-----")).collect();
+    match base64_decode(&body) {
+        Some(der) => fingerprint_der(&der),
+        None => fingerprint_der(pem),
+    }
+}
+
+fn base64_decode(input: &str) -> Option<Vec<u8>> {
+    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = Vec::with_capacity(input.len() * 3 / 4);
+    let mut buf: u32 = 0;
+    let mut bits = 0u32;
+    for c in input.bytes() {
+        if c == b'=' || c.is_ascii_whitespace() {
+            continue;
+        }
+        let v = TABLE.iter().position(|&t| t == c)? as u32;
+        buf = (buf << 6) | v;
+        bits += 6;
+        if bits >= 8 {
+            bits -= 8;
+            out.push(((buf >> bits) & 0xff) as u8);
+        }
+    }
+    Some(out)
+}
+
+fn fingerprint_hex(bytes: &[u8]) -> String {
+    let mut s = String::with_capacity(bytes.len() * 3);
+    for (i, b) in bytes.iter().enumerate() {
+        if i > 0 {
+            s.push(':');
+        }
+        s.push_str(&format!("{b:02X}"));
+    }
+    s
+}
+
 /// Base URL the phone should use, if a LAN address can be determined.
 pub fn lan_url(port: u16) -> Option<String> {
-    discover_lan_ip().map(|ip| format!("http://{ip}:{port}"))
+    discover_lan_ip().map(|ip| format!("https://{ip}:{port}"))
 }
 
 pub fn make_qr_svg(text: &str) -> Result<String, String> {

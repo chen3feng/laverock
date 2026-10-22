@@ -81,9 +81,12 @@ separate), and **生成配对二维码** produces a QR code plus a six-digit cod
   next request.
 - The pairing state survives restarts (`lan_enabled` is persisted).
 
-Limitations: the LAN listener is plain HTTP for now, so treat the network
-as trusted; phone microphone access needs HTTPS (browsers require a secure
-context) and will be added with the TLS listener. The LAN address is
+The LAN listener serves **HTTPS** with a self-signed certificate
+(`data/tls/`, regenerated if the LAN address changes) so a phone gets a
+secure context — required for the microphone and for PWA installation. The
+first visit warns about the untrusted certificate; choose "advanced →
+proceed". The certificate's SHA-256 fingerprint is shown next to the QR
+code so an extra-cautious user can verify it matches. The LAN address is
 resolved at startup — if the machine switches networks, toggle LAN access
 off and on again.
 
