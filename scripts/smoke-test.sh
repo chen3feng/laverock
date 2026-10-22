@@ -78,6 +78,38 @@ code=$(curl -s -o /dev/null -w '%{http_code}' -X DELETE "$BASE/api/profiles/$pid
 curl -sf "$BASE/api/profiles" | grep -q "$pid" \
   && bad "deleted profile still listed" || ok "profile removed"
 
+echo "remote access"
+PORT=$(echo "$BASE" | sed -n 's|.*:\([0-9][0-9]*\).*|\1|p')
+PORT=${PORT:-8787}
+LAN_IP=$(ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1 2>/dev/null || hostname -I 2>/dev/null | awk '{print $1}')
+if [ -n "$LAN_IP" ]; then
+  curl -s -X POST "$BASE/api/settings/lan" -H 'Content-Type: application/json' \
+    -d '{"enabled":true}' >/dev/null
+  sleep 0.5
+
+  code=$(curl -s -o /dev/null -w '%{http_code}' "http://$LAN_IP:$PORT/api/engines")
+  [ "$code" = "401" ] && ok "LAN requires pairing" || bad "LAN without token -> $code"
+
+  pair=$(curl -s -X POST "$BASE/api/pair/start")
+  pcode=$(echo "$pair" | sed -n 's/.*"code":"\([0-9]*\)".*/\1/p')
+  jar=$(mktemp)
+  curl -s -c "$jar" -X POST "http://$LAN_IP:$PORT/api/pair/claim" \
+    -H 'Content-Type: application/json' \
+    -d "{\"code\":\"$pcode\",\"device_name\":\"smoke-test\"}" >/dev/null
+  code=$(curl -s -b "$jar" -o /dev/null -w '%{http_code}' "http://$LAN_IP:$PORT/api/engines")
+  [ "$code" = "200" ] && ok "paired LAN access" || bad "paired LAN access -> $code"
+  rm -f "$jar"
+
+  did=$(curl -s "$BASE/api/devices" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p' | head -1)
+  code=$(curl -s -o /dev/null -w '%{http_code}' -X DELETE "$BASE/api/devices/$did")
+  [ "$code" = "204" ] && ok "revoke device" || bad "revoke device -> $code"
+
+  curl -s -X POST "$BASE/api/settings/lan" -H 'Content-Type: application/json' \
+    -d '{"enabled":false}' >/dev/null
+else
+  echo "  skip (no LAN address found)"
+fi
+
 echo
 echo "passed: $pass  failed: $fail"
 [ "$fail" -eq 0 ]

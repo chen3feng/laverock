@@ -63,6 +63,30 @@ the standalone server; release builds use the OS app-data directory. Set
 `LAVEROCK_SERVER_BIN` to point at the server binary explicitly, or
 `LAVEROCK_URL` to attach to a server elsewhere.
 
+### Phone remote
+
+Turn on **手机遥控 → 局域网访问** in the desktop UI. The server then opens a
+second listener on the machine's LAN address (the loopback listener stays
+separate), and **生成配对二维码** produces a QR code plus a six-digit code.
+
+- Phones load the same SPA as the desktop; no second frontend.
+- **Loopback is trusted; the LAN listener is not.** Everything except `/`,
+  `/api/session` and `/api/pair/claim` requires a device token, accepted
+  either as `Authorization: Bearer …` or as the `laverock_device` cookie
+  (needed for `<audio>` and streamed responses).
+- Pairing codes are single-use, expire after five minutes, and are
+  invalidated after eight wrong attempts. Only loopback can create one.
+- Tokens are 32 random bytes, stored only as SHA-256 hashes in
+  `data/remote.json` (mode 0600). Revoking a phone takes effect on its
+  next request.
+- The pairing state survives restarts (`lan_enabled` is persisted).
+
+Limitations: the LAN listener is plain HTTP for now, so treat the network
+as trusted; phone microphone access needs HTTPS (browsers require a secure
+context) and will be added with the TLS listener. The LAN address is
+resolved at startup — if the machine switches networks, toggle LAN access
+off and on again.
+
 ### API
 
 | Method | Path | Description |
@@ -74,6 +98,11 @@ the standalone server; release builds use the OS app-data directory. Set
 | POST | `/api/profiles` | multipart `name`, `prompt_text`, `prompt` (WAV) → saved voice |
 | GET | `/api/profiles/:id/audio` | reference clip of a saved voice |
 | DELETE | `/api/profiles/:id` | delete a saved voice |
+| GET | `/api/session` | loopback/paired state (public) |
+| POST | `/api/pair/start` | desktop-only: create a 5-minute pairing code + QR |
+| POST | `/api/pair/claim` | exchange a pairing code for a device cookie (public) |
+| GET | `/api/devices` · DELETE `/api/devices/:id` | desktop-only: list/revoke phones |
+| GET/POST | `/api/settings/lan` | desktop-only: toggle the LAN listener |
 
 Example:
 

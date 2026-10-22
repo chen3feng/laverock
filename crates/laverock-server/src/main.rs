@@ -14,16 +14,20 @@
 //! then the server binds loopback only.
 
 mod profiles;
+mod remote;
 
 use axum::{
-    extract::{Multipart, Path, State},
-    http::{header, StatusCode},
+    body::Body,
+    extract::{ConnectInfo, Multipart, Path, State},
+    http::{header, Request, StatusCode},
+    middleware::{self, Next},
     response::{Html, IntoResponse, Response},
     routing::{delete, get, post},
     Json, Router,
 };
 use laverock_core::{decode_wav, encode_wav, Audio, CoreError, EngineManager, SynthRequest};
 use profiles::ProfileStore;
+use remote::{LanCmd, RemoteState};
 use std::{net::SocketAddr, sync::Arc};
 use tracing::error;
 
@@ -31,6 +35,9 @@ use tracing::error;
 struct AppState {
     manager: Arc<EngineManager>,
     profiles: Arc<ProfileStore>,
+    remote: Arc<RemoteState>,
+    lan: tokio::sync::mpsc::Sender<LanCmd>,
+    port: u16,
 }
 
 /// Error type mapping core errors to HTTP.
@@ -46,6 +53,27 @@ impl ApiError {
             status: StatusCode::BAD_REQUEST,
             message: message.into(),
         }
+    }
+
+    fn forbidden() -> Self {
+        Self {
+            status: StatusCode::FORBIDDEN,
+            message: "该操作只能在电脑端进行".to_string(),
+        }
+    }
+
+    fn internal(message: impl Into<String>) -> Self {
+        Self {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            message: message.into(),
+        }
+    }
+}
+
+impl From<std::io::Error> for ApiError {
+    fn from(err: std::io::Error) -> Self {
+        error!(error = %err, "io error");
+        Self::internal(err.to_string())
     }
 }
 
@@ -94,6 +122,222 @@ async fn health(State(state): State<AppState>) -> impl IntoResponse {
 
 async fn engines(State(state): State<AppState>) -> impl IntoResponse {
     Json(state.manager.list())
+}
+
+// ---------------------------------------------------------------- remote
+
+/// Paths a browser may reach before pairing: the SPA itself and the
+/// endpoints needed to pair.
+fn is_public_path(path: &str) -> bool {
+    matches!(
+        path,
+        "/" | "/api/session" | "/api/pair/claim" | "/favicon.ico"
+    )
+}
+
+fn token_from_headers(headers: &axum::http::HeaderMap) -> Option<String> {
+    if let Some(token) = headers
+        .get(header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer "))
+    {
+        return Some(token.trim().to_string());
+    }
+    let raw = headers.get(header::COOKIE)?.to_str().ok()?;
+    raw.split(';').find_map(|part| {
+        part.trim()
+            .strip_prefix("laverock_device=")
+            .map(|v| v.trim().to_string())
+    })
+}
+
+/// Loopback is trusted; LAN requests need a paired device token, either
+/// as `Authorization: Bearer …` or as the pairing cookie (needed for
+/// `<audio src>` and EventSource, which cannot set headers).
+async fn auth_middleware(
+    State(state): State<AppState>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    req: Request<Body>,
+    next: Next,
+) -> Response {
+    if peer.ip().is_loopback() || is_public_path(req.uri().path()) {
+        return next.run(req).await;
+    }
+
+    let authorized = token_from_headers(req.headers())
+        .and_then(|token| state.remote.authorize(&token))
+        .is_some();
+
+    if authorized {
+        next.run(req).await
+    } else {
+        (
+            StatusCode::UNAUTHORIZED,
+            Json(serde_json::json!({ "error": "未配对的设备，请先在电脑上扫码配对" })),
+        )
+            .into_response()
+    }
+}
+
+fn is_loopback(peer: &SocketAddr) -> bool {
+    peer.ip().is_loopback()
+}
+
+async fn session(
+    State(state): State<AppState>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: axum::http::HeaderMap,
+) -> impl IntoResponse {
+    let device = token_from_headers(&headers).and_then(|t| state.remote.authorize(&t));
+    let loopback = is_loopback(&peer);
+
+    Json(serde_json::json!({
+        "loopback": loopback,
+        "paired": device.is_some(),
+        "device_name": device.map(|d| d.name),
+        "lan_enabled": state.remote.lan_enabled(),
+        // Do not hand the network address to unpaired peers.
+        "lan_url": if loopback && state.remote.lan_enabled() {
+            remote::lan_url(state.port)
+        } else {
+            None
+        },
+    }))
+}
+
+#[derive(serde::Deserialize)]
+struct LanSetting {
+    enabled: bool,
+}
+
+async fn get_lan(
+    State(state): State<AppState>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    if !is_loopback(&peer) {
+        return Err(ApiError::forbidden());
+    }
+    Ok(Json(serde_json::json!({
+        "enabled": state.remote.lan_enabled(),
+        "url": if state.remote.lan_enabled() { remote::lan_url(state.port) } else { None },
+    })))
+}
+
+async fn set_lan(
+    State(state): State<AppState>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    Json(body): Json<LanSetting>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    if !is_loopback(&peer) {
+        return Err(ApiError::forbidden());
+    }
+
+    if body.enabled {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        state
+            .lan
+            .send(LanCmd::Start(tx))
+            .await
+            .map_err(|_| ApiError::internal("LAN supervisor stopped"))?;
+        match rx
+            .await
+            .map_err(|_| ApiError::internal("LAN supervisor dropped"))?
+        {
+            Ok(_) => state.remote.set_lan_enabled(true)?,
+            Err(e) => return Err(ApiError::bad_request(e)),
+        }
+    } else {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        state
+            .lan
+            .send(LanCmd::Stop(tx))
+            .await
+            .map_err(|_| ApiError::internal("LAN supervisor stopped"))?;
+        let _ = rx.await;
+        state.remote.set_lan_enabled(false)?;
+    }
+
+    Ok(Json(serde_json::json!({
+        "enabled": body.enabled,
+        "url": if body.enabled { remote::lan_url(state.port) } else { None },
+    })))
+}
+
+async fn start_pairing(
+    State(state): State<AppState>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    if !is_loopback(&peer) {
+        return Err(ApiError::forbidden());
+    }
+    let Some(base) = remote::lan_url(state.port) else {
+        return Err(ApiError::bad_request(
+            "请先开启局域网访问，并确认电脑已连接到网络",
+        ));
+    };
+    let (code, expires_at) = state.remote.start_pairing();
+    let url = format!("{base}/?pair={code}");
+    let qr_svg = remote::make_qr_svg(&url).map_err(ApiError::internal)?;
+
+    Ok(Json(serde_json::json!({
+        "code": code,
+        "url": url,
+        "expires_at": expires_at,
+        "qr_svg": qr_svg,
+    })))
+}
+
+#[derive(serde::Deserialize)]
+struct ClaimRequest {
+    code: String,
+    #[serde(default)]
+    device_name: String,
+}
+
+async fn claim(
+    State(state): State<AppState>,
+    Json(body): Json<ClaimRequest>,
+) -> Result<Response, ApiError> {
+    let token = state
+        .remote
+        .claim(&body.code, &body.device_name)
+        .map_err(ApiError::bad_request)?;
+
+    let device = state.remote.authorize(&token);
+    let cookie =
+        format!("laverock_device={token}; Path=/; Max-Age=31536000; HttpOnly; SameSite=Lax");
+
+    Ok((
+        StatusCode::OK,
+        [(header::SET_COOKIE, cookie)],
+        Json(serde_json::json!({
+            "paired": true,
+            "device_name": device.map(|d| d.name),
+        })),
+    )
+        .into_response())
+}
+
+async fn list_devices(
+    State(state): State<AppState>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+) -> Result<Json<Vec<remote::DeviceView>>, ApiError> {
+    if !is_loopback(&peer) {
+        return Err(ApiError::forbidden());
+    }
+    Ok(Json(state.remote.devices()))
+}
+
+async fn revoke_device(
+    State(state): State<AppState>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    Path(id): Path<String>,
+) -> Result<StatusCode, ApiError> {
+    if !is_loopback(&peer) {
+        return Err(ApiError::forbidden());
+    }
+    state.remote.revoke(&id)?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 async fn list_profiles(
@@ -349,12 +593,23 @@ async fn main() {
 
     let manager = Arc::new(EngineManager::open(&models_dir).expect("scan models dir"));
     let profiles = Arc::new(ProfileStore::open(&data_dir).expect("open data dir"));
+    let remote = Arc::new(RemoteState::open(&data_dir).expect("open remote state"));
     tracing::info!(
         dir = %models_dir,
         engines = manager.len(),
         data = %data_dir,
         "engine registry ready"
     );
+
+    let (lan_tx, lan_rx) = tokio::sync::mpsc::channel(8);
+    let boot_lan = lan_tx.clone();
+    let state = AppState {
+        manager,
+        profiles,
+        remote: remote.clone(),
+        lan: lan_tx,
+        port,
+    };
 
     let app = Router::new()
         .route("/", get(index))
@@ -364,18 +619,49 @@ async fn main() {
         .route("/api/profiles", get(list_profiles).post(create_profile))
         .route("/api/profiles/{id}", delete(delete_profile))
         .route("/api/profiles/{id}/audio", get(profile_audio))
-        .with_state(AppState { manager, profiles });
+        .route("/api/session", get(session))
+        .route("/api/pair/start", post(start_pairing))
+        .route("/api/pair/claim", post(claim))
+        .route("/api/devices", get(list_devices))
+        .route("/api/devices/{id}", delete(revoke_device))
+        .route("/api/settings/lan", get(get_lan).post(set_lan))
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            auth_middleware,
+        ))
+        .with_state(state);
+
+    // The supervisor owns the router so the LAN listener can be started
+    // and stopped at runtime.
+    let lan_supervisor = tokio::spawn(remote::lan_supervisor(lan_rx, app.clone(), port));
 
     let addr: SocketAddr = format!("{host}:{port}")
         .parse()
         .expect("valid LAVEROCK_HOST:PORT");
     let listener = tokio::net::TcpListener::bind(addr).await.expect("bind");
     tracing::info!("Laverock listening on http://{addr}");
-    axum::serve(listener, app)
-        .with_graceful_shutdown(async {
-            let _ = tokio::signal::ctrl_c().await;
-            tracing::info!("shutting down");
-        })
-        .await
-        .expect("server error");
+
+    if remote.lan_enabled() {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        if boot_lan.send(LanCmd::Start(tx)).await.is_ok() {
+            match rx.await {
+                Ok(Ok(url)) => tracing::info!(%url, "LAN access enabled"),
+                Ok(Err(e)) => tracing::warn!("LAN access enabled but listener failed: {e}"),
+                Err(_) => tracing::warn!("LAN supervisor dropped the start request"),
+            }
+        }
+    }
+
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .with_graceful_shutdown(async {
+        let _ = tokio::signal::ctrl_c().await;
+        tracing::info!("shutting down");
+    })
+    .await
+    .expect("server error");
+
+    lan_supervisor.abort();
 }

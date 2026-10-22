@@ -51,6 +51,20 @@
   .badge { display: inline-block; font-size: 11px; color: var(--muted);
     border: 1px solid var(--line); border-radius: 999px; padding: 1px 8px; margin-left: 8px; }
   .hint { font-size: 12px; color: var(--muted); margin-top: 6px; }
+  .switch { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; font-size: 13px; color: var(--muted); }
+  .switch input { appearance: none; width: 42px; height: 24px; border-radius: 999px;
+    background: #2a2e3f; position: relative; transition: background .2s; cursor: pointer; }
+  .switch input:checked { background: var(--accent2); }
+  .switch input::after { content: ''; position: absolute; top: 3px; left: 3px;
+    width: 18px; height: 18px; border-radius: 50%; background: #fff; transition: left .2s; }
+  .switch input:checked::after { left: 21px; }
+  .qr { background: #fff; padding: 10px; border-radius: 10px; width: 240px; height: 240px;
+    display: none; margin-top: 12px; }
+  .qr svg { width: 100%; height: 100%; display: block; }
+  .overlay { position: fixed; inset: 0; background: rgba(8, 9, 12, .94);
+    display: none; place-items: center; z-index: 50; padding: 20px; }
+  .overlay.show { display: grid; }
+  .overlay .card { width: min(420px, 100%); }
 </style>
 </head>
 <body>
@@ -61,6 +75,29 @@
   <div class="card">
     <label for="engine">引擎</label>
     <select id="engine"></select>
+  </div>
+
+  <div class="card" id="remoteCard" style="display:none">
+    <label>手机遥控</label>
+    <div class="prompt-box" style="justify-content:space-between">
+      <span class="hint" id="lanHint">开启后，同一 Wi-Fi 下的手机经配对即可访问同一套界面</span>
+      <label class="switch">
+        <input type="checkbox" id="lanToggle" />
+        <span id="lanToggleLabel">局域网访问</span>
+      </label>
+    </div>
+    <div id="lanPanel" style="display:none;margin-top:14px">
+      <div class="prompt-box">
+        <button class="ghost" id="pairBtn" type="button">生成配对二维码</button>
+        <span class="fileinfo" id="pairInfo"></span>
+      </div>
+      <div class="qr" id="qr"></div>
+      <div class="hint" id="pairHint"></div>
+      <div style="margin-top:16px">
+        <label>已配对设备</label>
+        <div id="deviceList" class="hint">暂无</div>
+      </div>
+    </div>
   </div>
 
   <div class="card">
@@ -120,6 +157,22 @@
   </div>
   <audio id="player" controls style="display:none"></audio>
   <audio id="previewer" style="display:none"></audio>
+</div>
+
+<div class="overlay" id="pairOverlay">
+  <div class="card">
+    <h1 style="font-size:18px;margin:0 0 8px">连接到 Laverock</h1>
+    <p class="hint" id="pairMsg">在这台电脑上打开「手机遥控 → 生成配对二维码」，然后用手机扫码。</p>
+    <div style="margin-top:14px">
+      <label for="pairCode">配对码</label>
+      <input type="text" id="pairCode" inputmode="numeric" autocomplete="one-time-code"
+             placeholder="6 位数字" />
+    </div>
+    <div class="actions" style="margin-top:14px">
+      <button id="pairSubmit" type="button">连接</button>
+      <span id="pairStatus" class="hint"></span>
+    </div>
+  </div>
 </div>
 
 <script>
@@ -373,8 +426,164 @@ $('go').onclick = async () => {
   }
 };
 
+// ---------------- remote / pairing ----------------
+
+let session = { loopback: true, paired: false };
+
+async function loadSession() {
+  try {
+    session = await fetch('/api/session').then(r => r.json());
+  } catch {
+    session = { loopback: true, paired: false };
+  }
+  const desktop = session.loopback;
+  $('remoteCard').style.display = desktop ? 'block' : 'none';
+
+  if (!desktop && !session.paired) {
+    // A QR link carries ?pair=CODE: claim it and reload without the query.
+    const code = new URLSearchParams(location.search).get('pair');
+    if (code) {
+      $('pairCode').value = code;
+      $('pairMsg').textContent = '正在配对……';
+      const ok = await claim(code);
+      if (ok) return;
+    }
+    $('pairOverlay').classList.add('show');
+    return;
+  }
+  $('pairOverlay').classList.remove('show');
+
+  if (desktop) {
+    $('lanToggle').checked = !!session.lan_enabled;
+    $('lanPanel').style.display = session.lan_enabled ? 'block' : 'none';
+    if (session.lan_enabled) {
+      $('lanHint').textContent = `同一 Wi-Fi 下的手机可访问 ${session.lan_url || ''}`;
+      await loadDevices();
+    }
+  } else {
+    // Phone: surface which device this is, and note the mic limitation.
+    const hint = document.createElement('div');
+    hint.className = 'hint';
+    hint.textContent = `已连接到电脑${session.device_name ? '（' + session.device_name + '）' : ''}`;
+    document.querySelector('.sub').after(hint);
+  }
+
+  if (!window.isSecureContext && $('rec')) {
+    $('rec').disabled = true;
+    $('rec').title = '需要通过 HTTPS 访问才能使用手机麦克风';
+  }
+}
+
+async function claim(code) {
+  const status = $('pairStatus');
+  status.textContent = '';
+  try {
+    const res = await fetch('/api/pair/claim', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code, device_name: deviceName() }),
+    });
+    if (!res.ok) {
+      const msg = await res.json().then(j => j.error).catch(() => res.statusText);
+      throw new Error(msg);
+    }
+    location.replace('/');
+    return true;
+  } catch (e) {
+    $('pairMsg').textContent = '配对失败：' + e.message;
+    $('pairOverlay').classList.add('show');
+    return false;
+  }
+}
+
+function deviceName() {
+  const ua = navigator.userAgent;
+  if (/iPhone/.test(ua)) return 'iPhone';
+  if (/iPad/.test(ua)) return 'iPad';
+  if (/Android/.test(ua)) return 'Android 手机';
+  if (/Macintosh/.test(ua)) return 'Mac 浏览器';
+  return '浏览器设备';
+}
+
+$('pairSubmit').onclick = () => {
+  const code = $('pairCode').value.trim();
+  if (!/^\d{6}$/.test(code)) {
+    $('pairMsg').textContent = '请输入 6 位配对码';
+    return;
+  }
+  claim(code);
+};
+
+$('pairCode').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') $('pairSubmit').click();
+});
+
+$('lanToggle').onchange = async () => {
+  const enabled = $('lanToggle').checked;
+  $('lanHint').textContent = enabled ? '正在开启……' : '正在关闭……';
+  const res = await fetch('/api/settings/lan', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ enabled }),
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    $('lanToggle').checked = !enabled;
+    $('lanHint').textContent = '操作失败：' + (body.error || res.statusText);
+    return;
+  }
+  $('lanPanel').style.display = enabled ? 'block' : 'none';
+  $('qr').style.display = 'none';
+  $('pairInfo').textContent = '';
+  $('lanHint').textContent = enabled
+    ? `同一 Wi-Fi 下的手机可访问 ${body.url || ''}`
+    : '开启后，同一 Wi-Fi 下的手机经配对即可访问同一套界面';
+  if (!enabled) $('deviceList').textContent = '暂无';
+  else loadDevices();
+};
+
+$('pairBtn').onclick = async () => {
+  $('pairInfo').textContent = '生成中……';
+  const res = await fetch('/api/pair/start', { method: 'POST' });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    $('pairInfo').textContent = '失败：' + (body.error || res.statusText);
+    return;
+  }
+  $('qr').innerHTML = body.qr_svg;
+  $('qr').style.display = 'block';
+  $('pairInfo').textContent = `配对码 ${body.code}`;
+  $('pairHint').textContent = '手机扫码，或在这台电脑的浏览器中输入配对码。5 分钟内有效。';
+};
+
+async function loadDevices() {
+  const list = await fetch('/api/devices').then(r => r.json()).catch(() => []);
+  const box = $('deviceList');
+  if (!list.length) { box.textContent = '暂无'; return; }
+  box.innerHTML = '';
+  for (const d of list) {
+    const row = document.createElement('div');
+    row.className = 'prompt-box';
+    row.style.marginTop = '8px';
+    const name = document.createElement('span');
+    name.textContent = `${d.name} · ${new Date(d.created_at * 1000).toLocaleDateString()}`;
+    const btn = document.createElement('button');
+    btn.className = 'ghost';
+    btn.type = 'button';
+    btn.textContent = '撤销';
+    btn.onclick = async () => {
+      if (!confirm(`撤销设备「${d.name}」的访问权限？`)) return;
+      const res = await fetch(`/api/devices/${d.id}`, { method: 'DELETE' });
+      if (res.ok) loadDevices();
+    };
+    row.append(name, btn);
+    box.appendChild(row);
+  }
+}
+
 loadEngines();
 loadProfiles();
+loadSession();
 </script>
 </body>
 </html>
