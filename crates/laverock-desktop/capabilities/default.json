@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "The UI talks to the local server over HTTP; no webview IPC permissions are granted.",
+  "windows": ["main"],
+  "permissions": []
+}

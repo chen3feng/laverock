@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<title>Laverock</title>
+<style>
+  body {
+    margin: 0; min-height: 100vh; display: grid; place-items: center;
+    background: #0e0f13; color: #e8eaf2;
+    font: 15px/1.6 -apple-system, "PingFang SC", system-ui, sans-serif;
+  }
+  .box { max-width: 520px; padding: 28px; }
+  h1 { font-size: 20px; margin: 0 0 12px; }
+  p { color: #9aa0b5; }
+  code {
+    background: #1e2130; border: 1px solid #2a2e3f; border-radius: 6px;
+    padding: 2px 6px; font-size: 13px;
+  }
+</style>
+</head>
+<body>
+  <div class="box">
+    <h1>Laverock 服务未能启动</h1>
+    <p>桌面壳找不到或无法启动后台服务进程。</p>
+    <p>请确认已构建服务端并从项目目录启动：</p>
+    <p><code>cargo build -p laverock-server</code><br />
+       <code>./scripts/download-model.sh</code><br />
+       <code>cargo run -p laverock-desktop</code></p>
+    <p>也可以通过环境变量 <code>LAVEROCK_SERVER_BIN</code> 指定服务端可执行文件路径。</p>
+  </div>
+</body>
+</html>

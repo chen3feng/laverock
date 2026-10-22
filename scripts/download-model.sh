@@ -40,7 +40,7 @@ if [ ! -f lexicon-en-us.clean.txt ]; then
   awk 'NR==FNR { tok[$1]=1; next }
        /^[[:space:]]*#/ { next }
        { gsub(/\|\|/, " ");
-         w=$1; out=""; n=0;
+         w=tolower($1); out=""; n=0;
          for (i=2; i<=NF; i++) if ($i in tok) { out=out" "$i; n++ }
          if (n>0 && !seen[w]++) print w out }' \
     tokens.txt lexicon-en-us.txt > lexicon-en-us.clean.txt

@@ -10,6 +10,9 @@
 /.env
 *.tar.bz2
 
+# Tauri generated ACL schemas
+**/gen/schemas/
+
 # OS/editor
 .DS_Store
 .idea/

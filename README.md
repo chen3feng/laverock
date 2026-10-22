@@ -40,6 +40,22 @@ Pick or record 3–10 s of reference speech, type its exact transcript
 (required by ZipVoice for timbre/prosody alignment), type the text to
 synthesize, and press generate.
 
+### Desktop shell
+
+```sh
+cargo run -p laverock-desktop
+```
+
+The shell supervises the server for you: if nothing answers on
+`127.0.0.1:8787` it starts `laverock-server` itself, then opens a window on
+the same web UI. Closing the window hides it; the tray menu has show/hide,
+autostart at login, open data directory, and quit.
+
+During development the shell shares the repository's `data/` directory with
+the standalone server; release builds use the OS app-data directory. Set
+`LAVEROCK_SERVER_BIN` to point at the server binary explicitly, or
+`LAVEROCK_URL` to attach to a server elsewhere.
+
 ### API
 
 | Method | Path | Description |
