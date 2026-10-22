@@ -245,8 +245,30 @@ $('rec').onclick = async () => {
     mediaRecorder_state.stop();
     return;
   }
-  const stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1 } });
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    $('promptinfo').textContent = '当前环境不支持麦克风录音，请改用「选择文件」上传 WAV';
+    return;
+  }
+
+  $('promptinfo').textContent = '正在请求麦克风权限……';
+  let stream;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({
+      audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true },
+    });
+  } catch (e) {
+    const name = e && e.name ? e.name : 'Error';
+    const hint = name === 'NotAllowedError'
+      ? '权限被拒绝。请在「系统设置 → 隐私与安全性 → 麦克风」中允许 Laverock（或你使用的浏览器），然后重试。'
+      : name === 'NotFoundError'
+        ? '没有找到可用的麦克风设备。'
+        : '请检查系统麦克风设置后重试。';
+    $('promptinfo').textContent = `无法录音（${name}）：${hint}`;
+    return;
+  }
+
   const ctx = new AudioContext();
+  await ctx.resume();
   const src = ctx.createMediaStreamSource(stream);
   const TARGET = 24000;
   const ratio = ctx.sampleRate / TARGET;
@@ -255,7 +277,7 @@ $('rec').onclick = async () => {
   node.onaudioprocess = (e) => chunks.push(new Float32Array(e.inputBuffer.getChannelData(0)));
   src.connect(node); node.connect(ctx.destination);
   btn.classList.add('on'); btn.textContent = '■ 停止';
-  $('promptinfo').textContent = '录音中……';
+  $('promptinfo').textContent = '录音中……再次点击结束';
 
   mediaRecorder_state = {
     stop() {

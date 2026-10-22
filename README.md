@@ -43,8 +43,15 @@ synthesize, and press generate.
 ### Desktop shell
 
 ```sh
-cargo run -p laverock-desktop
+./scripts/run-desktop.sh
 ```
+
+On macOS the script wraps the binary in a minimal `.app` and ad-hoc signs
+it, because microphone access (`getUserMedia`) needs a bundle with
+`NSMicrophoneUsageDescription` and its own TCC identity. A bare binary
+launched from a shell is attributed to the terminal and is usually denied
+without any prompt. The first time you press record, macOS asks for
+permission; afterwards it is remembered.
 
 The shell supervises the server for you: if nothing answers on
 `127.0.0.1:8787` it starts `laverock-server` itself, then opens a window on
