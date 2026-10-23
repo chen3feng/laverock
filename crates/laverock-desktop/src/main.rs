@@ -175,9 +175,12 @@ fn spawn_server(app: &tauri::App) -> Result<Child, String> {
         .stderr(Stdio::inherit());
 
     if env::var_os("LAVEROCK_MODELS_DIR").is_none() {
-        if let Some(models) = find_models_dir(&bin) {
-            cmd.env("LAVEROCK_MODELS_DIR", models);
-        }
+        let models = find_models_dir(&bin).unwrap_or_else(|| {
+            let dir = data_dir.join("models");
+            let _ = std::fs::create_dir_all(&dir);
+            dir
+        });
+        cmd.env("LAVEROCK_MODELS_DIR", models);
     }
     if let Some(parent) = bin.parent() {
         cmd.current_dir(parent);
@@ -211,25 +214,44 @@ fn server_binary() -> Option<PathBuf> {
 
     let exe = env::current_exe().ok()?;
     let exe_dir = exe.parent()?;
-    let exe_name = if cfg!(windows) {
-        "laverock.exe"
-    } else {
-        "laverock"
-    };
+    let ext = if cfg!(windows) { ".exe" } else { "" };
 
-    let candidates = [
-        // Bundled next to the app binary.
-        exe_dir.join(exe_name),
-        // macOS .app: Contents/MacOS/../Resources
-        exe_dir.join("../Resources").join(exe_name),
-        // Development: <workspace>/target/debug/laverock
-        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../../target/debug")
-            .join(exe_name),
-        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../../target/release")
-            .join(exe_name),
-    ];
+    let mut candidates = Vec::new();
+
+    // Bundled next to the app binary (ad-hoc layouts and development).
+    candidates.push(exe_dir.join(format!("laverock{ext}")));
+    candidates.push(exe_dir.join("../Resources").join(format!("laverock{ext}")));
+
+    // Tauri sidecar: the CLI appends the target triple to the file name.
+    if let Some(triple) = option_env!("TAURI_ENV_TARGET_TRIPLE") {
+        candidates.push(exe_dir.join(format!("laverock-{triple}{ext}")));
+        candidates.push(
+            exe_dir
+                .join("../Resources")
+                .join(format!("laverock-{triple}{ext}")),
+        );
+    }
+    // Fallback: any `laverock-<triple>` sibling (except the shell itself).
+    if let Ok(entries) = std::fs::read_dir(exe_dir) {
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            let stem = name.strip_suffix(ext).unwrap_or(&name);
+            if stem.starts_with("laverock-") && stem != "laverock-desktop" && entry.path().is_file()
+            {
+                candidates.push(entry.path());
+            }
+        }
+    }
+
+    // Development: <workspace>/target/{debug,release}/laverock
+    for profile in ["debug", "release"] {
+        candidates.push(
+            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("../../target")
+                .join(profile)
+                .join(format!("laverock{ext}")),
+        );
+    }
 
     candidates.into_iter().find(|p| p.is_file())
 }

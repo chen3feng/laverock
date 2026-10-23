@@ -26,6 +26,19 @@ laverock-server   thin HTTP control plane (loopback for now)
 - macOS / Linux / Windows; CPU inference works everywhere. The MVP ships
   ZipVoice distill INT8 (~160 MB on disk including vocoder).
 
+## Download
+
+Prebuilt alpha packages are on the [releases page](https://github.com/chen3feng/laverock/releases):
+
+| Platform | File |
+| --- | --- |
+| macOS (Apple Silicon) | `Laverock_*_aarch64.dmg` |
+| Windows 64-bit | `Laverock_*_x64-setup.exe` |
+
+The packages do not contain model weights; run the download scripts below
+once. macOS builds are ad-hoc signed, Windows builds are unsigned — expect
+a one-time Gatekeeper/SmartScreen prompt.
+
 ## Quick start
 
 ```sh

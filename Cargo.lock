@@ -2091,7 +2091,7 @@ dependencies = [
 
 [[package]]
 name = "laverock-core"
-version = "0.1.0"
+version = "0.1.0-alpha"
 dependencies = [
  "hound",
  "serde",
@@ -2103,7 +2103,7 @@ dependencies = [
 
 [[package]]
 name = "laverock-desktop"
-version = "0.1.0"
+version = "0.1.0-alpha"
 dependencies = [
  "serde",
  "serde_json",
@@ -2114,7 +2114,7 @@ dependencies = [
 
 [[package]]
 name = "laverock-server"
-version = "0.1.0"
+version = "0.1.0-alpha"
 dependencies = [
  "axum",
  "axum-server",

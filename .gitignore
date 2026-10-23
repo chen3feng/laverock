@@ -13,6 +13,9 @@
 # Build tooling (llama.cpp-omni checkout used by download-voxcpm2.sh)
 /.tools
 
+# Sidecar binaries staged for bundling
+**/binaries/
+
 # Tauri generated ACL schemas
 **/gen/schemas/
 
