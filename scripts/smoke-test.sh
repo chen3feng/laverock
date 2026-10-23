@@ -78,6 +78,18 @@ code=$(curl -s -o /dev/null -w '%{http_code}' -X DELETE "$BASE/api/profiles/$pid
 curl -sf "$BASE/api/profiles" | grep -q "$pid" \
   && bad "deleted profile still listed" || ok "profile removed"
 
+if curl -sf "$BASE/api/engines" | grep -q '"id":"voxcpm2"'; then
+  echo "voxcpm2"
+  code=$(curl -s -o "$OUT/vox-zh.wav" -w '%{http_code}' -X POST \
+    "$BASE/api/engines/voxcpm2/synthesize" \
+    -F 'text=你好，我是 VoxCPM2，这里不需要参考文本。' \
+    -F "prompt=@$DIR/test_wavs/leijun-1.wav")
+  [ "$code" = "200" ] && head -c 4 "$OUT/vox-zh.wav" | grep -q RIFF \
+    && ok "voxcpm2 clone without transcript" || bad "voxcpm2 (HTTP $code)"
+else
+  echo "  skip voxcpm2 (not installed)"
+fi
+
 echo "remote access"
 PORT=$(echo "$BASE" | sed -n 's|.*:\([0-9][0-9]*\).*|\1|p')
 PORT=${PORT:-8787}

@@ -59,15 +59,28 @@ fi
 mkdir -p "$DEST"
 cp "$SRC/build/bin/voxcpm2-cli" "$DEST/voxcpm2-cli"
 
-# 4. Weights.
-[ -f "$DEST/VoxCPM2-BaseLM-Q8_0.gguf" ] || {
-  echo "Downloading BaseLM Q8_0 (1.6 GB) ..."
-  curl -L --fail --retry 3 -o "$DEST/VoxCPM2-BaseLM-Q8_0.gguf" "$HF/VoxCPM2-BaseLM-Q8_0.gguf"
+# 4. Weights. Resume partial downloads and verify the exact byte count —
+#    a truncated GGUF otherwise fails much later with an opaque error.
+fetch_model() { # url dest expected_bytes
+  local url="$1" dest="$2" want="$3"
+  if [ -f "$dest" ] && [ "$(wc -c <"$dest" | tr -d ' ')" = "$want" ]; then
+    echo "ok $(basename "$dest")"
+    return 0
+  fi
+  echo "Downloading $(basename "$dest") ($want bytes) ..."
+  curl -L --fail --retry 5 --retry-delay 2 -C - -o "$dest" "$url"
+  local got
+  got=$(wc -c <"$dest" | tr -d ' ')
+  if [ "$got" != "$want" ]; then
+    echo "size mismatch for $(basename "$dest"): got $got, want $want" >&2
+    return 1
+  fi
 }
-[ -f "$DEST/VoxCPM2-Acoustic-F16.gguf" ] || {
-  echo "Downloading Acoustic F16 (1.7 GB) ..."
-  curl -L --fail --retry 3 -o "$DEST/VoxCPM2-Acoustic-F16.gguf" "$HF/VoxCPM2-Acoustic-F16.gguf"
-}
+
+fetch_model "$HF/VoxCPM2-BaseLM-Q8_0.gguf" \
+  "$DEST/VoxCPM2-BaseLM-Q8_0.gguf" 1727309920
+fetch_model "$HF/VoxCPM2-Acoustic-F16.gguf" \
+  "$DEST/VoxCPM2-Acoustic-F16.gguf" 1825096352
 
 # 5. Manifest.
 cat > "$DEST/engine.json" <<'EOF'

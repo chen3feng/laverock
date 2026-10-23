@@ -3,9 +3,10 @@
 Local-first voice cloning studio. Models run on your own computer; a phone
 on the same network will later be able to connect as a remote control.
 
-Status: **MVP**. One engine (ZipVoice, Chinese/English zero-shot cloning),
-one local HTTP server with an embedded web UI, and a saved-voice library so
-a reference clip only has to be recorded once.
+Status: **MVP**. Two engines — ZipVoice (Chinese/English, ONNX, ~160 MB) and
+VoxCPM2 (30 languages, GGUF/llama.cpp, ~3.3 GB) — behind one local HTTP
+server with an embedded web UI, a saved-voice library, and phone remote
+control over LAN.
 
 ## Architecture (target)
 
@@ -28,13 +29,18 @@ laverock-server   thin HTTP control plane (loopback for now)
 ## Quick start
 
 ```sh
-# 1. Download the model (idempotent; ~160 MB)
-./scripts/download-model.sh
+# 1. Download a model (idempotent)
+./scripts/download-model.sh        # ZipVoice, ~160 MB, zh/en, ONNX
+./scripts/download-voxcpm2.sh      # VoxCPM2, ~3.3 GB, 30 langs, GGUF
 
 # 2. Run
 cargo run -p laverock-server
 # open http://127.0.0.1:8787
 ```
+
+Engines are discovered from `models/*/engine.json`. ZipVoice needs the
+reference transcript; VoxCPM2 clones from the audio alone. Adding another
+model of a supported kind is just another directory with a manifest.
 
 Pick or record 3–10 s of reference speech, type its exact transcript
 (required by ZipVoice for timbre/prosody alignment), type the text to
