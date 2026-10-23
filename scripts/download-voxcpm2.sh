@@ -11,7 +11,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 MODELS_DIR="${LAVEROCK_MODELS_DIR:-$ROOT/models}"
-TOOLS="$ROOT/.tools"
+TOOLS="${LAVEROCK_TOOLS_DIR:-$ROOT/.tools}"
 SRC="$TOOLS/llama.cpp-omni"
 DEST="$MODELS_DIR/voxcpm2"
 HF="${HF_ENDPOINT:-https://huggingface.co}/DennisHuang648/VoxCPM2-GGUF/resolve/main"

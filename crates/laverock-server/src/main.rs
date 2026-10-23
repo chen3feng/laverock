@@ -13,8 +13,11 @@
 //! Phone/LAN access (pairing, TLS, device tokens) comes later; until
 //! then the server binds loopback only.
 
+mod models;
 mod profiles;
+mod proxy;
 mod remote;
+mod settings;
 
 use axum::{
     body::Body,
@@ -26,8 +29,10 @@ use axum::{
     Json, Router,
 };
 use laverock_core::{decode_wav, encode_wav, Audio, CoreError, EngineManager, SynthRequest};
+use models::ModelService;
 use profiles::ProfileStore;
 use remote::{LanCmd, RemoteState};
+use settings::{Settings, SettingsStore};
 use std::{net::SocketAddr, sync::Arc};
 use tracing::error;
 
@@ -36,6 +41,8 @@ struct AppState {
     manager: Arc<EngineManager>,
     profiles: Arc<ProfileStore>,
     remote: Arc<RemoteState>,
+    settings: Arc<SettingsStore>,
+    models: Arc<ModelService>,
     lan: tokio::sync::mpsc::Sender<LanCmd>,
     port: u16,
 }
@@ -120,6 +127,7 @@ async fn index() -> Html<&'static str> {
 async fn health(State(state): State<AppState>) -> impl IntoResponse {
     Json(serde_json::json!({
         "status": "ok",
+        "version": env!("CARGO_PKG_VERSION"),
         "engines": state.manager.len(),
     }))
 }
@@ -355,9 +363,78 @@ async fn revoke_device(
     Ok(StatusCode::NO_CONTENT)
 }
 
+// ------------------------------------------------- settings / models
+
+async fn get_settings(
+    State(state): State<AppState>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    if !is_loopback(&peer) {
+        return Err(ApiError::forbidden());
+    }
+    let settings = state.settings.get();
+    let system_proxy = match settings.proxy_mode {
+        settings::ProxyMode::System => proxy::system(),
+        settings::ProxyMode::Manual | settings::ProxyMode::Direct => None,
+    };
+    Ok(Json(serde_json::json!({
+        "proxy_mode": settings.proxy_mode,
+        "proxy": settings.proxy,
+        "system_proxy": system_proxy,
+        "hf_endpoint": settings.hf_endpoint,
+        "pip_index": settings.pip_index,
+        "models_dir": state.models.models_dir().display().to_string(),
+        "scripts_dir": state.models.scripts_dir().map(|p| p.display().to_string()),
+    })))
+}
+
+async fn set_settings(
+    State(state): State<AppState>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    Json(body): Json<Settings>,
+) -> Result<Json<Settings>, ApiError> {
+    if !is_loopback(&peer) {
+        return Err(ApiError::forbidden());
+    }
+    Ok(Json(state.settings.update(body)?))
+}
+
+async fn list_models(
+    State(state): State<AppState>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+) -> Result<Json<models::ModelList>, ApiError> {
+    if !is_loopback(&peer) {
+        return Err(ApiError::forbidden());
+    }
+    Ok(Json(state.models.list()))
+}
+
+async fn install_model(
+    Path(id): Path<String>,
+    State(state): State<AppState>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    if !is_loopback(&peer) {
+        return Err(ApiError::forbidden());
+    }
+    state.models.install(&id)?;
+    Ok(Json(serde_json::json!({ "started": true, "id": id })))
+}
+
+async fn reload_models(
+    State(state): State<AppState>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    if !is_loopback(&peer) {
+        return Err(ApiError::forbidden());
+    }
+    let engines = state.models.reload()?;
+    Ok(Json(serde_json::json!({ "engines": engines })))
+}
+
 async fn list_profiles(
     State(state): State<AppState>,
-) -> Result<Json<Vec<profiles::ProfileMeta>>, ApiError> {
+) -> Result<Json<Vec<profiles::ProfileView>>, ApiError> {
     Ok(Json(state.profiles.list()?))
 }
 
@@ -607,12 +684,22 @@ async fn main() {
     let manager = Arc::new(EngineManager::open(&models_dir).expect("scan models dir"));
     let profiles = Arc::new(ProfileStore::open(&data_dir).expect("open data dir"));
     let remote = Arc::new(RemoteState::open(&data_dir).expect("open remote state"));
+    let settings = Arc::new(SettingsStore::open(&data_dir).expect("open settings"));
+    let scripts_dir = models::resolve_scripts_dir();
+    let model_service = Arc::new(ModelService::new(
+        &models_dir,
+        scripts_dir.clone(),
+        settings.clone(),
+        manager.clone(),
+    ));
     tracing::info!(
         dir = %models_dir,
         engines = manager.len(),
         data = %data_dir,
+        scripts = ?scripts_dir,
         "engine registry ready"
     );
+    tracing::info!(proxy = ?proxy::system(), "download proxy");
 
     let (lan_tx, lan_rx) = tokio::sync::mpsc::channel(8);
     let boot_lan = lan_tx.clone();
@@ -620,6 +707,8 @@ async fn main() {
         manager,
         profiles,
         remote: remote.clone(),
+        settings,
+        models: model_service,
         lan: lan_tx,
         port,
     };
@@ -638,6 +727,10 @@ async fn main() {
         .route("/api/devices", get(list_devices))
         .route("/api/devices/{id}", delete(revoke_device))
         .route("/api/settings/lan", get(get_lan).post(set_lan))
+        .route("/api/settings", get(get_settings).post(set_settings))
+        .route("/api/models", get(list_models))
+        .route("/api/models/reload", post(reload_models))
+        .route("/api/models/{id}/install", post(install_model))
         .layer(middleware::from_fn_with_state(
             state.clone(),
             auth_middleware,

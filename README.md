@@ -9,12 +9,28 @@ official Python package in an isolated venv) — behind one local HTTP server
 with an embedded web UI, a saved-voice library, and phone remote control
 over LAN.
 
-## Architecture (target)
+## Architecture
 
 ```
 laverock-core     engine trait + manifest registry + ONNX/GGUF runtimes
-laverock-server   thin HTTP control plane (loopback for now)
+laverock-server   thin HTTP control plane + embedded SPA + model installer
+laverock-desktop  Tauri shell: tray, autostart, server supervision
 ```
+
+The UI has a sidebar with four sections:
+
+- **合成** — pick an engine and a saved voice (or record/upload one), type
+  the text, generate and play or download the WAV.
+- **语音素材** — the saved reference voices: play, create, delete.
+- **模型** — installed engines and a catalog of installable models. A
+  download streams its log into the card and the engine registry reloads
+  when it finishes.
+- **设置** — download proxy and mirrors, phone remote control, version.
+
+Installable models are listed in
+`crates/laverock-server/assets/catalog.json`; the server runs the same
+`scripts/download-*.sh` used from the command line, with the settings
+above passed as environment variables.
 
 - Adding a model of a supported kind is just a directory with an
   `engine.json` manifest under `models/` — no code changes.
@@ -53,6 +69,9 @@ cargo run -p laverock-server
 # open http://127.0.0.1:8787
 ```
 
+The same downloads are available from **模型** in the UI; the scripts are
+convenient for headless installs and CI.
+
 Engines are discovered from `models/*/engine.json`. ZipVoice needs the
 reference transcript; VoxCPM2 and Qwen3-TTS clone from the audio alone.
 Qwen3-TTS also supports preset speakers and voice design through
@@ -68,6 +87,26 @@ including model load.
 Pick or record 3–10 s of reference speech, type its exact transcript
 (required by ZipVoice for timbre/prosody alignment), type the text to
 synthesize, and press generate.
+
+### Proxy and mirrors
+
+**设置 → 下载网络** stores `<data>/settings.json` and passes the values to
+every model download script. They never affect inference.
+
+| Setting | Environment | Default |
+|---|---|---|
+| 代理 | `HTTP_PROXY` / `HTTPS_PROXY` / `ALL_PROXY` (and lowercase) | system browser proxy |
+| Hugging Face 镜像 | `HF_ENDPOINT` | `https://huggingface.co` |
+| PyPI 镜像 | `PIP_INDEX_URL` | PyPI |
+
+Downloads follow the proxy the browser uses: an exported `HTTPS_PROXY`
+(or `ALL_PROXY` / `HTTP_PROXY`) wins, otherwise the macOS system proxy
+(`scutil --proxy`) or the Windows Internet Settings store is used. Pick
+"手动指定" to override it, or "不使用代理" to force a direct connection;
+manual URLs accept `http`, `https`, `socks5` and `socks5h`. PAC scripts
+are not evaluated — enter the proxy by hand in that case. Scripts run
+with `no_proxy=127.0.0.1,localhost` merged into any inherited exceptions,
+so a local mirror keeps working.
 
 ### Desktop shell
 
@@ -126,7 +165,7 @@ off and on again.
 | GET | `/api/health` | service status |
 | GET | `/api/engines` | registered engines and defaults |
 | POST | `/api/engines/:id/synthesize` | multipart `text` + either `profile_id` or (`prompt` WAV + `prompt_text`), optional `speed`, `num_steps` → WAV |
-| GET | `/api/profiles` | saved voices (metadata only) |
+| GET | `/api/profiles` | saved voices with duration/size |
 | POST | `/api/profiles` | multipart `name`, `prompt_text`, `prompt` (WAV) → saved voice |
 | GET | `/api/profiles/:id/audio` | reference clip of a saved voice |
 | DELETE | `/api/profiles/:id` | delete a saved voice |
@@ -135,6 +174,10 @@ off and on again.
 | POST | `/api/pair/claim` | exchange a pairing code for a device cookie (public) |
 | GET | `/api/devices` · DELETE `/api/devices/:id` | desktop-only: list/revoke phones |
 | GET/POST | `/api/settings/lan` | desktop-only: toggle the LAN listener |
+| GET/POST | `/api/settings` | desktop-only: download proxy and mirrors |
+| GET | `/api/models` | desktop-only: catalog, install state, job log tail |
+| POST | `/api/models/:id/install` | desktop-only: start a download in the background |
+| POST | `/api/models/reload` | desktop-only: re-scan `models/*/engine.json` |
 
 Example:
 
@@ -150,10 +193,17 @@ curl -X POST http://127.0.0.1:8787/api/engines/sherpa-onnx-zipvoice-distill-int8
 
 | Env var | Default | Purpose |
 |---|---|---|
-| `LAVEROCK_HOST` | `127.0.0.1` | bind address (loopback only until pairing/TLS lands) |
+| `LAVEROCK_HOST` | `127.0.0.1` | bind address for the trusted loopback listener |
 | `LAVEROCK_PORT` | `8787` | port |
 | `LAVEROCK_MODELS_DIR` | `models` | directory scanned for `*/engine.json` |
-| `LAVEROCK_DATA_DIR` | `data` | saved voices are stored under `<data>/profiles/<id>/` |
+| `LAVEROCK_DATA_DIR` | `data` | profiles, settings, pairing state, TLS certs |
+| `LAVEROCK_SCRIPTS_DIR` | auto-detected | `scripts/` used by the model installer |
+| `LAVEROCK_TOOLS_DIR` | `<repo>/.tools` | build tools and Python venvs for engines |
+
+Packaged desktop builds ship `scripts/` as app resources and put
+`LAVEROCK_TOOLS_DIR` under the user data directory. On Windows, in-app
+model installs need `bash` from Git for Windows; the download scripts are
+otherwise the same on every platform.
 
 ## Model credits
 

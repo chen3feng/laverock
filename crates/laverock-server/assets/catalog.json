@@ -1,0 +1,38 @@
+[
+  {
+    "id": "zipvoice",
+    "dir": "sherpa-onnx-zipvoice-distill-int8-zh-en-emilia",
+    "name": "ZipVoice Distill INT8",
+    "description": "中英文零样本克隆。ONNX 静态运行时，体积最小、CPU 速度最快，适合作为默认引擎。",
+    "size": "~160 MB",
+    "languages": ["zh", "en"],
+    "capabilities": ["tts", "clone"],
+    "script": "download-model.sh",
+    "env": {},
+    "note": "克隆时必须提供参考音频对应的文字。"
+  },
+  {
+    "id": "voxcpm2",
+    "dir": "voxcpm2",
+    "name": "VoxCPM2",
+    "description": "30 种语言、零样本克隆与声音设计。GGUF 权重经 llama.cpp 在本机推理。",
+    "size": "~3.3 GB",
+    "languages": ["zh", "en", "ja", "ko", "ar", "es", "fr", "+ 30 languages"],
+    "capabilities": ["tts", "clone", "voice-design"],
+    "script": "download-voxcpm2.sh",
+    "env": {},
+    "note": "首次安装需联网编译 llama.cpp-omni（git、cmake 与 C++ 工具链）。"
+  },
+  {
+    "id": "qwen3tts",
+    "dir": "qwen3tts",
+    "name": "Qwen3-TTS 0.6B",
+    "description": "官方 qwen-tts 包，跑在独立的 Python venv 中；10 种语言，仅凭声音即可克隆。",
+    "size": "~2–3 GB（含 venv）",
+    "languages": ["zh", "en", "ja", "ko", "de", "fr", "ru", "pt", "es", "it"],
+    "capabilities": ["tts", "clone"],
+    "script": "download-qwen3tts.sh",
+    "env": { "QWEN3TTS_VARIANT": "base" },
+    "note": "需要 Python 3.10–3.12；脚本会自动创建隔离环境。Apple Silicon 上自动使用 MPS。"
+  }
+]

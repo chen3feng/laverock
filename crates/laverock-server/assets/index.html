@@ -2,23 +2,72 @@
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <meta name="color-scheme" content="dark" />
 <title>Laverock</title>
 <style>
   :root {
     --bg: #0e0f13; --panel: #171922; --panel2: #1e2130; --line: #2a2e3f;
     --text: #e8eaf2; --muted: #9aa0b5; --accent: #7cc4ff; --accent2: #5b8def;
-    --danger: #ff6b6b; --ok: #5dd39e;
+    --danger: #ff6b6b; --ok: #5dd39e; --sidebar-w: 224px;
   }
   * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  html, body { height: 100%; }
   body {
     margin: 0; background: var(--bg); color: var(--text);
     font: 15px/1.5 -apple-system, "SF Pro Text", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
   }
-  .wrap { max-width: 760px; margin: 0 auto; padding: 32px 20px 80px; }
-  h1 { font-size: 22px; margin: 0 0 4px; letter-spacing: 0.5px; }
-  .sub { color: var(--muted); font-size: 13px; margin-bottom: 28px; }
+  a { color: var(--accent); }
+  code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12.5px; }
+
+  /* ---------- sidebar ---------- */
+  .sidebar {
+    position: fixed; top: 0; bottom: 0; left: 0; width: var(--sidebar-w);
+    display: flex; flex-direction: column; padding: 20px 12px 16px;
+    background: #12141b; border-right: 1px solid var(--line); z-index: 30;
+  }
+  .brand { display: flex; align-items: center; gap: 10px; padding: 4px 8px 20px; }
+  .brand .logo {
+    width: 34px; height: 34px; border-radius: 10px; flex: none;
+    display: grid; place-items: center; color: #fff;
+    background: linear-gradient(145deg, #7cc4ff, #3357a8);
+  }
+  .brand .logo svg { width: 20px; height: 20px; }
+  .brand b { display: block; font-size: 15px; letter-spacing: .4px; }
+  .brand span { display: block; font-size: 11px; color: var(--muted); }
+  nav { display: flex; flex-direction: column; gap: 4px; }
+  nav a {
+    display: flex; align-items: center; gap: 10px; padding: 10px 12px;
+    border-radius: 10px; color: var(--muted); text-decoration: none; font-size: 14px;
+    transition: background .15s, color .15s;
+  }
+  nav a svg {
+    width: 18px; height: 18px; flex: none; fill: none; stroke: currentColor;
+    stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round;
+  }
+  nav a:hover { background: var(--panel); color: var(--text); }
+  nav a.active {
+    background: var(--panel2); color: var(--text);
+    box-shadow: inset 2px 0 0 var(--accent);
+  }
+  .sidebar-foot {
+    margin-top: auto; padding: 10px 12px 2px; display: flex;
+    align-items: center; justify-content: space-between; font-size: 11.5px; color: var(--muted);
+  }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 8px var(--ok); }
+  .dot.off { background: var(--danger); box-shadow: 0 0 8px var(--danger); }
+
+  /* ---------- layout ---------- */
+  .content { margin-left: var(--sidebar-w); min-height: 100vh; }
+  .wrap { max-width: 900px; margin: 0 auto; padding: 34px 28px 96px; }
+  .page { display: none; }
+  .page.active { display: block; }
+  .page-head { margin-bottom: 22px; }
+  h1 { font-size: 22px; margin: 0 0 4px; letter-spacing: .3px; }
+  .sub { color: var(--muted); font-size: 13px; margin: 0; }
+  .section-title { font-size: 14px; color: var(--muted); font-weight: 600; margin: 28px 0 10px; letter-spacing: .4px; }
+
   .card {
     background: var(--panel); border: 1px solid var(--line); border-radius: 14px;
     padding: 20px; margin-bottom: 16px;
@@ -30,27 +79,35 @@
     font: inherit; outline: none;
   }
   textarea { min-height: 110px; resize: vertical; }
-  select:focus, textarea:focus { border-color: var(--accent2); }
+  select:focus, textarea:focus, input[type="text"]:focus { border-color: var(--accent2); }
   .row { display: flex; gap: 14px; flex-wrap: wrap; }
-  .row > div { flex: 1; min-width: 140px; }
+  .row > div { flex: 1; min-width: 160px; }
   button {
-    background: var(--accent2); color: white; border: 0; border-radius: 10px;
+    background: var(--accent2); color: #fff; border: 0; border-radius: 10px;
     padding: 11px 20px; font: inherit; font-weight: 600; cursor: pointer;
   }
-  button:disabled { opacity: 0.5; cursor: not-allowed; }
+  button:disabled { opacity: .45; cursor: not-allowed; }
   button.ghost { background: var(--panel2); border: 1px solid var(--line); color: var(--text); }
+  button.ghost.danger { color: var(--danger); border-color: #4b2b33; }
   button.rec { background: #3a2030; border: 1px solid #6e3040; color: #ffb3c0; }
   button.rec.on { background: var(--danger); color: #fff; border-color: var(--danger); }
+  button.small { padding: 6px 12px; font-size: 13px; border-radius: 8px; }
   .prompt-box { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
   .fileinfo { font-size: 12.5px; color: var(--muted); }
-  .actions { display: flex; gap: 12px; align-items: center; margin-top: 4px; }
+  .actions { display: flex; gap: 12px; align-items: center; margin-top: 4px; flex-wrap: wrap; }
   #status { font-size: 13px; color: var(--muted); min-height: 20px; }
   #status.err { color: var(--danger); }
   #status.ok { color: var(--ok); }
   audio { width: 100%; margin-top: 14px; }
-  .badge { display: inline-block; font-size: 11px; color: var(--muted);
-    border: 1px solid var(--line); border-radius: 999px; padding: 1px 8px; margin-left: 8px; }
+  .badge, .pill, .chip {
+    display: inline-block; font-size: 11px; color: var(--muted);
+    border: 1px solid var(--line); border-radius: 999px; padding: 1px 8px;
+  }
+  .pill.ok { color: var(--ok); border-color: #2c4b3d; }
+  .chip { padding: 0 7px; margin: 0 4px 4px 0; }
   .hint { font-size: 12px; color: var(--muted); margin-top: 6px; }
+  .hint.ok { color: var(--ok); }
+  .hint.err { color: var(--danger); }
   .switch { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; font-size: 13px; color: var(--muted); }
   .switch input { appearance: none; width: 42px; height: 24px; border-radius: 999px;
     background: #2a2e3f; position: relative; transition: background .2s; cursor: pointer; }
@@ -58,115 +115,315 @@
   .switch input::after { content: ''; position: absolute; top: 3px; left: 3px;
     width: 18px; height: 18px; border-radius: 50%; background: #fff; transition: left .2s; }
   .switch input:checked::after { left: 21px; }
-  .qr { background: #fff; padding: 10px; border-radius: 10px; width: 240px; height: 240px;
-    display: none; margin-top: 12px; }
+  input[type="range"] { width: 100%; }
+  .qr { background: #fff; padding: 10px; border-radius: 10px; width: 240px; height: 240px; margin-top: 12px; }
   .qr svg { width: 100%; height: 100%; display: block; }
+
+  /* ---------- voices ---------- */
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 12px; }
+  .voice-card, .model-card {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 14px;
+    padding: 16px; display: flex; flex-direction: column; gap: 8px; min-width: 0;
+  }
+  .voice-top, .model-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .voice-top b, .model-head b { font-size: 14.5px; overflow-wrap: anywhere; min-width: 0; }
+  .voice-top .chip, .model-head .pill {
+    flex: none; max-width: 58%; white-space: nowrap;
+    overflow: hidden; text-overflow: ellipsis;
+  }
+  .voice-meta { font-size: 11.5px; color: var(--muted); }
+  .voice-text {
+    font-size: 13px; color: #b9bfd2; line-height: 1.45;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+    min-height: 38px;
+  }
+  .voice-actions { display: flex; gap: 8px; margin-top: auto; }
+  .voice-actions button { flex: 1; }
+  .empty {
+    border: 1px dashed var(--line); border-radius: 14px; padding: 34px 20px;
+    text-align: center; color: var(--muted); font-size: 13.5px;
+  }
+  .model-desc { font-size: 13px; color: #b9bfd2; }
+  .model-card .model-actions { display: flex; align-items: center; gap: 10px; margin-top: auto; flex-wrap: wrap; }
+  .log {
+    background: #0b0c10; border: 1px solid var(--line); border-radius: 9px;
+    padding: 10px; margin: 4px 0 0; max-height: 180px; overflow: auto;
+    font: 11.5px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    color: #b9c2a8; white-space: pre-wrap; word-break: break-word;
+  }
+  .pathline code { color: var(--text); background: var(--panel2); padding: 3px 7px; border-radius: 6px; }
+
+  /* ---------- overlay / toast ---------- */
   .overlay { position: fixed; inset: 0; background: rgba(8, 9, 12, .94);
     display: none; place-items: center; z-index: 50; padding: 20px; }
   .overlay.show { display: grid; }
   .overlay .card { width: min(420px, 100%); }
+  .toast {
+    position: fixed; left: 50%; bottom: 28px; transform: translateX(-50%);
+    background: #202433; border: 1px solid var(--line); color: var(--text);
+    border-radius: 10px; padding: 10px 18px; font-size: 13px; z-index: 60;
+    box-shadow: 0 12px 30px rgba(0, 0, 0, .4); max-width: min(90vw, 520px);
+  }
+  .toast.err { border-color: #5a2b33; color: #ffb3bd; }
+
+  @media (max-width: 760px) {
+    .sidebar {
+      top: auto; right: 0; bottom: 0; left: 0; width: auto;
+      flex-direction: row; padding: 6px 8px calc(6px + env(safe-area-inset-bottom));
+      border-right: 0; border-top: 1px solid var(--line);
+      background: rgba(16, 18, 25, .98); backdrop-filter: blur(12px);
+    }
+    .brand, .sidebar-foot { display: none; }
+    nav { flex-direction: row; flex: 1; gap: 2px; }
+    nav a {
+      flex: 1; flex-direction: column; gap: 3px; justify-content: center;
+      padding: 7px 2px; font-size: 10.5px; border-radius: 9px;
+    }
+    nav a.active { box-shadow: none; }
+    nav a svg { width: 20px; height: 20px; }
+    .content { margin-left: 0; }
+    .wrap { padding: 22px 16px calc(92px + env(safe-area-inset-bottom)); }
+    h1 { font-size: 19px; }
+    .toast { bottom: calc(78px + env(safe-area-inset-bottom)); }
+  }
 </style>
 </head>
 <body>
-<div class="wrap">
-  <h1>Laverock <span class="badge">MVP · ZipVoice zh/en</span></h1>
-  <div class="sub">本地语音克隆合成 — 所有处理都在这台电脑上完成</div>
 
-  <div class="card">
-    <label for="engine">引擎</label>
-    <select id="engine"></select>
-  </div>
-
-  <div class="card" id="remoteCard" style="display:none">
-    <label>手机遥控</label>
-    <div class="prompt-box" style="justify-content:space-between">
-      <span class="hint" id="lanHint">开启后，同一 Wi-Fi 下的手机经配对即可访问同一套界面</span>
-      <label class="switch">
-        <input type="checkbox" id="lanToggle" />
-        <span id="lanToggleLabel">局域网访问</span>
-      </label>
+<aside class="sidebar">
+  <div class="brand">
+    <div class="logo">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+        <path d="M3 12h2M7 7v10M11 4v16M15 7v10M19 11v2" />
+      </svg>
     </div>
-    <div id="lanPanel" style="display:none;margin-top:14px">
-      <div class="prompt-box">
-        <button class="ghost" id="pairBtn" type="button">生成配对二维码</button>
-        <span class="fileinfo" id="pairInfo"></span>
+    <div><b>Laverock</b><span>本地语音工作室</span></div>
+  </div>
+  <nav>
+    <a href="#/synthesize" data-page="synthesize">
+      <svg viewBox="0 0 24 24"><path d="M11 5 6 9H2v6h4l5 4V5Z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M18.5 5.5a9 9 0 0 1 0 13"/></svg>
+      <span>合成</span>
+    </a>
+    <a href="#/voices" data-page="voices">
+      <svg viewBox="0 0 24 24"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><path d="M12 19v3"/></svg>
+      <span>语音素材</span>
+    </a>
+    <a href="#/models" data-page="models">
+      <svg viewBox="0 0 24 24"><path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/></svg>
+      <span>模型</span>
+    </a>
+    <a href="#/settings" data-page="settings">
+      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9c.14.63.63 1.13 1.26 1.27H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z"/></svg>
+      <span>设置</span>
+    </a>
+  </nav>
+  <div class="sidebar-foot"><span id="version"></span><span class="dot" id="connState" title="服务状态"></span></div>
+</aside>
+
+<main class="content">
+  <div class="wrap">
+
+    <!-- ================= 合成 ================= -->
+    <section id="page-synthesize" class="page">
+      <div class="page-head"><h1>合成</h1><p class="sub">选择引擎与声音，输入文字，在这台电脑上生成语音。</p></div>
+
+      <div class="card">
+        <label for="engine">引擎</label>
+        <select id="engine"></select>
+        <div class="hint" id="engineHint"></div>
       </div>
-      <div class="qr" id="qr"></div>
-      <div class="hint" id="pairHint"></div>
-      <div style="margin-top:16px">
-        <label>已配对设备</label>
-        <div id="deviceList" class="hint">暂无</div>
-      </div>
-    </div>
-  </div>
 
-  <div class="card">
-    <label for="profile">声音库（已保存的参考声音）</label>
-    <div class="prompt-box">
-      <select id="profile" style="flex:1">
-        <option value="">— 临时录音 / 上传 —</option>
-      </select>
-      <button class="ghost" id="preview" type="button" disabled>试听</button>
-      <button class="ghost" id="delprofile" type="button" disabled>删除</button>
-    </div>
-    <div class="hint" id="profilehint">选择一个已保存的声音，或使用下方的临时录音。</div>
-  </div>
-
-  <div class="card" id="adhoc">
-    <label>参考声音（3–10 秒干净人声 WAV）</label>
-    <div class="prompt-box">
-      <input type="file" id="file" accept="audio/wav,.wav" style="display:none" />
-      <button class="ghost" id="pick" type="button">选择文件</button>
-      <button class="rec" id="rec" type="button">● 录音</button>
-      <span class="fileinfo" id="promptinfo">未选择</span>
-    </div>
-    <div class="hint">录音会在浏览器内重采样为 24kHz 单声道 WAV；也可以上传 wav/mp3 转码后的 wav。</div>
-    <div style="margin-top:14px">
-      <label for="prompt_text">参考音频对应文字（ZipVoice 必填；VoxCPM2 / Qwen3-TTS 可留空）</label>
-      <input type="text" id="prompt_text" placeholder="例如：那还是三十六年前，一九八七年。" />
-      <div class="hint">录音说了什么就填什么，中英文均可。ZipVoice 用它对齐音色与韵律；VoxCPM2 与 Qwen3-TTS 仅凭声音即可克隆。部分引擎（自定义音色 / 声音设计）完全不需要参考音频。</div>
-    </div>
-    <div style="margin-top:14px">
-      <label for="profilename">保存到声音库（可选，便于下次直接复用）</label>
-      <div class="prompt-box">
-        <input type="text" id="profilename" placeholder="给这个声音起个名字，例如：新闻女声" style="flex:1" />
-        <button class="ghost" id="saveprofile" type="button">保存声音</button>
+      <div class="card">
+        <label for="profile">声音</label>
+        <div class="prompt-box">
+          <select id="profile" style="flex:1"></select>
+          <button class="ghost" id="preview" type="button" disabled>试听</button>
+        </div>
+        <div class="hint" id="profilehint">选择一个已保存的声音，或使用下方的临时录音。</div>
       </div>
-      <div class="hint" id="savehint"></div>
-    </div>
-  </div>
 
-  <div class="card">
-    <label for="text">要合成的文字</label>
-    <textarea id="text" placeholder="输入中文或 English 文本……"></textarea>
-    <div class="row" style="margin-top:14px">
-      <div>
-        <label for="speed">语速 <span id="speedv">1.0</span></label>
-        <input type="range" id="speed" min="0.5" max="2" step="0.1" value="1" style="width:100%" />
+      <div class="card" id="adhoc">
+        <label>临时参考声音（3–10 秒干净人声）</label>
+        <div id="synthCapture"></div>
+        <div class="hint">录音会在浏览器内转成 24kHz 单声道 WAV；也可以直接上传 WAV。</div>
+        <div style="margin-top:14px">
+          <label for="prompt_text">参考音频对应文字（ZipVoice 必填）</label>
+          <input type="text" id="prompt_text" placeholder="例如：那还是三十六年前，一九八七年。" />
+          <div class="hint">录音说了什么就填什么。VoxCPM2 与 Qwen3-TTS 仅凭声音即可克隆，可留空。</div>
+        </div>
+        <div style="margin-top:14px">
+          <label for="profilename">保存到声音库（可选，便于下次直接复用）</label>
+          <div class="prompt-box">
+            <input type="text" id="profilename" placeholder="给这个声音起个名字，例如：新闻女声" style="flex:1" />
+            <button class="ghost" id="saveprofile" type="button">保存声音</button>
+          </div>
+          <div class="hint" id="savehint"></div>
+        </div>
       </div>
-      <div>
-        <label for="steps">扩散步数 <span id="stepsv">4</span>（越多越稳、越慢）</label>
-        <input type="range" id="steps" min="1" max="16" step="1" value="4" style="width:100%" />
-      </div>
-    </div>
-  </div>
 
-  <div class="actions">
-    <button id="go" type="button">生成语音</button>
-    <span id="status"></span>
+      <div class="card">
+        <label for="text">要合成的文字</label>
+        <textarea id="text" placeholder="输入中文或 English 文本……"></textarea>
+        <div class="row" style="margin-top:14px">
+          <div>
+            <label for="speed">语速 <span id="speedv">1.0</span></label>
+            <input type="range" id="speed" min="0.5" max="2" step="0.1" value="1" />
+          </div>
+          <div>
+            <label for="steps">扩散步数 <span id="stepsv">4</span>（越多越稳、越慢）</label>
+            <input type="range" id="steps" min="1" max="16" step="1" value="4" />
+          </div>
+        </div>
+      </div>
+
+      <div class="actions">
+        <button id="go" type="button">生成语音</button>
+        <span id="status"></span>
+        <a id="download" class="hint" download="laverock.wav" hidden>下载 WAV</a>
+      </div>
+      <audio id="player" controls hidden></audio>
+      <audio id="previewer" hidden></audio>
+    </section>
+
+    <!-- ================= 语音素材 ================= -->
+    <section id="page-voices" class="page">
+      <div class="page-head" style="display:flex;align-items:flex-end;justify-content:space-between;gap:12px;flex-wrap:wrap">
+        <div><h1>语音素材</h1><p class="sub">保存的参考声音可以复用到任何克隆引擎。</p></div>
+        <button id="newVoiceBtn" type="button">＋ 新建声音</button>
+      </div>
+
+      <div class="card" id="newVoiceCard" hidden>
+        <label for="newName">声音名称</label>
+        <input type="text" id="newName" placeholder="例如：新闻女声" />
+        <label style="margin-top:14px">参考声音（3–10 秒干净人声）</label>
+        <div id="voiceCapture"></div>
+        <div class="hint">录音会在浏览器内转成 24kHz 单声道 WAV。</div>
+        <div style="margin-top:14px">
+          <label for="newPromptText">参考音频对应文字（ZipVoice 必填）</label>
+          <input type="text" id="newPromptText" placeholder="录音里说了什么就填什么" />
+        </div>
+        <div class="actions" style="margin-top:16px">
+          <button id="newSave" type="button">保存到声音库</button>
+          <button class="ghost" id="newCancel" type="button">取消</button>
+          <span class="hint" id="newSaveHint"></span>
+        </div>
+      </div>
+
+      <div class="grid" id="voicesGrid"></div>
+      <div class="empty" id="voicesEmpty" hidden>
+        还没有保存的声音。点击「新建声音」录音或上传一段 3–10 秒的参考音频。
+      </div>
+    </section>
+
+    <!-- ================= 模型 ================= -->
+    <section id="page-models" class="page">
+      <div class="page-head"><h1>模型</h1><p class="sub">每个模型都是 <code>models/&lt;id&gt;/engine.json</code> 描述的一个插件。</p></div>
+
+      <div class="card" id="modelPaths" hidden>
+        <label>模型目录</label>
+        <div class="pathline"><code id="modelsDirPath">…</code></div>
+        <label style="margin-top:12px">下载脚本</label>
+        <div class="pathline"><code id="scriptsDirPath">…</code></div>
+        <div class="hint">下载使用「设置 → 下载网络」中的代理与镜像；安装完成后引擎会自动刷新。</div>
+      </div>
+
+      <div class="card" id="modelsNotice" hidden>
+        <label>模型管理仅在电脑端可用</label>
+        <div class="hint">手机上可以查看已安装的引擎并直接合成。安装新模型请在电脑上打开同一界面。</div>
+      </div>
+
+      <h2 class="section-title">已安装</h2>
+      <div class="grid" id="installedModels"></div>
+      <div class="empty" id="installedEmpty" hidden>还没有安装任何模型。从下方选择一个开始下载。</div>
+
+      <div id="catalogSection">
+        <h2 class="section-title">可安装</h2>
+        <div class="grid" id="catalogModels"></div>
+      </div>
+    </section>
+
+    <!-- ================= 设置 ================= -->
+    <section id="page-settings" class="page">
+      <div class="page-head"><h1>设置</h1><p class="sub">下载网络、手机遥控与关于信息。</p></div>
+
+      <div class="card" id="downloadSettings" hidden>
+        <label>下载网络</label>
+        <div class="hint" style="margin:0 0 14px">代理与镜像只影响模型下载脚本，不会改变本机推理。</div>
+        <label for="proxyMode">代理</label>
+        <select id="proxyMode">
+          <option value="system">跟随系统代理（默认）</option>
+          <option value="manual">手动指定</option>
+          <option value="direct">不使用代理（直连）</option>
+        </select>
+        <input type="text" id="proxy" placeholder="http://127.0.0.1:10808" hidden style="margin-top:8px" />
+        <div class="hint" id="proxyHint"></div>
+        <div class="row" style="margin-top:14px">
+          <div>
+            <label for="hfPreset">Hugging Face 镜像</label>
+            <select id="hfPreset"></select>
+            <input type="text" id="hfCustom" placeholder="https://…" hidden style="margin-top:8px" />
+          </div>
+          <div>
+            <label for="pipPreset">PyPI 镜像（Qwen3-TTS 安装）</label>
+            <select id="pipPreset"></select>
+            <input type="text" id="pipCustom" placeholder="https://…/simple" hidden style="margin-top:8px" />
+          </div>
+        </div>
+        <div class="hint">当前模型目录：<code id="pathModels">…</code> · 脚本目录：<code id="pathScripts">…</code></div>
+        <div class="actions" style="margin-top:14px">
+          <button id="saveSettings" type="button">保存设置</button>
+          <span class="hint" id="settingsHint"></span>
+        </div>
+      </div>
+
+      <div class="card" id="remoteCard" hidden>
+        <label>手机遥控</label>
+        <div class="prompt-box" style="justify-content:space-between">
+          <span class="hint" id="lanHint">开启后，同一 Wi-Fi 下的手机经配对即可访问同一套界面</span>
+          <label class="switch">
+            <input type="checkbox" id="lanToggle" />
+            <span id="lanToggleLabel">局域网访问</span>
+          </label>
+        </div>
+        <div id="lanPanel" hidden style="margin-top:14px">
+          <div class="prompt-box">
+            <button class="ghost" id="pairBtn" type="button">生成配对二维码</button>
+            <span class="fileinfo" id="pairInfo"></span>
+          </div>
+          <div class="qr" id="qr" hidden></div>
+          <div class="hint" id="pairHint"></div>
+          <div style="margin-top:16px">
+            <label>已配对设备</label>
+            <div id="deviceList" class="hint">暂无</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card" id="phoneSettings" hidden>
+        <label>本机连接</label>
+        <div class="hint" id="phoneInfo">已连接到电脑。</div>
+        <div class="hint">网络、模型与下载设置只能在电脑上修改。</div>
+        <div class="actions" style="margin-top:12px">
+          <button class="ghost" id="unpair" type="button">取消配对</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <label>关于</label>
+        <div class="hint">Laverock <span id="aboutVersion">…</span> · MIT · 所有推理都在本机完成。</div>
+      </div>
+    </section>
+
   </div>
-  <audio id="player" controls style="display:none"></audio>
-  <audio id="previewer" style="display:none"></audio>
-</div>
+</main>
 
 <div class="overlay" id="pairOverlay">
   <div class="card">
     <h1 style="font-size:18px;margin:0 0 8px">连接到 Laverock</h1>
-    <p class="hint" id="pairMsg">在这台电脑上打开「手机遥控 → 生成配对二维码」，然后用手机扫码。</p>
+    <p class="hint" id="pairMsg">在这台电脑上打开「设置 → 手机遥控 → 生成配对二维码」，然后用手机扫码。</p>
     <div style="margin-top:14px">
       <label for="pairCode">配对码</label>
-      <input type="text" id="pairCode" inputmode="numeric" autocomplete="one-time-code"
-             placeholder="6 位数字" />
+      <input type="text" id="pairCode" inputmode="numeric" autocomplete="one-time-code" placeholder="6 位数字" />
     </div>
     <div class="actions" style="margin-top:14px">
       <button id="pairSubmit" type="button">连接</button>
@@ -175,178 +432,165 @@
   </div>
 </div>
 
+<div class="toast" id="toast" hidden></div>
+
+<template id="captureTpl">
+  <div class="prompt-box">
+    <input type="file" class="cap-file" accept="audio/wav,.wav" hidden />
+    <button class="ghost cap-pick" type="button">选择文件</button>
+    <button class="rec cap-rec" type="button">● 录音</button>
+    <span class="fileinfo cap-info">未选择</span>
+  </div>
+</template>
+
 <script>
 const $ = (id) => document.getElementById(id);
-let promptBlob = null, promptName = null, mediaRecorder_state = null;
+const PAGES = ['synthesize', 'voices', 'models', 'settings'];
+const PAGE_TITLES = { synthesize: '合成', voices: '语音素材', models: '模型', settings: '设置' };
+const HF_PRESETS = [
+  { value: '', label: '官方（huggingface.co）' },
+  { value: 'https://hf-mirror.com', label: 'hf-mirror.com（国内加速）' },
+];
+const PIP_PRESETS = [
+  { value: '', label: '官方（pypi.org）' },
+  { value: 'https://pypi.tuna.tsinghua.edu.cn/simple', label: '清华 TUNA' },
+  { value: 'https://mirrors.aliyun.com/pypi/simple/', label: '阿里云' },
+];
+
+let engines = [];
 let profiles = [];
+let session = { loopback: true, paired: false };
+let modelsData = null;
+let modelsTimer = null;
+let previewId = null;
+let toastTimer = null;
 
-function selectedProfile() {
-  return profiles.find(p => p.id === $('profile').value) || null;
+const esc = (value) => String(value ?? '').replace(/[&<>"']/g, (c) => (
+  { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+));
+const fmtBytes = (b) => (!b ? '—' : b >= 1048576 ? (b / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(b / 1024)) + ' KB');
+const fmtDur = (s) => (s ? s.toFixed(1) + 's' : '—');
+const fmtDate = (t) => (t ? new Date(t * 1000).toLocaleDateString('zh-CN') : '—');
+
+function toast(message, isError) {
+  const el = $('toast');
+  el.textContent = message;
+  el.className = 'toast' + (isError ? ' err' : '');
+  el.hidden = false;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { el.hidden = true; }, 3200);
 }
 
-function syncProfileUI() {
-  const p = selectedProfile();
-  $('adhoc').style.display = p ? 'none' : 'block';
-  $('preview').disabled = !p;
-  $('delprofile').disabled = !p;
-  $('profilehint').textContent = p
-    ? `使用「${p.name}」· 参考文本：${p.prompt_text}`
-    : '选择一个已保存的声音，或使用下方的临时录音。';
-}
-
-async function loadProfiles() {
-  const res = await fetch('/api/profiles');
-  profiles = await res.json();
-  const sel = $('profile');
-  const current = sel.value;
-  sel.innerHTML = '<option value="">— 临时录音 / 上传 —</option>';
-  for (const p of profiles) {
-    const o = document.createElement('option');
-    o.value = p.id;
-    o.textContent = p.name;
-    sel.appendChild(o);
-  }
-  if (profiles.some(p => p.id === current)) sel.value = current;
-  syncProfileUI();
-}
-
-$('profile').onchange = syncProfileUI;
-
-$('preview').onclick = () => {
-  const p = selectedProfile();
-  if (!p) return;
-  $('previewer').src = `/api/profiles/${p.id}/audio`;
-  $('previewer').play();
-};
-
-$('delprofile').onclick = async () => {
-  const p = selectedProfile();
-  if (!p) return;
-  if (!confirm(`删除声音「${p.name}」？此操作不可撤销。`)) return;
-  const res = await fetch(`/api/profiles/${p.id}`, { method: 'DELETE' });
-  if (res.ok) {
-    $('profilehint').textContent = `已删除「${p.name}」`;
-    await loadProfiles();
-  } else {
-    $('profilehint').textContent = '删除失败';
-  }
-};
-
-$('saveprofile').onclick = async () => {
-  const name = $('profilename').value.trim();
-  const ptext = $('prompt_text').value.trim();
-  if (!promptBlob) { $('savehint').textContent = '请先选择或录制参考声音'; return; }
-  if (!name) { $('savehint').textContent = '请给声音起个名字'; return; }
-  if (!ptext) { $('savehint').textContent = '请填写参考音频对应的文字'; return; }
-
-  const fd = new FormData();
-  fd.append('name', name);
-  fd.append('prompt_text', ptext);
-  fd.append('prompt', promptBlob, promptName || 'reference.wav');
-  const engine = $('engine').value;
-  if (engine) fd.append('engine_id', engine);
-
-  const res = await fetch('/api/profiles', { method: 'POST', body: fd });
+async function api(path, opts) {
+  const res = await fetch(path, opts);
   if (!res.ok) {
-    const msg = await res.json().then(j => j.error).catch(() => res.statusText);
-    $('savehint').textContent = '保存失败：' + msg;
-    return;
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || res.statusText || ('HTTP ' + res.status));
   }
-  const meta = await res.json();
-  $('profilename').value = '';
-  $('savehint').textContent = `已保存「${meta.name}」，下次可直接选用`;
-  await loadProfiles();
-  $('profile').value = meta.id;
-  syncProfileUI();
-};
-
-async function loadEngines() {
-  const res = await fetch('/api/engines');
-  const engines = await res.json();
-  const sel = $('engine');
-  sel.innerHTML = '';
-  if (!engines.length) {
-    sel.innerHTML = '<option>未发现模型 — 运行 scripts/download-model.sh</option>';
-    $('go').disabled = true;
-    return;
-  }
-  for (const e of engines) {
-    const o = document.createElement('option');
-    o.value = e.id;
-    o.textContent = `${e.name} (${e.languages.join('/') || '?'})`;
-    sel.appendChild(o);
-  }
-  $('steps').value = engines[0].defaults?.num_steps ?? 4;
-  $('stepsv').textContent = $('steps').value;
+  const type = res.headers.get('content-type') || '';
+  return type.includes('application/json') ? res.json() : res.text();
 }
 
-$('speed').oninput = (e) => $('speedv').textContent = e.target.value;
-$('steps').oninput = (e) => $('stepsv').textContent = e.target.value;
+// ---------------------------------------------------------------- capture
 
-$('pick').onclick = () => $('file').click();
-$('file').onchange = () => {
-  const f = $('file').files[0];
-  if (!f) return;
-  promptBlob = f; promptName = f.name;
-  $('promptinfo').textContent = `${f.name} · ${(f.size/1024/1024).toFixed(2)} MB`;
-};
+class Capture {
+  constructor(host) {
+    host.innerHTML = '';
+    host.appendChild($('captureTpl').content.cloneNode(true));
+    this.host = host;
+    this.file = host.querySelector('.cap-file');
+    this.pick = host.querySelector('.cap-pick');
+    this.rec = host.querySelector('.cap-rec');
+    this.info = host.querySelector('.cap-info');
+    this.blob = null;
+    this.filename = null;
+    this.recording = false;
+    this.onChange = () => {};
 
-// ---- Mic -> 24kHz mono WAV (no MediaRecorder/webm dependency) ----
-$('rec').onclick = async () => {
-  const btn = $('rec');
-  if (mediaRecorder_state) {
-    mediaRecorder_state.stop();
-    return;
-  }
-  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-    $('promptinfo').textContent = '当前环境不支持麦克风录音，请改用「选择文件」上传 WAV';
-    return;
-  }
-
-  $('promptinfo').textContent = '正在请求麦克风权限……';
-  let stream;
-  try {
-    stream = await navigator.mediaDevices.getUserMedia({
-      audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true },
-    });
-  } catch (e) {
-    const name = e && e.name ? e.name : 'Error';
-    const hint = name === 'NotAllowedError'
-      ? '权限被拒绝。请在「系统设置 → 隐私与安全性 → 麦克风」中允许 Laverock（或你使用的浏览器），然后重试。'
-      : name === 'NotFoundError'
-        ? '没有找到可用的麦克风设备。'
-        : '请检查系统麦克风设置后重试。';
-    $('promptinfo').textContent = `无法录音（${name}）：${hint}`;
-    return;
+    this.pick.onclick = () => this.file.click();
+    this.file.onchange = () => {
+      const f = this.file.files[0];
+      if (!f) return;
+      this.blob = f;
+      this.filename = f.name;
+      this.info.textContent = `${f.name} · ${fmtBytes(f.size)}`;
+      this.onChange();
+    };
+    this.rec.onclick = () => this.toggle();
   }
 
-  const ctx = new AudioContext();
-  await ctx.resume();
-  const src = ctx.createMediaStreamSource(stream);
-  const TARGET = 24000;
-  const ratio = ctx.sampleRate / TARGET;
-  const chunks = [];
-  const node = ctx.createScriptProcessor(4096, 1, 1);
-  node.onaudioprocess = (e) => chunks.push(new Float32Array(e.inputBuffer.getChannelData(0)));
-  src.connect(node); node.connect(ctx.destination);
-  btn.classList.add('on'); btn.textContent = '■ 停止';
-  $('promptinfo').textContent = '录音中……再次点击结束';
+  clear() {
+    if (this.recording) this.stop();
+    this.blob = null;
+    this.filename = null;
+    this.file.value = '';
+    this.info.textContent = '未选择';
+    this.onChange();
+  }
 
-  mediaRecorder_state = {
-    stop() {
-      node.disconnect(); src.disconnect(); stream.getTracks().forEach(t => t.stop());
-      ctx.close();
-      const raw = concatFloat(chunks);
-      const down = downsample(raw, ratio);
-      promptBlob = new Blob([encodeWav(down, TARGET)], { type: 'audio/wav' });
-      promptName = 'mic-reference.wav';
-      const sec = (down.length / TARGET).toFixed(1);
-      $('promptinfo').textContent = `麦克风录音 · ${sec}s`;
-      btn.classList.remove('on'); btn.textContent = '● 录音';
-      mediaRecorder_state = null;
+  async toggle() {
+    if (this.recording) return this.stop();
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      this.info.textContent = '当前环境不支持麦克风录音，请改用「选择文件」上传 WAV';
+      return;
     }
-  };
-};
+    this.info.textContent = '正在请求麦克风权限……';
+    let stream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({
+        audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true },
+      });
+    } catch (e) {
+      const name = (e && e.name) || 'Error';
+      const hint = name === 'NotAllowedError'
+        ? '权限被拒绝。请在「系统设置 → 隐私与安全性 → 麦克风」中允许 Laverock（或浏览器），然后重试。'
+        : name === 'NotFoundError'
+          ? '没有找到可用的麦克风设备。'
+          : '请检查系统麦克风设置后重试。';
+      this.info.textContent = `无法录音（${name}）：${hint}`;
+      return;
+    }
+
+    const ctx = new AudioContext();
+    await ctx.resume();
+    const src = ctx.createMediaStreamSource(stream);
+    const TARGET = 24000;
+    const node = ctx.createScriptProcessor(4096, 1, 1);
+    const chunks = [];
+    node.onaudioprocess = (e) => chunks.push(new Float32Array(e.inputBuffer.getChannelData(0)));
+    src.connect(node);
+    node.connect(ctx.destination);
+
+    this.stream = stream;
+    this.ctx = ctx;
+    this.srcNode = src;
+    this.node = node;
+    this.chunks = chunks;
+    this.ratio = ctx.sampleRate / TARGET;
+    this.recording = true;
+    this.rec.classList.add('on');
+    this.rec.textContent = '■ 停止';
+    this.info.textContent = '录音中……再次点击结束';
+  }
+
+  stop() {
+    if (!this.recording) return;
+    this.recording = false;
+    try { this.node.disconnect(); this.srcNode.disconnect(); } catch (_) { /* already closed */ }
+    this.stream.getTracks().forEach((t) => t.stop());
+    this.ctx.close();
+
+    const raw = concatFloat(this.chunks);
+    const down = downsample(raw, this.ratio);
+    this.blob = new Blob([encodeWav(down, 24000)], { type: 'audio/wav' });
+    this.filename = 'mic-reference.wav';
+    this.info.textContent = `麦克风录音 · ${(down.length / 24000).toFixed(1)}s`;
+    this.chunks = [];
+    this.rec.classList.remove('on');
+    this.rec.textContent = '● 录音';
+    this.onChange();
+  }
+}
 
 function concatFloat(arrs) {
   const n = arrs.reduce((a, b) => a + b.length, 0);
@@ -382,58 +626,592 @@ function encodeWav(samples, sr) {
   return buf;
 }
 
+const synthCapture = new Capture($('synthCapture'));
+const voiceCapture = new Capture($('voiceCapture'));
+
+if (!window.isSecureContext) {
+  for (const cap of [synthCapture, voiceCapture]) {
+    cap.rec.disabled = true;
+    cap.rec.title = '需要通过 HTTPS 或 localhost 访问才能使用麦克风';
+  }
+}
+
+// ---------------------------------------------------------------- profiles
+
+function selectedProfile() {
+  return profiles.find((p) => p.id === $('profile').value) || null;
+}
+
+function syncProfileUI() {
+  const p = selectedProfile();
+  $('adhoc').hidden = !!p;
+  $('preview').disabled = !p;
+  $('preview').textContent = previewId && p && previewId === p.id ? '停止' : '试听';
+  $('profilehint').textContent = p
+    ? `使用「${p.name}」· 参考文本：${p.prompt_text}`
+    : '选择一个已保存的声音，或使用下方的临时录音。';
+}
+
+async function loadProfiles() {
+  try {
+    profiles = await api('/api/profiles');
+  } catch (e) {
+    toast('读取声音库失败：' + e.message, true);
+    return;
+  }
+  const sel = $('profile');
+  const current = sel.value;
+  sel.innerHTML = '<option value="">— 临时录音 / 上传 —</option>';
+  for (const p of profiles) {
+    const o = document.createElement('option');
+    o.value = p.id;
+    o.textContent = p.name;
+    sel.appendChild(o);
+  }
+  if (profiles.some((p) => p.id === current)) sel.value = current;
+  syncProfileUI();
+  renderVoices();
+}
+
+function renderVoices() {
+  const grid = $('voicesGrid');
+  grid.innerHTML = '';
+  $('voicesEmpty').hidden = profiles.length > 0;
+  for (const p of profiles) {
+    const el = document.createElement('div');
+    el.className = 'voice-card';
+    el.innerHTML = `
+      <div class="voice-top"><b>${esc(p.name)}</b>${p.engine_id ? `<span class="chip">${esc(p.engine_id)}</span>` : ''}</div>
+      <div class="voice-meta">${fmtDur(p.duration_secs)} · ${fmtBytes(p.bytes)} · ${fmtDate(p.created_at)}</div>
+      <div class="voice-text">${esc(p.prompt_text)}</div>
+      <div class="voice-actions">
+        <button class="ghost small play" type="button">${previewId === p.id ? '停止' : '试听'}</button>
+        <button class="ghost small danger del" type="button">删除</button>
+      </div>`;
+    el.querySelector('.play').onclick = () => togglePreview(p.id);
+    el.querySelector('.del').onclick = () => deleteProfile(p);
+    grid.appendChild(el);
+  }
+}
+
+function togglePreview(id) {
+  const audio = $('previewer');
+  if (previewId === id) {
+    audio.pause();
+    audio.removeAttribute('src');
+    previewId = null;
+  } else {
+    previewId = id;
+    audio.src = `/api/profiles/${encodeURIComponent(id)}/audio`;
+    audio.play().catch(() => {});
+  }
+  renderVoices();
+  syncProfileUI();
+}
+
+$('previewer').addEventListener('ended', () => {
+  previewId = null;
+  renderVoices();
+  syncProfileUI();
+});
+
+async function deleteProfile(p) {
+  if (!confirm(`删除声音「${p.name}」？此操作不可撤销。`)) return;
+  try {
+    await api(`/api/profiles/${encodeURIComponent(p.id)}`, { method: 'DELETE' });
+  } catch (e) {
+    toast('删除失败：' + e.message, true);
+    return;
+  }
+  if (previewId === p.id) {
+    $('previewer').pause();
+    previewId = null;
+  }
+  toast(`已删除「${p.name}」`);
+  await loadProfiles();
+}
+
+async function createProfile(name, promptText, blob, engineId) {
+  if (!blob) throw new Error('请先选择或录制参考声音');
+  if (!name) throw new Error('请给声音起个名字');
+  if (!promptText) throw new Error('请填写参考音频对应的文字');
+  const fd = new FormData();
+  fd.append('name', name);
+  fd.append('prompt_text', promptText);
+  fd.append('prompt', blob, blob.name || 'reference.wav');
+  if (engineId) fd.append('engine_id', engineId);
+  const res = await fetch('/api/profiles', { method: 'POST', body: fd });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || res.statusText);
+  }
+  return res.json();
+}
+
+$('profile').onchange = syncProfileUI;
+$('preview').onclick = () => {
+  const p = selectedProfile();
+  if (p) togglePreview(p.id);
+};
+
+$('saveprofile').onclick = async () => {
+  const hint = $('savehint');
+  hint.className = 'hint';
+  try {
+    const meta = await createProfile(
+      $('profilename').value.trim(),
+      $('prompt_text').value.trim(),
+      synthCapture.blob,
+      $('engine').value,
+    );
+    $('profilename').value = '';
+    $('savehint').textContent = `已保存「${meta.name}」，下次可直接选用`;
+    await loadProfiles();
+    $('profile').value = meta.id;
+    syncProfileUI();
+    toast(`已保存「${meta.name}」`);
+  } catch (e) {
+    hint.className = 'hint err';
+    hint.textContent = '保存失败：' + e.message;
+  }
+};
+
+$('newVoiceBtn').onclick = () => {
+  const card = $('newVoiceCard');
+  card.hidden = !card.hidden;
+  if (!card.hidden) $('newName').focus();
+};
+$('newCancel').onclick = () => {
+  $('newVoiceCard').hidden = true;
+  $('newSaveHint').textContent = '';
+};
+$('newSave').onclick = async () => {
+  const hint = $('newSaveHint');
+  hint.className = 'hint';
+  try {
+    const meta = await createProfile(
+      $('newName').value.trim(),
+      $('newPromptText').value.trim(),
+      voiceCapture.blob,
+      $('engine').value,
+    );
+    $('newName').value = '';
+    $('newPromptText').value = '';
+    voiceCapture.clear();
+    $('newVoiceCard').hidden = true;
+    await loadProfiles();
+    toast(`已保存「${meta.name}」`);
+  } catch (e) {
+    hint.className = 'hint err';
+    hint.textContent = '保存失败：' + e.message;
+  }
+};
+
+// ---------------------------------------------------------------- engines
+
+async function loadEngines() {
+  try {
+    engines = await api('/api/engines');
+  } catch (e) {
+    toast('读取引擎失败：' + e.message, true);
+    return;
+  }
+  const sel = $('engine');
+  const current = sel.value;
+  sel.innerHTML = '';
+  if (!engines.length) {
+    const o = document.createElement('option');
+    o.textContent = '未发现模型 — 前往「模型」下载';
+    sel.appendChild(o);
+    $('go').disabled = true;
+  } else {
+    $('go').disabled = false;
+    for (const e of engines) {
+      const o = document.createElement('option');
+      o.value = e.id;
+      o.textContent = e.name;
+      sel.appendChild(o);
+    }
+    if (engines.some((e) => e.id === current)) sel.value = current;
+  }
+  syncEngine();
+  if (currentPage() === 'models') {
+    if (modelsData) renderModels();
+    else if (!session.loopback) renderInstalledOnly();
+  }
+}
+
+function syncEngine() {
+  const e = engines.find((x) => x.id === $('engine').value);
+  if (!e) {
+    $('engineHint').textContent = '';
+    return;
+  }
+  $('engineHint').textContent =
+    `${e.kind} · ${(e.languages || []).join(' / ')} · ${(e.capabilities || []).join(', ')}`;
+  if (e.defaults && e.defaults.num_steps) {
+    $('steps').value = e.defaults.num_steps;
+    $('stepsv').textContent = e.defaults.num_steps;
+  }
+}
+
+$('engine').onchange = syncEngine;
+$('speed').oninput = (e) => { $('speedv').textContent = e.target.value; };
+$('steps').oninput = (e) => { $('stepsv').textContent = e.target.value; };
+
+try {
+  $('speed').value = localStorage.getItem('laverock.speed') || '1';
+  $('speedv').textContent = $('speed').value;
+} catch (_) { /* storage blocked */ }
+
+$('speed').addEventListener('change', () => {
+  try { localStorage.setItem('laverock.speed', $('speed').value); } catch (_) { /* ignore */ }
+});
+
 $('go').onclick = async () => {
   const status = $('status');
   const saved = selectedProfile();
   const text = $('text').value.trim();
   if (!text) { status.className = 'err'; status.textContent = '请输入要合成的文字'; return; }
 
+  if (!saved && !synthCapture.blob && !$('engine').value) {
+    status.className = 'err'; status.textContent = '请选择引擎';
+    return;
+  }
+
   const fd = new FormData();
   fd.append('text', text);
   if (saved) {
     fd.append('profile_id', saved.id);
   } else {
-    if (promptBlob) fd.append('prompt', promptBlob, promptName);
+    if (synthCapture.blob) fd.append('prompt', synthCapture.blob, synthCapture.filename || 'reference.wav');
     const pt = $('prompt_text').value.trim();
     if (pt) fd.append('prompt_text', pt);
   }
   fd.append('speed', $('speed').value);
   fd.append('num_steps', $('steps').value);
 
+  const url = `/api/engines/${encodeURIComponent($('engine').value)}/synthesize`;
   $('go').disabled = true;
-  status.className = ''; status.textContent = '合成中（首次加载模型需要几秒）……';
+  status.className = '';
+  status.textContent = '合成中（首次加载模型需要几秒）……';
   const t0 = performance.now();
   try {
-    const res = await fetch(`/api/engines/${$('engine').value}/synthesize`, { method: 'POST', body: fd });
+    const res = await fetch(url, { method: 'POST', body: fd });
     if (!res.ok) {
-      const msg = await res.json().then(j => j.error).catch(() => res.statusText);
+      const msg = await res.json().then((j) => j.error).catch(() => res.statusText);
       throw new Error(msg);
     }
     const blob = await res.blob();
-    const url = URL.createObjectURL(blob);
-    const p = $('player');
-    p.src = url; p.style.display = 'block'; p.play();
+    const audioUrl = URL.createObjectURL(blob);
+    const player = $('player');
+    if (player.dataset.url) URL.revokeObjectURL(player.dataset.url);
+    player.dataset.url = audioUrl;
+    player.src = audioUrl;
+    player.hidden = false;
+    player.play().catch(() => {});
+    const dl = $('download');
+    dl.href = audioUrl;
+    dl.hidden = false;
     status.className = 'ok';
-    status.textContent = `完成 · ${(blob.size/1024).toFixed(0)} KB · ${((performance.now()-t0)/1000).toFixed(1)}s`;
+    status.textContent = `完成 · ${(blob.size / 1024).toFixed(0)} KB · ${((performance.now() - t0) / 1000).toFixed(1)}s`;
   } catch (e) {
-    status.className = 'err'; status.textContent = '失败：' + e.message;
+    status.className = 'err';
+    status.textContent = '失败：' + e.message;
   } finally {
     $('go').disabled = false;
   }
 };
 
-// ---------------- remote / pairing ----------------
+// ---------------------------------------------------------------- models
 
-let session = { loopback: true, paired: false };
+async function loadModels() {
+  if (!session.loopback) {
+    $('modelPaths').hidden = true;
+    $('modelsNotice').hidden = false;
+    $('catalogSection').hidden = true;
+    renderInstalledOnly();
+    return;
+  }
+  $('modelsNotice').hidden = true;
+  try {
+    modelsData = await api('/api/models');
+  } catch (e) {
+    toast('读取模型列表失败：' + e.message, true);
+    return;
+  }
+  $('modelPaths').hidden = false;
+  $('modelsDirPath').textContent = modelsData.models_dir || '—';
+  $('scriptsDirPath').textContent = modelsData.scripts_dir || '未找到 scripts/ 目录（安装不可用）';
+  renderModels();
+  schedulePoll();
+}
+
+function engineFor(model) {
+  return engines.find((e) => e.id === (model.engine_id || model.dir));
+}
+
+function renderInstalledOnly() {
+  const box = $('installedModels');
+  box.innerHTML = '';
+  for (const e of engines) {
+    const el = document.createElement('div');
+    el.className = 'model-card';
+    el.innerHTML = `
+      <div class="model-head"><b>${esc(e.name)}</b><span class="pill ok">已安装</span></div>
+      <div class="chips">${(e.languages || []).map((l) => `<span class="chip">${esc(l)}</span>`).join('')}</div>
+      <div class="hint">${esc(e.kind)} · ${esc((e.capabilities || []).join(', '))}</div>`;
+    box.appendChild(el);
+  }
+  $('installedEmpty').hidden = engines.length > 0;
+}
+
+function renderModels() {
+  const installedBox = $('installedModels');
+  const catalogBox = $('catalogModels');
+  installedBox.innerHTML = '';
+  catalogBox.innerHTML = '';
+
+  const catalogEngineIds = new Set();
+  for (const model of modelsData.models) {
+    if (model.installed) {
+      catalogEngineIds.add(model.engine_id || model.dir);
+      installedBox.appendChild(modelCard(model, true));
+    } else {
+      catalogBox.appendChild(modelCard(model, false));
+    }
+  }
+
+  // Engines whose manifest is not in the catalog (manual installs).
+  for (const engine of engines) {
+    if (catalogEngineIds.has(engine.id)) continue;
+    if (modelsData.models.some((m) => m.dir === engine.id)) continue;
+    const el = document.createElement('div');
+    el.className = 'model-card';
+    el.innerHTML = `
+      <div class="model-head"><b>${esc(engine.name)}</b><span class="pill ok">已安装</span></div>
+      <div class="chips">${(engine.languages || []).map((l) => `<span class="chip">${esc(l)}</span>`).join('')}</div>
+      <div class="hint">${esc(engine.kind)} · 手动安装的 manifest</div>`;
+    installedBox.appendChild(el);
+  }
+
+  $('installedEmpty').hidden = installedBox.children.length > 0;
+  $('catalogSection').hidden = catalogBox.children.length === 0;
+}
+
+function modelCard(model, installed) {
+  const job = model.job;
+  const running = !!job && job.status === 'running';
+  const failed = !!job && job.status === 'failed' && !installed;
+  const engine = engineFor(model);
+  const el = document.createElement('div');
+  el.className = 'model-card';
+  el.innerHTML = `
+    <div class="model-head">
+      <b>${esc(model.name)}</b>
+      ${installed ? '<span class="pill ok">已安装</span>' : `<span class="pill">${esc(model.size || '')}</span>`}
+    </div>
+    <div class="model-desc">${esc(model.description)}</div>
+    <div class="chips">${(model.languages || []).map((l) => `<span class="chip">${esc(l)}</span>`).join('')}</div>
+    ${model.note ? `<div class="hint">${esc(model.note)}</div>` : ''}
+    ${installed && engine ? `<div class="hint">${esc(engine.kind)} · ${engine.loaded ? '已加载到内存' : '首次使用时加载'}</div>` : ''}
+    ${job && (running || failed) ? `<pre class="log">${esc(job.log || '')}</pre>` : ''}
+    <div class="model-actions"></div>`;
+
+  const actions = el.querySelector('.model-actions');
+  if (installed) {
+    actions.innerHTML = `<span class="hint">目录：models/${esc(model.dir)}</span>`;
+    return el;
+  }
+
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.textContent = running ? '安装中…' : failed ? '重试安装' : '下载安装';
+  btn.disabled = running || !modelsData.scripts_dir;
+  btn.onclick = () => installModel(model.id);
+  actions.appendChild(btn);
+  if (!modelsData.scripts_dir) {
+    const hint = document.createElement('span');
+    hint.className = 'hint err';
+    hint.textContent = '未找到 scripts/ 目录';
+    actions.appendChild(hint);
+  }
+  return el;
+}
+
+async function installModel(id) {
+  try {
+    await api(`/api/models/${encodeURIComponent(id)}/install`, { method: 'POST' });
+  } catch (e) {
+    toast('无法开始安装：' + e.message, true);
+    return;
+  }
+  toast('已开始下载，进度会显示在卡片里');
+  await loadModels();
+}
+
+function schedulePoll() {
+  if (modelsTimer) {
+    clearInterval(modelsTimer);
+    modelsTimer = null;
+  }
+  if (!modelsData || !modelsData.models.some((m) => m.job && m.job.status === 'running')) return;
+  modelsTimer = setInterval(async () => {
+    if (currentPage() !== 'models' || !session.loopback) {
+      clearInterval(modelsTimer);
+      modelsTimer = null;
+      return;
+    }
+    try {
+      modelsData = await api('/api/models');
+    } catch (_) {
+      return;
+    }
+    renderModels();
+    const running = modelsData.models.some((m) => m.job && m.job.status === 'running');
+    if (!running) {
+      clearInterval(modelsTimer);
+      modelsTimer = null;
+      const failed = modelsData.models.some((m) => m.job && m.job.status === 'failed' && !m.installed);
+      await loadEngines();
+      await loadModels();
+      toast(failed ? '安装失败，请查看卡片中的日志' : '安装流程结束', failed);
+    }
+  }, 1500);
+}
+
+// ---------------------------------------------------------------- settings
+
+function fillPreset(sel, presets) {
+  sel.innerHTML = presets.map((p) => `<option value="${esc(p.value)}">${esc(p.label)}</option>`).join('')
+    + '<option value="__custom">自定义…</option>';
+}
+
+function setPreset(prefix, value, presets) {
+  const sel = $(prefix + 'Preset');
+  const custom = $(prefix + 'Custom');
+  const clean = (v) => String(v || '').replace(/\/+$/, '');
+  if (!value) {
+    sel.value = '';
+    custom.hidden = true;
+    custom.value = '';
+    return;
+  }
+  const hit = presets.find((p) => p.value && clean(p.value) === clean(value));
+  if (hit) {
+    sel.value = hit.value;
+    custom.hidden = true;
+    custom.value = '';
+  } else {
+    sel.value = '__custom';
+    custom.hidden = false;
+    custom.value = value;
+  }
+}
+
+function getPreset(prefix) {
+  const sel = $(prefix + 'Preset');
+  return sel.value === '__custom' ? $(prefix + 'Custom').value.trim() : sel.value;
+}
+
+function wirePreset(prefix) {
+  const sel = $(prefix + 'Preset');
+  const custom = $(prefix + 'Custom');
+  sel.onchange = () => {
+    custom.hidden = sel.value !== '__custom';
+    if (!custom.hidden) custom.focus();
+  };
+}
+
+fillPreset($('hfPreset'), HF_PRESETS);
+fillPreset($('pipPreset'), PIP_PRESETS);
+wirePreset('hf');
+wirePreset('pip');
+
+let detectedProxy = null;
+
+function syncProxyMode() {
+  const mode = $('proxyMode').value;
+  $('proxy').hidden = mode !== 'manual';
+  const hint = $('proxyHint');
+  hint.className = 'hint';
+  if (mode === 'system') {
+    hint.innerHTML = detectedProxy
+      ? '检测到系统代理 <code>' + esc(detectedProxy) + '</code>，模型下载会自动使用它。'
+      : '未检测到系统代理，模型下载将直连。';
+  } else if (mode === 'manual') {
+    hint.textContent = '仅用于模型下载，支持 http、https、socks5、socks5h。';
+  } else {
+    hint.textContent = '始终直连，即使环境变量或系统里设置了代理。';
+  }
+}
+$('proxyMode').onchange = syncProxyMode;
+
+async function loadSettingsPage() {
+  if (!session.loopback) {
+    $('downloadSettings').hidden = true;
+    $('phoneSettings').hidden = false;
+    return;
+  }
+  $('downloadSettings').hidden = false;
+  $('phoneSettings').hidden = true;
+  try {
+    const s = await api('/api/settings');
+    detectedProxy = s.system_proxy || null;
+    $('proxyMode').value = s.proxy_mode || 'system';
+    $('proxy').value = s.proxy || '';
+    syncProxyMode();
+    setPreset('hf', s.hf_endpoint || '', HF_PRESETS);
+    setPreset('pip', s.pip_index || '', PIP_PRESETS);
+    $('pathModels').textContent = s.models_dir || '—';
+    $('pathScripts').textContent = s.scripts_dir || '未找到';
+    $('settingsHint').className = 'hint';
+    $('settingsHint').textContent = '';
+  } catch (e) {
+    $('settingsHint').className = 'hint err';
+    $('settingsHint').textContent = '读取设置失败：' + e.message;
+  }
+}
+
+$('saveSettings').onclick = async () => {
+  const hint = $('settingsHint');
+  const body = {
+    proxy_mode: $('proxyMode').value,
+    proxy: $('proxy').value.trim(),
+    hf_endpoint: getPreset('hf'),
+    pip_index: getPreset('pip'),
+  };
+  try {
+    const saved = await api('/api/settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    $('proxyMode').value = saved.proxy_mode || 'system';
+    $('proxy').value = saved.proxy || '';
+    syncProxyMode();
+    setPreset('hf', saved.hf_endpoint || '', HF_PRESETS);
+    setPreset('pip', saved.pip_index || '', PIP_PRESETS);
+    hint.className = 'hint ok';
+    hint.textContent = '已保存，下次下载生效';
+    toast('下载设置已保存');
+  } catch (e) {
+    hint.className = 'hint err';
+    hint.textContent = '保存失败：' + e.message;
+  }
+};
+
+// ---------------------------------------------------------------- remote / pairing
 
 async function loadSession() {
   try {
-    session = await fetch('/api/session').then(r => r.json());
-  } catch {
+    session = await api('/api/session');
+  } catch (_) {
     session = { loopback: true, paired: false };
   }
-  const desktop = session.loopback;
-  $('remoteCard').style.display = desktop ? 'block' : 'none';
+  const desktop = !!session.loopback;
+  $('remoteCard').hidden = !desktop;
+  $('phoneSettings').hidden = desktop;
 
   if (!desktop && !session.paired) {
     // A QR link carries ?pair=CODE: claim it and reload without the query.
@@ -441,8 +1219,7 @@ async function loadSession() {
     if (code) {
       $('pairCode').value = code;
       $('pairMsg').textContent = '正在配对……';
-      const ok = await claim(code);
-      if (ok) return;
+      if (await claim(code)) return;
     }
     $('pairOverlay').classList.add('show');
     return;
@@ -451,22 +1228,13 @@ async function loadSession() {
 
   if (desktop) {
     $('lanToggle').checked = !!session.lan_enabled;
-    $('lanPanel').style.display = session.lan_enabled ? 'block' : 'none';
+    $('lanPanel').hidden = !session.lan_enabled;
     if (session.lan_enabled) {
       $('lanHint').textContent = `同一 Wi-Fi 下的手机可访问 ${session.lan_url || ''}`;
       await loadDevices();
     }
   } else {
-    // Phone: surface which device this is, and note the mic limitation.
-    const hint = document.createElement('div');
-    hint.className = 'hint';
-    hint.textContent = `已连接到电脑${session.device_name ? '（' + session.device_name + '）' : ''}`;
-    document.querySelector('.sub').after(hint);
-  }
-
-  if (!window.isSecureContext && $('rec')) {
-    $('rec').disabled = true;
-    $('rec').title = '需要通过 HTTPS 访问才能使用手机麦克风';
+    $('phoneInfo').textContent = `已连接到电脑${session.device_name ? '（' + session.device_name + '）' : ''}。`;
   }
 }
 
@@ -480,7 +1248,7 @@ async function claim(code) {
       body: JSON.stringify({ code, device_name: deviceName() }),
     });
     if (!res.ok) {
-      const msg = await res.json().then(j => j.error).catch(() => res.statusText);
+      const msg = await res.json().then((j) => j.error).catch(() => res.statusText);
       throw new Error(msg);
     }
     location.replace('/');
@@ -514,6 +1282,11 @@ $('pairCode').addEventListener('keydown', (e) => {
   if (e.key === 'Enter') $('pairSubmit').click();
 });
 
+$('unpair').onclick = () => {
+  document.cookie = 'laverock_device=; Path=/; Max-Age=0';
+  location.reload();
+};
+
 $('lanToggle').onchange = async () => {
   const enabled = $('lanToggle').checked;
   $('lanHint').textContent = enabled ? '正在开启……' : '正在关闭……';
@@ -528,8 +1301,8 @@ $('lanToggle').onchange = async () => {
     $('lanHint').textContent = '操作失败：' + (body.error || res.statusText);
     return;
   }
-  $('lanPanel').style.display = enabled ? 'block' : 'none';
-  $('qr').style.display = 'none';
+  $('lanPanel').hidden = !enabled;
+  $('qr').hidden = true;
   $('pairInfo').textContent = '';
   $('lanHint').textContent = enabled
     ? `${body.url || ''}${body.fingerprint ? '  ·  证书指纹 ' + body.fingerprint.slice(0, 17) + '…' : ''}`
@@ -547,14 +1320,15 @@ $('pairBtn').onclick = async () => {
     return;
   }
   $('qr').innerHTML = body.qr_svg;
-  $('qr').style.display = 'block';
+  $('qr').hidden = false;
   $('pairInfo').textContent = `配对码 ${body.code}`;
   $('pairHint').textContent = '手机扫码即可打开 https 链接；首次访问会提示证书不受信任，请选择「高级 → 继续前往」以允许使用麦克风（证书指纹 ' +
     (body.fingerprint ? body.fingerprint.slice(0, 17) + '…' : '') + '）。5 分钟内有效。';
 };
 
 async function loadDevices() {
-  const list = await fetch('/api/devices').then(r => r.json()).catch(() => []);
+  let list = [];
+  try { list = await api('/api/devices'); } catch (_) { list = []; }
   const box = $('deviceList');
   if (!list.length) { box.textContent = '暂无'; return; }
   box.innerHTML = '';
@@ -563,24 +1337,73 @@ async function loadDevices() {
     row.className = 'prompt-box';
     row.style.marginTop = '8px';
     const name = document.createElement('span');
+    name.className = 'fileinfo';
     name.textContent = `${d.name} · ${new Date(d.created_at * 1000).toLocaleDateString()}`;
     const btn = document.createElement('button');
-    btn.className = 'ghost';
+    btn.className = 'ghost small';
     btn.type = 'button';
     btn.textContent = '撤销';
     btn.onclick = async () => {
       if (!confirm(`撤销设备「${d.name}」的访问权限？`)) return;
-      const res = await fetch(`/api/devices/${d.id}`, { method: 'DELETE' });
-      if (res.ok) loadDevices();
+      try {
+        await api(`/api/devices/${encodeURIComponent(d.id)}`, { method: 'DELETE' });
+        loadDevices();
+      } catch (e) {
+        toast('撤销失败：' + e.message, true);
+      }
     };
     row.append(name, btn);
     box.appendChild(row);
   }
 }
 
-loadEngines();
-loadProfiles();
-loadSession();
+// ---------------------------------------------------------------- routing / boot
+
+function currentPage() {
+  const raw = location.hash.replace(/^#\/?/, '');
+  return PAGES.includes(raw) ? raw : 'synthesize';
+}
+
+function showPage(page) {
+  for (const p of PAGES) $('page-' + p).classList.toggle('active', p === page);
+  document.querySelectorAll('nav a').forEach((a) => a.classList.toggle('active', a.dataset.page === page));
+  document.title = `${PAGE_TITLES[page]} · Laverock`;
+  if (page !== 'models' && modelsTimer) {
+    clearInterval(modelsTimer);
+    modelsTimer = null;
+  }
+  if (page === 'voices') loadProfiles();
+  if (page === 'models') loadModels();
+  if (page === 'settings') loadSettingsPage();
+}
+
+window.addEventListener('hashchange', () => showPage(currentPage()));
+
+async function loadHealth() {
+  try {
+    const h = await api('/api/health');
+    const v = (h.version || '').trim();
+    $('version').textContent = v ? 'v' + v : '';
+    $('aboutVersion').textContent = v ? 'v' + v : '—';
+    $('connState').classList.remove('off');
+  } catch (_) {
+    $('connState').classList.add('off');
+  }
+}
+
+async function boot() {
+  await loadSession();
+  loadHealth();
+  if (!session.loopback && !session.paired) {
+    // The pairing overlay is up; do not fire authenticated requests.
+    for (const p of PAGES) $('page-' + p).classList.toggle('active', p === currentPage());
+    return;
+  }
+  await Promise.all([loadEngines(), loadProfiles()]);
+  showPage(currentPage());
+}
+
+boot();
 </script>
 </body>
 </html>

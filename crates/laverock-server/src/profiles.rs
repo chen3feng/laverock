@@ -28,6 +28,16 @@ pub struct ProfileMeta {
     pub created_at: u64,
 }
 
+/// A saved voice plus facts the library view needs without downloading
+/// the clip first.
+#[derive(Debug, Clone, Serialize)]
+pub struct ProfileView {
+    #[serde(flatten)]
+    pub meta: ProfileMeta,
+    pub duration_secs: f32,
+    pub bytes: u64,
+}
+
 pub struct ProfileStore {
     root: PathBuf,
 }
@@ -39,7 +49,7 @@ impl ProfileStore {
         Ok(Self { root })
     }
 
-    pub fn list(&self) -> Result<Vec<ProfileMeta>> {
+    pub fn list(&self) -> Result<Vec<ProfileView>> {
         let mut out = Vec::new();
         for entry in fs::read_dir(&self.root)? {
             let entry = entry?;
@@ -54,14 +64,21 @@ impl ProfileStore {
                 .map_err(CoreError::from)
                 .and_then(|raw| serde_json::from_str::<ProfileMeta>(&raw).map_err(CoreError::from))
             {
-                Ok(meta) => out.push(meta),
+                Ok(meta) => {
+                    let (duration_secs, bytes) = clip_facts(&entry.path().join("reference.wav"));
+                    out.push(ProfileView {
+                        meta,
+                        duration_secs,
+                        bytes,
+                    });
+                }
                 Err(e) => tracing::warn!(
                     "skipping unreadable profile {}: {e}",
                     entry.path().display()
                 ),
             }
         }
-        out.sort_by_key(|a| std::cmp::Reverse(a.created_at));
+        out.sort_by_key(|a| std::cmp::Reverse(a.meta.created_at));
         Ok(out)
     }
 
@@ -143,6 +160,19 @@ impl ProfileStore {
         let dir = self.dir(id)?;
         fs::remove_dir_all(dir)?;
         Ok(())
+    }
+}
+
+/// Duration and size of a reference clip; missing or unreadable clips
+/// report zero duration rather than failing the whole listing.
+fn clip_facts(path: &Path) -> (f32, u64) {
+    let Ok(bytes) = fs::read(path) else {
+        return (0.0, 0);
+    };
+    let size = bytes.len() as u64;
+    match decode_wav(&bytes) {
+        Ok((samples, rate)) if rate > 0 => (samples.len() as f32 / rate as f32, size),
+        _ => (0.0, size),
     }
 }
 

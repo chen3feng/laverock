@@ -9,9 +9,11 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 MODELS_DIR="${LAVEROCK_MODELS_DIR:-$ROOT/models}"
+TOOLS="${LAVEROCK_TOOLS_DIR:-$ROOT/.tools}"
 DEST="$MODELS_DIR/qwen3tts"
-VENV="$ROOT/.tools/qwen-tts-venv"
+VENV="$TOOLS/qwen-tts-venv"
 VARIANT="${QWEN3TTS_VARIANT:-base}"
 
 case "$VARIANT" in
@@ -47,7 +49,7 @@ if [ -z "$PYTHON" ]; then
 fi
 command -v "$PYTHON" >/dev/null 2>&1 || { echo "a Python 3.10-3.12 interpreter is required" >&2; exit 1; }
 echo "Using $("$PYTHON" --version 2>&1) ($PYTHON)"
-mkdir -p "$MODELS_DIR" "$DEST" "$ROOT/.tools"
+mkdir -p "$MODELS_DIR" "$DEST" "$TOOLS"
 
 # 1. Isolated environment — Qwen's torch/transformers pins stay here.
 if [ ! -x "$VENV/bin/python" ]; then
@@ -64,7 +66,7 @@ export HF_HOME="$DEST/.hf-cache"
 "$VENV/bin/huggingface-cli" download "$MODEL" >/dev/null
 
 # 3. Runner script.
-cp "$ROOT/scripts/qwen3tts_runner.py" "$DEST/qwen3tts_runner.py"
+cp "$SCRIPT_DIR/qwen3tts_runner.py" "$DEST/qwen3tts_runner.py"
 
 # 4. Manifest (absolute paths are allowed and used as-is).
 PY="$VENV/bin/python"

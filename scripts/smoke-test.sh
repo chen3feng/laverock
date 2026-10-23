@@ -19,11 +19,58 @@ echo "health"
 curl -sf "$BASE/api/health" >/dev/null && ok "GET /api/health" || bad "GET /api/health"
 
 echo "engines"
-curl -sf "$BASE/api/engines" | grep -q "\"$MODEL\"" \
-  && ok "engine $MODEL registered" || bad "engine $MODEL missing"
+# Captured once: piping curl into `grep -q` trips pipefail with SIGPIPE.
+engines_json=$(curl -sf "$BASE/api/engines")
+case "$engines_json" in
+  *"\"$MODEL\""*) ok "engine $MODEL registered" ;;
+  *) bad "engine $MODEL missing" ;;
+esac
 
 echo "ui"
-curl -sf "$BASE/" | grep -q "Laverock" && ok "index page" || bad "index page"
+index_html=$(curl -sf "$BASE/")
+case "$index_html" in
+  *Laverock*) ok "index page" ;;
+  *) bad "index page" ;;
+esac
+case "$index_html" in
+  *'id="page-settings"'*) ok "sidebar pages" ;;
+  *) bad "sidebar pages" ;;
+esac
+
+echo "settings"
+settings_json=$(curl -s "$BASE/api/settings")
+curl -sf "$BASE/api/settings" >/dev/null && ok "GET /api/settings" || bad "GET /api/settings"
+case "$settings_json" in
+  *'"proxy_mode":"system"'*|*'"proxy_mode":"manual"'*|*'"proxy_mode":"direct"'*)
+    ok "proxy mode reported" ;;
+  *) bad "proxy mode missing" ;;
+esac
+
+code=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/settings" \
+  -H 'Content-Type: application/json' -d '{"proxy_mode":"manual","proxy":"not-a-url"}')
+[ "$code" = "400" ] && ok "invalid proxy -> 400" || bad "invalid proxy -> $code"
+
+code=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/settings" \
+  -H 'Content-Type: application/json' \
+  -d '{"proxy_mode":"manual","proxy":"http://127.0.0.1:10808"}')
+[ "$code" = "200" ] && ok "save settings" || bad "save settings -> $code"
+
+# Put the user's settings back.
+curl -s -o /dev/null -X POST "$BASE/api/settings" \
+  -H 'Content-Type: application/json' -d "$settings_json"
+
+echo "models"
+models_json=$(curl -sf "$BASE/api/models")
+case "$models_json" in
+  *'"id":"zipvoice"'*) ok "model catalog" ;;
+  *) bad "model catalog" ;;
+esac
+code=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/models/nope/install")
+[ "$code" = "400" ] && ok "unknown model -> 400" || bad "unknown model -> $code"
+code=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/models/zipvoice/install")
+[ "$code" = "400" ] && ok "installed model -> 400" || bad "installed model -> $code"
+curl -sf -X POST "$BASE/api/models/reload" >/dev/null \
+  && ok "reload engines" || bad "reload engines"
 
 synth() { # name text wav prompt_text [extra...]
   local name="$1" text="$2" wav="$3" ptext="$4"; shift 4
@@ -61,8 +108,10 @@ pid=$(curl -s -X POST "$BASE/api/profiles" \
   | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')
 [ -n "$pid" ] && ok "create profile ($pid)" || bad "create profile"
 
-curl -sf "$BASE/api/profiles" | grep -q "$pid" \
-  && ok "profile listed" || bad "profile not listed"
+case "$(curl -sf "$BASE/api/profiles")" in
+  *"$pid"*) ok "profile listed" ;;
+  *) bad "profile not listed" ;;
+esac
 curl -sf "$BASE/api/profiles/$pid/audio" -o "$OUT/ref.wav" \
   && head -c 4 "$OUT/ref.wav" | grep -q RIFF \
   && ok "profile audio" || bad "profile audio"
@@ -78,7 +127,7 @@ code=$(curl -s -o /dev/null -w '%{http_code}' -X DELETE "$BASE/api/profiles/$pid
 curl -sf "$BASE/api/profiles" | grep -q "$pid" \
   && bad "deleted profile still listed" || ok "profile removed"
 
-if curl -sf "$BASE/api/engines" | grep -q '"id":"voxcpm2"'; then
+if case "$engines_json" in *'"id":"voxcpm2"'*) true ;; *) false ;; esac; then
   echo "voxcpm2"
   code=$(curl -s -o "$OUT/vox-zh.wav" -w '%{http_code}' -X POST \
     "$BASE/api/engines/voxcpm2/synthesize" \
@@ -90,7 +139,7 @@ else
   echo "  skip voxcpm2 (not installed)"
 fi
 
-if curl -sf "$BASE/api/engines" | grep -q '"id":"qwen3tts"'; then
+if case "$engines_json" in *'"id":"qwen3tts"'*) true ;; *) false ;; esac; then
   echo "qwen3tts"
   code=$(curl -s -o "$OUT/qwen.wav" -w '%{http_code}' -X POST \
     "$BASE/api/engines/qwen3tts/synthesize" \

@@ -182,6 +182,18 @@ fn spawn_server(app: &tauri::App) -> Result<Child, String> {
         });
         cmd.env("LAVEROCK_MODELS_DIR", models);
     }
+    if env::var_os("LAVEROCK_SCRIPTS_DIR").is_none() {
+        if let Some(scripts) = find_scripts_dir(&bin) {
+            cmd.env("LAVEROCK_SCRIPTS_DIR", scripts);
+        }
+    }
+    // Packaged builds keep the app bundle read-only-ish, so build tools
+    // and virtualenvs live in the user's data directory.
+    if env::var_os("LAVEROCK_TOOLS_DIR").is_none() && !cfg!(debug_assertions) {
+        let tools = data_dir.join("tools");
+        let _ = std::fs::create_dir_all(&tools);
+        cmd.env("LAVEROCK_TOOLS_DIR", tools);
+    }
     if let Some(parent) = bin.parent() {
         cmd.current_dir(parent);
     }
@@ -268,6 +280,23 @@ fn find_models_dir(bin: &Path) -> Option<PathBuf> {
     candidates.push(
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../../models")
+            .to_path_buf(),
+    );
+    candidates.into_iter().find(|p| p.is_dir())
+}
+
+/// Locate the repository's `scripts/` directory: bundled resources in a
+/// packaged app, the workspace in development.
+fn find_scripts_dir(bin: &Path) -> Option<PathBuf> {
+    let mut candidates: Vec<PathBuf> = Vec::new();
+    if let Some(dir) = bin.parent() {
+        candidates.push(dir.join("scripts"));
+        candidates.push(dir.join("../Resources/scripts"));
+        candidates.push(dir.join("../../scripts"));
+    }
+    candidates.push(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../scripts")
             .to_path_buf(),
     );
     candidates.into_iter().find(|p| p.is_dir())

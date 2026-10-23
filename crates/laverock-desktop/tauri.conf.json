@@ -17,6 +17,9 @@
     "active": true,
     "targets": "all",
     "externalBin": ["binaries/laverock"],
+    "resources": {
+      "../../scripts/": "scripts/"
+    },
     "macOS": {
       "signingIdentity": "-"
     },

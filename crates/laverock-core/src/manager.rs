@@ -10,10 +10,10 @@ use crate::{
 };
 use serde::Serialize;
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     fs,
     path::{Path, PathBuf},
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, RwLock},
 };
 
 /// A loaded, ready-to-run engine.
@@ -47,7 +47,7 @@ pub struct EngineInfo {
 
 pub struct EngineManager {
     root: PathBuf,
-    manifests: Vec<Manifest>,
+    manifests: RwLock<Vec<Manifest>>,
     loaded: Mutex<HashMap<String, Arc<dyn SpeechEngine>>>,
 }
 
@@ -56,56 +56,42 @@ impl EngineManager {
     /// `engine.json` is a registered engine.
     pub fn open(root: impl Into<PathBuf>) -> Result<Self> {
         let root = root.into();
-        let mut manifests = Vec::new();
-
-        if root.is_dir() {
-            for entry in fs::read_dir(&root)? {
-                let entry = entry?;
-                if !entry.file_type()?.is_dir() {
-                    continue;
-                }
-                let manifest_path = entry.path().join("engine.json");
-                if !manifest_path.is_file() {
-                    continue;
-                }
-                match fs::read_to_string(&manifest_path) {
-                    Ok(raw) => match serde_json::from_str::<Manifest>(&raw) {
-                        Ok(m) => {
-                            tracing::info!(engine = %m.id, kind = ?m.kind, "registered engine");
-                            manifests.push(m);
-                        }
-                        Err(e) => tracing::warn!(
-                            dir = %entry.path().display(),
-                            "skipping invalid engine.json: {e}"
-                        ),
-                    },
-                    Err(e) => tracing::warn!("cannot read {}: {e}", manifest_path.display()),
-                }
-            }
-        } else {
-            tracing::warn!(dir = %root.display(), "models directory does not exist yet");
-        }
-
-        manifests.sort_by(|a, b| a.id.cmp(&b.id));
-
+        let manifests = scan(&root)?;
         Ok(Self {
             root,
-            manifests,
+            manifests: RwLock::new(manifests),
             loaded: Mutex::new(HashMap::new()),
         })
     }
 
+    /// Re-scan the models directory, e.g. after a model was downloaded
+    /// from the UI. Already-loaded engines stay loaded as long as their
+    /// manifest still exists.
+    pub fn reload(&self) -> Result<usize> {
+        let manifests = scan(&self.root)?;
+        let count = manifests.len();
+        let ids: HashSet<String> = manifests.iter().map(|m| m.id.clone()).collect();
+
+        *self.manifests.write().expect("manifest lock poisoned") = manifests;
+        self.loaded
+            .lock()
+            .expect("engine lock poisoned")
+            .retain(|id, _| ids.contains(id));
+        Ok(count)
+    }
+
     pub fn len(&self) -> usize {
-        self.manifests.len()
+        self.manifests.read().expect("manifest lock poisoned").len()
     }
 
     pub fn is_empty(&self) -> bool {
-        self.manifests.is_empty()
+        self.len() == 0
     }
 
     pub fn list(&self) -> Vec<EngineInfo> {
+        let manifests = self.manifests.read().expect("manifest lock poisoned");
         let loaded = self.loaded.lock().expect("engine lock poisoned");
-        self.manifests
+        manifests
             .iter()
             .map(|m| EngineInfo {
                 id: m.id.clone(),
@@ -119,30 +105,37 @@ impl EngineManager {
             .collect()
     }
 
-    fn manifest(&self, id: &str) -> Result<&Manifest> {
+    /// Manifests are cloned out so no lock is held while an engine is
+    /// constructed (construction can take seconds).
+    fn manifest(&self, id: &str) -> Result<Manifest> {
         self.manifests
+            .read()
+            .expect("manifest lock poisoned")
             .iter()
             .find(|m| m.id == id)
+            .cloned()
             .ok_or_else(|| CoreError::NotFound(id.to_string()))
     }
 
     /// Return the engine as a shared handle, constructing it on first
     /// call. Construction is serialized; inference itself is not.
     pub fn engine(&self, id: &str) -> Result<Arc<dyn SpeechEngine>> {
-        let mut loaded = self.loaded.lock().expect("engine lock poisoned");
-        if let Some(engine) = loaded.get(id) {
+        if let Some(engine) = self.loaded.lock().expect("engine lock poisoned").get(id) {
             return Ok(engine.clone());
         }
 
-        let manifest = self.manifest(id)?.clone();
+        let manifest = self.manifest(id)?;
         let dir: PathBuf = self.root.join(&manifest.id);
         let engine: Arc<dyn SpeechEngine> = match manifest.kind {
             EngineKind::ZipVoice => Arc::new(ZipVoiceEngine::build(&dir, &manifest)?),
             EngineKind::VoxCpm2 => Arc::new(VoxCpm2Engine::build(&dir, &manifest)?),
             EngineKind::Qwen3Tts => Arc::new(Qwen3TtsEngine::build(&dir, &manifest)?),
         };
-        loaded.insert(id.to_string(), engine.clone());
-        Ok(engine)
+
+        let mut loaded = self.loaded.lock().expect("engine lock poisoned");
+        // A parallel first request may have built one meanwhile; keep
+        // the first handle so callers share a warmed engine.
+        Ok(loaded.entry(id.to_string()).or_insert(engine).clone())
     }
 
     /// Convenience: load if needed and run one synthesis request.
@@ -152,10 +145,46 @@ impl EngineManager {
     }
 
     pub fn manifest_defaults(&self, id: &str) -> Result<crate::manifest::SynthDefaults> {
-        Ok(self.manifest(id)?.defaults.clone())
+        Ok(self.manifest(id)?.defaults)
     }
 
     pub fn root(&self) -> &Path {
         &self.root
     }
+}
+
+/// Read every valid manifest under `root`, sorted by engine id.
+fn scan(root: &Path) -> Result<Vec<Manifest>> {
+    let mut manifests = Vec::new();
+
+    if root.is_dir() {
+        for entry in fs::read_dir(root)? {
+            let entry = entry?;
+            if !entry.file_type()?.is_dir() {
+                continue;
+            }
+            let manifest_path = entry.path().join("engine.json");
+            if !manifest_path.is_file() {
+                continue;
+            }
+            match fs::read_to_string(&manifest_path) {
+                Ok(raw) => match serde_json::from_str::<Manifest>(&raw) {
+                    Ok(m) => {
+                        tracing::info!(engine = %m.id, kind = ?m.kind, "registered engine");
+                        manifests.push(m);
+                    }
+                    Err(e) => tracing::warn!(
+                        dir = %entry.path().display(),
+                        "skipping invalid engine.json: {e}"
+                    ),
+                },
+                Err(e) => tracing::warn!("cannot read {}: {e}", manifest_path.display()),
+            }
+        }
+    } else {
+        tracing::warn!(dir = %root.display(), "models directory does not exist yet");
+    }
+
+    manifests.sort_by(|a, b| a.id.cmp(&b.id));
+    Ok(manifests)
 }
