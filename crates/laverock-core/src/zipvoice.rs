@@ -111,6 +111,11 @@ impl SpeechEngine for ZipVoiceEngine {
     }
 
     fn synthesize(&self, req: &SynthRequest) -> Result<Audio> {
+        if req.prompt_samples.is_empty() {
+            return Err(CoreError::BadRequest(
+                "ZipVoice 需要一段参考音频；请录音/上传，或选择声音库中的声音。".into(),
+            ));
+        }
         let reference_text = req
             .prompt_text
             .as_deref()

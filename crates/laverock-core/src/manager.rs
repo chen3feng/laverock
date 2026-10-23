@@ -5,8 +5,8 @@
 //! the embedding application should call it from a blocking thread.
 
 use crate::{
-    voxcpm2::VoxCpm2Engine, zipvoice::ZipVoiceEngine, Audio, CoreError, EngineKind, Manifest,
-    Result,
+    qwen3tts::Qwen3TtsEngine, voxcpm2::VoxCpm2Engine, zipvoice::ZipVoiceEngine, Audio, CoreError,
+    EngineKind, Manifest, Result,
 };
 use serde::Serialize;
 use std::{
@@ -139,6 +139,7 @@ impl EngineManager {
         let engine: Arc<dyn SpeechEngine> = match manifest.kind {
             EngineKind::ZipVoice => Arc::new(ZipVoiceEngine::build(&dir, &manifest)?),
             EngineKind::VoxCpm2 => Arc::new(VoxCpm2Engine::build(&dir, &manifest)?),
+            EngineKind::Qwen3Tts => Arc::new(Qwen3TtsEngine::build(&dir, &manifest)?),
         };
         loaded.insert(id.to_string(), engine.clone());
         Ok(engine)

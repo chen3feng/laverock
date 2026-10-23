@@ -525,28 +525,31 @@ async fn synthesize(
         .map(|t| t.trim().to_string())
         .filter(|t| !t.is_empty())
         .ok_or_else(|| ApiError::bad_request("missing required field: text"))?;
-    // A saved voice takes precedence over an ad-hoc upload.
+    // A saved voice takes precedence over an ad-hoc upload. Reference audio
+    // is optional at the API level: preset/voice-design engines do not need
+    // one, and each engine reports what it requires.
     let (prompt_bytes, prompt_text) = if let Some(id) = profile_id {
         let (meta, wav) = state.profiles.get(&id)?;
-        (wav, Some(meta.prompt_text))
+        (Some(wav), Some(meta.prompt_text))
     } else {
-        let wav = prompt_bytes.filter(|b| !b.is_empty()).ok_or_else(|| {
-            ApiError::bad_request("missing required field: prompt (WAV reference) or profile_id")
-        })?;
-        // The transcript is optional at the API level: VoxCPM2 clones from
-        // audio alone. ZipVoice enforces it itself with a clear message.
         let text = prompt_text
             .map(|t| t.trim().to_string())
             .filter(|t| !t.is_empty());
-        (wav, text)
+        (prompt_bytes.filter(|b| !b.is_empty()), text)
     };
 
     // Defaults come from the engine manifest.
     let defaults = state.manager.manifest_defaults(&engine_id)?;
-    let (prompt_samples, prompt_sr) = decode_wav(&prompt_bytes)?;
-    if prompt_samples.is_empty() {
-        return Err(ApiError::bad_request("reference audio is empty"));
-    }
+    let (prompt_samples, prompt_sr) = match prompt_bytes {
+        Some(bytes) => {
+            let (samples, rate) = decode_wav(&bytes)?;
+            if samples.is_empty() {
+                return Err(ApiError::bad_request("reference audio is empty"));
+            }
+            (samples, rate)
+        }
+        None => (Vec::new(), 0),
+    };
 
     let request = SynthRequest {
         text,

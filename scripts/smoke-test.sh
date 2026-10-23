@@ -90,6 +90,18 @@ else
   echo "  skip voxcpm2 (not installed)"
 fi
 
+if curl -sf "$BASE/api/engines" | grep -q '"id":"qwen3tts"'; then
+  echo "qwen3tts"
+  code=$(curl -s -o "$OUT/qwen.wav" -w '%{http_code}' -X POST \
+    "$BASE/api/engines/qwen3tts/synthesize" \
+    -F 'text=你好，我是 Qwen3-TTS，通过 laverock 调用。' \
+    -F "prompt=@$DIR/test_wavs/leijun-1.wav")
+  [ "$code" = "200" ] && head -c 4 "$OUT/qwen.wav" | grep -q RIFF \
+    && ok "qwen3tts clone" || bad "qwen3tts (HTTP $code)"
+else
+  echo "  skip qwen3tts (not installed)"
+fi
+
 echo "remote access"
 PORT=$(echo "$BASE" | sed -n 's|.*:\([0-9][0-9]*\).*|\1|p')
 PORT=${PORT:-8787}

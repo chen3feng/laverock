@@ -14,6 +14,8 @@ pub enum EngineKind {
     ZipVoice,
     #[serde(rename = "voxcpm2")]
     VoxCpm2,
+    #[serde(rename = "qwen3tts")]
+    Qwen3Tts,
 }
 
 impl EngineKind {
@@ -21,6 +23,7 @@ impl EngineKind {
         match self {
             EngineKind::ZipVoice => "zipvoice",
             EngineKind::VoxCpm2 => "voxcpm2",
+            EngineKind::Qwen3Tts => "qwen3tts",
         }
     }
 }
@@ -39,6 +42,8 @@ pub struct Manifest {
     pub zipvoice: Option<ZipVoiceManifest>,
     #[serde(default)]
     pub voxcpm2: Option<VoxCpm2Manifest>,
+    #[serde(default)]
+    pub qwen3tts: Option<Qwen3TtsManifest>,
     #[serde(default)]
     pub defaults: SynthDefaults,
 }
@@ -140,4 +145,52 @@ fn default_voxcpm2_temperature() -> f32 {
 }
 fn default_voxcpm2_seed() -> i32 {
     42
+}
+
+/// Qwen3-TTS runs through the official `qwen-tts` Python package in its
+/// own isolated environment; the core only invokes a small runner script.
+///
+/// `model` may be a Hugging Face repo id or a path relative to the model
+/// directory. `mode` selects the model family:
+///   - `clone`          Base model, needs a reference clip (transcript optional)
+///   - `custom_voice`   preset speakers + optional instruction
+///   - `voice_design`   a voice described in natural language
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Qwen3TtsManifest {
+    #[serde(default = "default_python")]
+    pub python: String,
+    pub script: String,
+    pub model: String,
+    #[serde(default = "default_qwen_mode")]
+    pub mode: String,
+    #[serde(default)]
+    pub speaker: Option<String>,
+    #[serde(default)]
+    pub language: Option<String>,
+    #[serde(default)]
+    pub instruct: Option<String>,
+    #[serde(default = "default_device")]
+    pub device: String,
+    #[serde(default = "default_dtype")]
+    pub dtype: String,
+    #[serde(default = "default_attn")]
+    pub attn: String,
+    #[serde(default)]
+    pub env: std::collections::BTreeMap<String, String>,
+}
+
+fn default_python() -> String {
+    "python3".to_string()
+}
+fn default_qwen_mode() -> String {
+    "clone".to_string()
+}
+fn default_device() -> String {
+    "auto".to_string()
+}
+fn default_dtype() -> String {
+    "auto".to_string()
+}
+fn default_attn() -> String {
+    "sdpa".to_string()
 }
