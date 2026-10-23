@@ -31,6 +31,19 @@ jobs:
 
       - uses: Swatinem/rust-cache@e9d7b9f1e587218970671bac74e5511ed9506e6a # v2
 
+      # tauri-build validates externalBin at compile time, so the sidecar
+      # must exist for the host target before clippy/build run.
+      - name: Stage sidecar
+        shell: bash
+        run: |
+          triple=$(rustc -vV | sed -n 's/^host: //p')
+          ext=""
+          [ "$RUNNER_OS" = "Windows" ] && ext=".exe"
+          mkdir -p crates/laverock-desktop/binaries
+          cargo build -p laverock-server
+          cp "target/debug/laverock${ext}" \
+             "crates/laverock-desktop/binaries/laverock-${triple}${ext}"
+
       # Tauri prerequisites on Linux runners.
       - name: Linux webview deps
         if: matrix.os == 'ubuntu-latest'
@@ -44,6 +57,9 @@ jobs:
 
       - name: Clippy
         run: cargo clippy --all-targets --all-features -- -D warnings
+
+      - name: Test
+        run: cargo test --workspace
 
       - name: Build
         run: cargo build --all-targets
