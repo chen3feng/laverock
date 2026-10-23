@@ -4,9 +4,19 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
 
 jobs:
+  # Format, lint and build every crate on all three desktop platforms.
   check:
+    name: check (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -33,7 +43,55 @@ jobs:
         run: cargo fmt --all -- --check
 
       - name: Clippy
-        run: cargo clippy --all-targets -- -D warnings
+        run: cargo clippy --all-targets --all-features -- -D warnings
 
       - name: Build
-        run: cargo build
+        run: cargo build --all-targets
+
+  # Actually run the server and exercise it end to end with the small
+  # ZipVoice model (~160 MB, cached).
+  smoke:
+    name: smoke (ubuntu)
+    runs-on: ubuntu-latest
+    needs: check
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Cache ZipVoice model
+        uses: actions/cache@v4
+        with:
+          path: models/sherpa-onnx-zipvoice-distill-int8-zh-en-emilia
+          key: zipvoice-int8-${{ hashFiles('scripts/download-model.sh') }}
+
+      - name: Download model
+        run: ./scripts/download-model.sh
+
+      - name: Build server
+        run: cargo build -p laverock-server
+
+      - name: Start server
+        run: |
+          ./target/debug/laverock > server.log 2>&1 &
+          echo $! > server.pid
+          for i in $(seq 1 60); do
+            if curl -sf http://127.0.0.1:8787/api/health >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          cat server.log
+          exit 1
+
+      - name: Smoke test
+        run: ./scripts/smoke-test.sh
+
+      - name: Server log
+        if: always()
+        run: cat server.log
+
+      - name: Stop server
+        if: always()
+        run: kill "$(cat server.pid)" 2>/dev/null || true
