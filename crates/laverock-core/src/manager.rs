@@ -4,7 +4,10 @@
 //! The manager is executor-agnostic. Inference is blocking ONNX work;
 //! the embedding application should call it from a blocking thread.
 
-use crate::{zipvoice::ZipVoiceEngine, Audio, CoreError, EngineKind, Manifest, Result};
+use crate::{
+    voxcpm2::VoxCpm2Engine, zipvoice::ZipVoiceEngine, Audio, CoreError, EngineKind, Manifest,
+    Result,
+};
 use serde::Serialize;
 use std::{
     collections::HashMap,
@@ -135,6 +138,7 @@ impl EngineManager {
         let dir: PathBuf = self.root.join(&manifest.id);
         let engine: Arc<dyn SpeechEngine> = match manifest.kind {
             EngineKind::ZipVoice => Arc::new(ZipVoiceEngine::build(&dir, &manifest)?),
+            EngineKind::VoxCpm2 => Arc::new(VoxCpm2Engine::build(&dir, &manifest)?),
         };
         loaded.insert(id.to_string(), engine.clone());
         Ok(engine)

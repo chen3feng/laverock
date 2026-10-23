@@ -122,9 +122,9 @@
     </div>
     <div class="hint">录音会在浏览器内重采样为 24kHz 单声道 WAV；也可以上传 wav/mp3 转码后的 wav。</div>
     <div style="margin-top:14px">
-      <label for="prompt_text">参考音频对应文字（必填 — 需与录音内容一致）</label>
+      <label for="prompt_text">参考音频对应文字（ZipVoice 必填；VoxCPM2 可留空）</label>
       <input type="text" id="prompt_text" placeholder="例如：那还是三十六年前，一九八七年。" />
-      <div class="hint">ZipVoice 需要参考文本才能对齐音色与韵律。录音说了什么就填什么，中英文均可。</div>
+      <div class="hint">录音说了什么就填什么，中英文均可。ZipVoice 用它对齐音色与韵律；VoxCPM2 仅凭声音即可克隆。</div>
     </div>
     <div style="margin-top:14px">
       <label for="profilename">保存到声音库（可选，便于下次直接复用）</label>
@@ -396,10 +396,9 @@ $('go').onclick = async () => {
   if (saved) {
     fd.append('profile_id', saved.id);
   } else {
-    const pt = $('prompt_text').value.trim();
-    if (!pt) { status.className = 'err'; status.textContent = '请填写参考音频对应的文字'; return; }
     fd.append('prompt', promptBlob, promptName);
-    fd.append('prompt_text', pt);
+    const pt = $('prompt_text').value.trim();
+    if (pt) fd.append('prompt_text', pt);
   }
   fd.append('speed', $('speed').value);
   fd.append('num_steps', $('steps').value);

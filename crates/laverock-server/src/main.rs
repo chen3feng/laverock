@@ -88,6 +88,10 @@ impl From<CoreError> for ApiError {
                 status: StatusCode::BAD_REQUEST,
                 message: msg,
             },
+            CoreError::BadRequest(msg) => Self {
+                status: StatusCode::BAD_REQUEST,
+                message: msg,
+            },
             other => {
                 error!(error = %other, "request failed");
                 Self {
@@ -529,17 +533,12 @@ async fn synthesize(
         let wav = prompt_bytes.filter(|b| !b.is_empty()).ok_or_else(|| {
             ApiError::bad_request("missing required field: prompt (WAV reference) or profile_id")
         })?;
-        // ZipVoice requires the transcript of the reference clip; without it
-        // sherpa-onnx logs "reference_text is empty" and returns no audio.
+        // The transcript is optional at the API level: VoxCPM2 clones from
+        // audio alone. ZipVoice enforces it itself with a clear message.
         let text = prompt_text
             .map(|t| t.trim().to_string())
-            .filter(|t| !t.is_empty())
-            .ok_or_else(|| {
-                ApiError::bad_request(
-                    "missing required field: prompt_text (transcript of the reference audio)",
-                )
-            })?;
-        (wav, Some(text))
+            .filter(|t| !t.is_empty());
+        (wav, text)
     };
 
     // Defaults come from the engine manifest.

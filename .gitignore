@@ -10,6 +10,9 @@
 /.env
 *.tar.bz2
 
+# Build tooling (llama.cpp-omni checkout used by download-voxcpm2.sh)
+/.tools
+
 # Tauri generated ACL schemas
 **/gen/schemas/
 

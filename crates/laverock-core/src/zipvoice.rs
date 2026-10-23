@@ -117,9 +117,8 @@ impl SpeechEngine for ZipVoiceEngine {
             .map(str::trim)
             .filter(|t| !t.is_empty())
             .ok_or_else(|| {
-                CoreError::Synth(
-                    "reference transcript is required: ZipVoice cannot align the voice without it"
-                        .into(),
+                CoreError::BadRequest(
+                    "ZipVoice 需要参考音频对应的文字；如果用 VoxCPM2 则可留空。".into(),
                 )
             })?;
 

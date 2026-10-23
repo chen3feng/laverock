@@ -7,11 +7,12 @@
 mod audio;
 mod manager;
 mod manifest;
+mod voxcpm2;
 mod zipvoice;
 
 pub use audio::{decode_wav, encode_wav};
 pub use manager::{EngineInfo, EngineManager, SpeechEngine, SynthRequest};
-pub use manifest::{EngineKind, Manifest, SynthDefaults, ZipVoiceManifest};
+pub use manifest::{EngineKind, Manifest, SynthDefaults, VoxCpm2Manifest, ZipVoiceManifest};
 
 /// Re-exported for engines that need the underlying runtime.
 pub use sherpa_onnx;
@@ -35,6 +36,9 @@ pub enum CoreError {
 
     #[error("audio decode failed: {0}")]
     Wav(String),
+
+    #[error("{0}")]
+    BadRequest(String),
 
     #[error(transparent)]
     Io(#[from] std::io::Error),
