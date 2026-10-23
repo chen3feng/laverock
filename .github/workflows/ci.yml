@@ -40,6 +40,10 @@ jobs:
           ext=""
           [ "$RUNNER_OS" = "Windows" ] && ext=".exe"
           mkdir -p crates/laverock-desktop/binaries
+          # A restored rust-cache can contain a partially extracted
+          # sherpa-onnx lib dir; drop it so the build script re-extracts
+          # from the cached archive (no re-download).
+          rm -rf target/sherpa-onnx-prebuilt/*/lib target/sherpa-onnx-prebuilt/*/jniLibs || true
           cargo build -p laverock-server
           cp "target/debug/laverock${ext}" \
              "crates/laverock-desktop/binaries/laverock-${triple}${ext}"

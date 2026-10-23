@@ -49,7 +49,12 @@ jobs:
       # The server is shipped as a Tauri sidecar, so it must be built for the
       # same target and placed where the bundler expects it.
       - name: Build server
-        run: cargo build --release -p laverock-server --target ${{ matrix.triple }}
+        shell: bash
+        run: |
+          # A restored cache can hold a partially extracted sherpa-onnx lib
+          # dir; force a re-extract from the cached archive.
+          rm -rf target/sherpa-onnx-prebuilt/*/lib target/sherpa-onnx-prebuilt/*/jniLibs || true
+          cargo build --release -p laverock-server --target ${{ matrix.triple }}
 
       - name: Stage sidecar
         shell: bash
