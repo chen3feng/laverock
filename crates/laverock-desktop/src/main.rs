@@ -175,11 +175,14 @@ fn spawn_server(app: &tauri::App) -> Result<Child, String> {
         .stderr(Stdio::inherit());
 
     if env::var_os("LAVEROCK_MODELS_DIR").is_none() {
-        let models = find_models_dir(&bin).unwrap_or_else(|| {
-            let dir = data_dir.join("models");
-            let _ = std::fs::create_dir_all(&dir);
-            dir
-        });
+        // Packaged builds keep models in the user's data directory, never
+        // in the (read-only) app bundle or next to a development checkout.
+        let models = if cfg!(debug_assertions) {
+            find_models_dir(&bin).unwrap_or_else(|| data_dir.join("models"))
+        } else {
+            data_dir.join("models")
+        };
+        let _ = std::fs::create_dir_all(&models);
         cmd.env("LAVEROCK_MODELS_DIR", models);
     }
     if env::var_os("LAVEROCK_SCRIPTS_DIR").is_none() {
@@ -255,21 +258,24 @@ fn server_binary() -> Option<PathBuf> {
         }
     }
 
-    // Development: <workspace>/target/{debug,release}/laverock
-    for profile in ["debug", "release"] {
-        candidates.push(
-            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                .join("../../target")
-                .join(profile)
-                .join(format!("laverock{ext}")),
-        );
+    // Development: <workspace>/target/{debug,release}/laverock. A packaged
+    // app must never reach back into a checkout that happened to build it.
+    if cfg!(debug_assertions) {
+        for profile in ["debug", "release"] {
+            candidates.push(
+                PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                    .join("../../target")
+                    .join(profile)
+                    .join(format!("laverock{ext}")),
+            );
+        }
     }
 
     candidates.into_iter().find(|p| p.is_file())
 }
 
-/// Locate the `models` directory relative to the server binary, falling
-/// back to the workspace layout used in development.
+/// Locate the workspace `models` directory for development runs. Release
+/// builds ignore it and use the app-data directory instead.
 fn find_models_dir(bin: &Path) -> Option<PathBuf> {
     let mut candidates: Vec<PathBuf> = Vec::new();
     if let Some(dir) = bin.parent() {
@@ -277,28 +283,34 @@ fn find_models_dir(bin: &Path) -> Option<PathBuf> {
         candidates.push(dir.join("../../models"));
         candidates.push(dir.join("../Resources/models"));
     }
-    candidates.push(
-        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../../models")
-            .to_path_buf(),
-    );
+    if cfg!(debug_assertions) {
+        candidates.push(
+            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("../../models")
+                .to_path_buf(),
+        );
+    }
     candidates.into_iter().find(|p| p.is_dir())
 }
 
-/// Locate the repository's `scripts/` directory: bundled resources in a
-/// packaged app, the workspace in development.
+/// Locate `scripts/`: bundled app resources when packaged, the checkout
+/// when running from `target/`.
 fn find_scripts_dir(bin: &Path) -> Option<PathBuf> {
     let mut candidates: Vec<PathBuf> = Vec::new();
     if let Some(dir) = bin.parent() {
+        // macOS app bundle: Contents/MacOS -> Contents/Resources/scripts;
+        // Windows/Linux installs put resources next to the executable.
         candidates.push(dir.join("scripts"));
         candidates.push(dir.join("../Resources/scripts"));
         candidates.push(dir.join("../../scripts"));
     }
-    candidates.push(
-        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../../scripts")
-            .to_path_buf(),
-    );
+    if cfg!(debug_assertions) {
+        candidates.push(
+            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("../../scripts")
+                .to_path_buf(),
+        );
+    }
     candidates.into_iter().find(|p| p.is_dir())
 }
 

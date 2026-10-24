@@ -18,7 +18,10 @@
     "targets": "all",
     "externalBin": ["binaries/laverock"],
     "resources": {
-      "../../scripts/": "scripts/"
+      "../../scripts/download-model.sh": "scripts/download-model.sh",
+      "../../scripts/download-voxcpm2.sh": "scripts/download-voxcpm2.sh",
+      "../../scripts/download-qwen3tts.sh": "scripts/download-qwen3tts.sh",
+      "../../scripts/qwen3tts_runner.py": "scripts/qwen3tts_runner.py"
     },
     "macOS": {
       "signingIdentity": "-"

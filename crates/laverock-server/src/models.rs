@@ -119,6 +119,9 @@ impl ModelService {
         // relative "models"; the directory may not exist yet.
         let models_root = models_root.into();
         let models_root = std::fs::canonicalize(&models_root).unwrap_or(models_root);
+        // Paths handed in by the desktop shell can contain `..`; show
+        // clean paths in the UI and hand scripts a stable one.
+        let scripts_dir = scripts_dir.map(|p| std::fs::canonicalize(&p).unwrap_or(p));
         Self {
             models_root,
             scripts_dir,

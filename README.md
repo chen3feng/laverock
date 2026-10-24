@@ -200,10 +200,13 @@ curl -X POST http://127.0.0.1:8787/api/engines/sherpa-onnx-zipvoice-distill-int8
 | `LAVEROCK_SCRIPTS_DIR` | auto-detected | `scripts/` used by the model installer |
 | `LAVEROCK_TOOLS_DIR` | `<repo>/.tools` | build tools and Python venvs for engines |
 
-Packaged desktop builds ship `scripts/` as app resources and put
-`LAVEROCK_TOOLS_DIR` under the user data directory. On Windows, in-app
-model installs need `bash` from Git for Windows; the download scripts are
-otherwise the same on every platform.
+Packaged desktop builds ship `scripts/` inside the app bundle (macOS
+`Contents/Resources/scripts`, Windows/Linux beside the executable) and
+keep downloads, build tools and venvs in the user data directory
+(`~/Library/Application Support/sh.laverock.desktop/models` and
+`…/tools` on macOS), so an installed app never reads from a source
+checkout. On Windows, in-app model installs need `bash` from Git for
+Windows; the download scripts are otherwise the same on every platform.
 
 ## Model credits
 
