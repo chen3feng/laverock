@@ -153,6 +153,29 @@
   }
   .pathline code { color: var(--text); background: var(--panel2); padding: 3px 7px; border-radius: 6px; }
 
+  /* ---------- progress ---------- */
+  .pbar {
+    height: 8px; border-radius: 99px; background: var(--panel2);
+    overflow: hidden; margin-top: 10px;
+  }
+  .pbar-fill {
+    height: 100%; width: 0; border-radius: 99px;
+    background: linear-gradient(90deg, var(--accent2), var(--accent));
+    transition: width .5s ease;
+  }
+  .pbar-fill.indeterminate {
+    width: 38%; animation: pbar-slide 1.1s ease-in-out infinite alternate;
+  }
+  @keyframes pbar-slide {
+    from { margin-left: -40%; }
+    to   { margin-left: 102%; }
+  }
+  .pbar-label {
+    display: flex; justify-content: space-between; gap: 10px;
+    font-size: 12px; color: var(--muted); margin-top: 6px;
+  }
+  .pbar-label b { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
+
   /* ---------- overlay / toast ---------- */
   .overlay { position: fixed; inset: 0; background: rgba(8, 9, 12, .94);
     display: none; place-items: center; z-index: 50; padding: 20px; }
@@ -281,6 +304,8 @@
         <span id="status"></span>
         <a id="download" class="hint" download="laverock.wav" hidden>下载 WAV</a>
       </div>
+      <div id="synthProgress" class="pbar" hidden><div class="pbar-fill indeterminate"></div></div>
+      <div id="synthProgressLabel" class="pbar-label" hidden><span></span><b></b></div>
       <audio id="player" controls hidden></audio>
       <audio id="previewer" hidden></audio>
     </section>
@@ -894,7 +919,31 @@ $('go').onclick = async () => {
   const url = `/api/engines/${encodeURIComponent($('engine').value)}/synthesize`;
   $('go').disabled = true;
   status.className = '';
-  status.textContent = '合成中（首次加载模型需要几秒）……';
+
+  // Progress: the request is one blocking WAV response, so show stages
+  // (model load vs. synthesis) with an elapsed timer rather than a fake
+  // percentage. Engine load dominates the first request for each engine.
+  const engine = engines.find((x) => x.id === $('engine').value);
+  const kind = engine ? engine.kind : '';
+  const loadNote = kind === 'qwen3tts'
+    ? 'Qwen3-TTS 首次加载约 20–90 秒'
+    : kind === 'voxcpm2' ? 'VoxCPM2 首次加载需数秒' : '首次加载模型需几秒';
+  const labelEl = $('synthProgressLabel');
+  const pbar = $('synthProgress');
+  pbar.hidden = false;
+  labelEl.hidden = false;
+  const startedAt = Date.now();
+  const fmtElapsed = () => {
+    const s = (Date.now() - startedAt) / 1000;
+    return `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
+  };
+  const setStage = (text) => {
+    labelEl.querySelector('span').textContent = text;
+    labelEl.querySelector('b').textContent = fmtElapsed();
+    status.textContent = text;
+  };
+  setStage(engine && engine.loaded ? '正在合成语音…' : `正在加载模型到内存（${loadNote}）`);
+  const timer = setInterval(() => { labelEl.querySelector('b').textContent = fmtElapsed(); }, 250);
   const t0 = performance.now();
   try {
     const res = await fetch(url, { method: 'POST', body: fd });
@@ -913,12 +962,16 @@ $('go').onclick = async () => {
     const dl = $('download');
     dl.href = audioUrl;
     dl.hidden = false;
+    if (engine) engine.loaded = true;
     status.className = 'ok';
     status.textContent = `完成 · ${(blob.size / 1024).toFixed(0)} KB · ${((performance.now() - t0) / 1000).toFixed(1)}s`;
   } catch (e) {
     status.className = 'err';
     status.textContent = '失败：' + e.message;
   } finally {
+    clearInterval(timer);
+    pbar.hidden = true;
+    labelEl.hidden = true;
     $('go').disabled = false;
   }
 };
@@ -999,6 +1052,16 @@ function renderModels() {
   $('catalogSection').hidden = catalogBox.children.length === 0;
 }
 
+function progressBarHtml(job) {
+  const pct = typeof job.progress === 'number' ? Math.max(0, Math.min(100, job.progress)) : null;
+  const label = esc(job.stage || (pct === null ? '准备中…' : '下载中'));
+  const right = pct === null ? '' : `<b>${pct.toFixed(1)}%</b>`;
+  const fill = pct === null
+    ? '<div class="pbar-fill indeterminate"></div>'
+    : `<div class="pbar-fill" style="width:${pct.toFixed(1)}%"></div>`;
+  return `<div class="pbar">${fill}</div><div class="pbar-label"><span>${label}</span>${right}</div>`;
+}
+
 function modelCard(model, installed) {
   const job = model.job;
   const running = !!job && job.status === 'running';
@@ -1015,6 +1078,7 @@ function modelCard(model, installed) {
     <div class="chips">${(model.languages || []).map((l) => `<span class="chip">${esc(l)}</span>`).join('')}</div>
     ${model.note ? `<div class="hint">${esc(model.note)}</div>` : ''}
     ${installed && engine ? `<div class="hint">${esc(engine.kind)} · ${engine.loaded ? '已加载到内存' : '首次使用时加载'}</div>` : ''}
+    ${running ? progressBarHtml(job) : ''}
     ${job && (running || failed) ? `<pre class="log">${esc(job.log || '')}</pre>` : ''}
     <div class="model-actions"></div>`;
 

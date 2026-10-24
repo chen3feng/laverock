@@ -4,6 +4,10 @@
 # clips. We additionally write engine.json — the manifest the server scans.
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# shellcheck source=laverock-lib.sh
+. "$SCRIPT_DIR/laverock-lib.sh"
+
 MODEL="sherpa-onnx-zipvoice-distill-int8-zh-en-emilia"
 URL="https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/${MODEL}.tar.bz2"
 
@@ -17,19 +21,27 @@ trap 'rm -rf "$TMP"' EXIT
 if [ -f "$MODELS_DIR/$MODEL/encoder.int8.onnx" ]; then
   echo "Model archive already extracted"
 else
-  echo "Downloading $MODEL (~104 MB) ..."
-  curl -L --fail --retry 3 -o "$TMP/model.tar.bz2" "$URL"
-  echo "Extracting ..."
+  lv_stage "下载主模型（1/3）· 约 104 MB"
+  lv_download "$URL" "$TMP/model.tar.bz2" 0
+  lv_stage "解压模型文件"
   tar -xjf "$TMP/model.tar.bz2" -C "$MODELS_DIR"
 fi
 
 # The int8 archive omits the shared vocoder and the English lexicon;
 # both are separate upstream artifacts.
 cd "$MODELS_DIR/$MODEL"
-[ -f vocos_24khz.onnx ] || curl -SL --fail --retry 3 -O \
-  https://github.com/k2-fsa/sherpa-onnx/releases/download/vocoder-models/vocos_24khz.onnx
-[ -f lexicon-en-us.txt ] || curl -SL --fail --retry 3 -O \
-  https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/lexicon-en-us.txt
+if [ ! -f vocos_24khz.onnx ]; then
+  lv_stage "下载声码器（2/3）"
+  lv_download \
+    https://github.com/k2-fsa/sherpa-onnx/releases/download/vocoder-models/vocos_24khz.onnx \
+    vocos_24khz.onnx
+fi
+if [ ! -f lexicon-en-us.txt ]; then
+  lv_stage "下载英文词典（3/3）"
+  lv_download \
+    https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/lexicon-en-us.txt \
+    lexicon-en-us.txt
+fi
 
 # sherpa-onnx's lexicon parser understands neither `#` comments nor the
 # `word || phones` separator in the upstream file, and the file's IPA
@@ -47,6 +59,7 @@ if [ ! -f lexicon-en-us.clean.txt ]; then
 fi
 cd - >/dev/null
 
+lv_stage "写入引擎清单"
 cat > "$MODELS_DIR/$MODEL/engine.json" <<EOF
 {
   "id": "$MODEL",

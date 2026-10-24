@@ -23,8 +23,9 @@ The UI has a sidebar with four sections:
   the text, generate and play or download the WAV.
 - **语音素材** — the saved reference voices: play, create, delete.
 - **模型** — installed engines and a catalog of installable models. A
-  download streams its log into the card and the engine registry reloads
-  when it finishes.
+  download streams its log into the card with a progress bar (percentage
+  and current step; subprocess meters like git/pip/tqdm are parsed too),
+  and the engine registry reloads when it finishes.
 - **设置** — download proxy and mirrors, phone remote control, version.
 
 Installable models are listed in

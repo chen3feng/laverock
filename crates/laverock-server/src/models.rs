@@ -56,6 +56,10 @@ struct Job {
     started_at: u64,
     finished_at: Option<u64>,
     log: String,
+    /// Human-readable current step from the script (`@@LV stage`).
+    stage: Option<String>,
+    /// 0-100 from the script or a progress meter; `None` = indeterminate.
+    progress: Option<f32>,
 }
 
 impl Job {
@@ -65,6 +69,8 @@ impl Job {
             started_at: now_secs(),
             finished_at: None,
             log: String::new(),
+            stage: Some("等待开始".to_string()),
+            progress: None,
         }
     }
 }
@@ -76,6 +82,8 @@ pub struct JobView {
     finished_at: Option<u64>,
     /// Last few KB of script output; the full log stays in memory.
     log: String,
+    stage: Option<String>,
+    progress: Option<f32>,
 }
 
 #[derive(Debug, Serialize)]
@@ -280,6 +288,8 @@ impl From<&Job> for JobView {
             started_at: job.started_at,
             finished_at: job.finished_at,
             log: tail(&job.log, LOG_TAIL),
+            stage: job.stage.clone(),
+            progress: job.progress,
         }
     }
 }
@@ -358,16 +368,7 @@ fn run_install(
     for pipe in pipes {
         let jobs = jobs.clone();
         let id = entry.id.clone();
-        readers.push(std::thread::spawn(move || {
-            let mut pipe = pipe;
-            let mut buf = [0u8; 4096];
-            loop {
-                match pipe.read(&mut buf) {
-                    Ok(0) | Err(_) => break,
-                    Ok(n) => append_log(&jobs, &id, &String::from_utf8_lossy(&buf[..n])),
-                }
-            }
-        }));
+        readers.push(std::thread::spawn(move || pump_pipe(pipe, &jobs, &id)));
     }
 
     let status = child.wait();
@@ -377,6 +378,7 @@ fn run_install(
 
     match status {
         Ok(status) if status.success() => {
+            set_progress(&jobs, &entry.id, Some("安装完成".to_string()), Some(100.0));
             append_log(&jobs, &entry.id, "\n安装完成。\n");
             match manager.reload() {
                 Ok(count) => append_log(
@@ -423,6 +425,122 @@ fn append_log(jobs: &Arc<Mutex<HashMap<String, Job>>>, id: &str, chunk: &str) {
     if let Some(job) = jobs.get_mut(id) {
         push_bounded(&mut job.log, chunk);
     }
+}
+
+fn set_progress(
+    jobs: &Arc<Mutex<HashMap<String, Job>>>,
+    id: &str,
+    stage: Option<String>,
+    progress: Option<f32>,
+) {
+    let mut jobs = jobs.lock().expect("jobs lock poisoned");
+    if let Some(job) = jobs.get_mut(id) {
+        if stage.is_some() {
+            job.stage = stage;
+        }
+        if progress.is_some() {
+            job.progress = progress.map(|p| p.clamp(0.0, 100.0));
+        }
+    }
+}
+
+/// Read one piped script output stream, splitting on both `\n` and `\r`
+/// so both normal log lines and progress-meter redraws are handled.
+fn pump_pipe(mut pipe: Box<dyn Read + Send>, jobs: &Arc<Mutex<HashMap<String, Job>>>, id: &str) {
+    let mut pending = String::new();
+    let mut buf = [0u8; 4096];
+    loop {
+        match pipe.read(&mut buf) {
+            Ok(0) | Err(_) => break,
+            Ok(n) => {
+                pending.push_str(&String::from_utf8_lossy(&buf[..n]));
+                while let Some(pos) = pending.find(['\n', '\r']) {
+                    let cr = pending.as_bytes()[pos] == b'\r';
+                    let line: String = pending.drain(..=pos).collect();
+                    handle_output_line(jobs, id, &line, cr);
+                }
+                // Meters can emit many redraws; keep the buffer bounded if
+                // a script never terminates a line.
+                if pending.len() > 8192 {
+                    handle_output_line(jobs, id, &std::mem::take(&mut pending), true);
+                }
+            }
+        }
+    }
+    if !pending.trim().is_empty() {
+        handle_output_line(jobs, id, &pending, false);
+    }
+}
+
+fn handle_output_line(jobs: &Arc<Mutex<HashMap<String, Job>>>, id: &str, raw: &str, cr: bool) {
+    let line = raw.trim_matches(['\n', '\r']);
+    if let Some(rest) = line.strip_prefix("@@LV ") {
+        let mut parts = rest.splitn(2, ' ');
+        match (parts.next(), parts.next()) {
+            (Some("stage"), Some(label)) if !label.trim().is_empty() => {
+                set_progress(jobs, id, Some(label.trim().to_string()), None);
+            }
+            (Some("progress"), Some(value)) => {
+                if let Ok(pct) = value.trim().parse::<f32>() {
+                    set_progress(jobs, id, None, Some(pct));
+                }
+            }
+            _ => {}
+        }
+        return;
+    }
+
+    if cr {
+        // Progress meters (git/tqdm/pip) redraw with \r. Extract a
+        // percentage when possible; drop meter-only redraws otherwise so
+        // the visible log is not flooded with control garbage.
+        if let Some(pct) = parse_meter(line) {
+            set_progress(jobs, id, None, Some(pct));
+        } else if looks_like_meter(line) {
+            // Not worth logging.
+        } else if !line.trim().is_empty() {
+            append_log(jobs, id, line);
+            append_log(jobs, id, "\n");
+        }
+    } else if !line.is_empty() {
+        append_log(jobs, id, line);
+        append_log(jobs, id, "\n");
+    }
+}
+
+/// Find the first `NN%` / `NN.N%` token in a progress-meter redraw.
+fn parse_meter(line: &str) -> Option<f32> {
+    let bytes = line.as_bytes();
+    for (i, &b) in bytes.iter().enumerate() {
+        if b != b'%' {
+            continue;
+        }
+        let mut j = i;
+        while j > 0 && (bytes[j - 1].is_ascii_digit() || bytes[j - 1] == b'.') {
+            j -= 1;
+        }
+        if j < i {
+            if let Ok(value) = line[j..i].parse::<f32>() {
+                if (0.0..=100.0).contains(&value) {
+                    return Some(value);
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Whether a CR-terminated line is meter-only noise (bar redraws without
+/// a percentage token). Percent-bearing redraws are caught by
+/// [`parse_meter`] before this runs.
+fn looks_like_meter(line: &str) -> bool {
+    let t = line.trim();
+    if t.is_empty() {
+        return true;
+    }
+    const BARS: [char; 11] = ['█', '▏', '▎', '▍', '▌', '▋', '▊', '▉', '▇', '#', '='];
+    let bar_count = t.chars().filter(|c| BARS.contains(c)).count();
+    bar_count > 0 && bar_count * 2 >= t.chars().count()
 }
 
 fn push_bounded(log: &mut String, chunk: &str) {
@@ -509,6 +627,57 @@ mod tests {
             assert!(!entry.id.is_empty());
             assert!(!entry.dir.is_empty());
             assert!(entry.script.ends_with(".sh"));
+        }
+    }
+
+    #[test]
+    fn meter_percentages() {
+        assert_eq!(
+            parse_meter("Receiving objects: 45% (1234/9000)"),
+            Some(45.0)
+        );
+        assert_eq!(
+            parse_meter("model.safetensors:  42.5%|████▎ | 700M/1.6G"),
+            Some(42.5)
+        );
+        assert_eq!(
+            parse_meter("##################################  41.7%"),
+            Some(41.7)
+        );
+        assert_eq!(parse_meter("plain log line without progress"), None);
+        assert_eq!(parse_meter("150% impossible"), None);
+    }
+
+    #[test]
+    fn progress_markers_and_meters() {
+        let jobs: Arc<Mutex<HashMap<String, Job>>> = Arc::new(Mutex::new(HashMap::new()));
+        jobs.lock().unwrap().insert("m".to_string(), Job::running());
+
+        handle_output_line(&jobs, "m", "@@LV stage 下载权重\n", false);
+        handle_output_line(&jobs, "m", "@@LV progress 33.3\n", false);
+        {
+            let j = jobs.lock().unwrap();
+            let job = j.get("m").unwrap();
+            assert_eq!(job.stage.as_deref(), Some("下载权重"));
+            assert!((job.progress.unwrap() - 33.3).abs() < 0.01);
+            assert!(!job.log.contains("@@LV"));
+        }
+
+        // A tqdm-style CR redraw updates the percentage, not the log.
+        handle_output_line(&jobs, "m", "file: 80%|████████ | 8/10\r", true);
+        {
+            let j = jobs.lock().unwrap();
+            let job = j.get("m").unwrap();
+            assert!((job.progress.unwrap() - 80.0).abs() < 0.01);
+            assert!(job.log.is_empty());
+        }
+
+        // Plain output survives, including CR-terminated status text.
+        handle_output_line(&jobs, "m", "Building voxcpm2-cli ...", false);
+        handle_output_line(&jobs, "m", "\n", false);
+        {
+            let j = jobs.lock().unwrap();
+            assert!(j.get("m").unwrap().log.contains("Building voxcpm2-cli"));
         }
     }
 

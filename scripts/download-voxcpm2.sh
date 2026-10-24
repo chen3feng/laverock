@@ -9,6 +9,10 @@
 # Total download ~3.3 GB (BaseLM Q8_0 1.6 GB + Acoustic F16 1.7 GB).
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# shellcheck source=laverock-lib.sh
+. "$SCRIPT_DIR/laverock-lib.sh"
+
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 MODELS_DIR="${LAVEROCK_MODELS_DIR:-$ROOT/models}"
 TOOLS="${LAVEROCK_TOOLS_DIR:-$ROOT/.tools}"
@@ -31,8 +35,8 @@ mkdir -p "$MODELS_DIR" "$TOOLS"
 
 # 1. Sources (shallow; cached).
 if [ ! -d "$SRC/.git" ]; then
-  echo "Cloning llama.cpp-omni ..."
-  git clone --depth 1 https://github.com/tc-mb/llama.cpp-omni.git "$SRC"
+  lv_stage "拉取 llama.cpp-omni 源码"
+  git clone --depth 1 --progress https://github.com/tc-mb/llama.cpp-omni.git "$SRC"
 fi
 cd "$SRC"
 if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
@@ -41,7 +45,7 @@ fi
 
 # 2. Build the CLI target once.
 if [ ! -x "$SRC/build/bin/voxcpm2-cli" ]; then
-  echo "Building voxcpm2-cli (first build takes several minutes) ..."
+  lv_stage "编译 voxcpm2-cli（首次约数分钟）"
   case "$(uname -s)" in
     Darwin) BACKEND="-DGGML_METAL=ON";;
     *) BACKEND="-DGGML_BACKEND_DL=ON";;
@@ -67,8 +71,7 @@ fetch_model() { # url dest expected_bytes
     echo "ok $(basename "$dest")"
     return 0
   fi
-  echo "Downloading $(basename "$dest") ($want bytes) ..."
-  curl -L --fail --retry 5 --retry-delay 2 -C - -o "$dest" "$url"
+  lv_download "$url" "$dest"
   local got
   got=$(wc -c <"$dest" | tr -d ' ')
   if [ "$got" != "$want" ]; then
@@ -77,10 +80,13 @@ fetch_model() { # url dest expected_bytes
   fi
 }
 
+lv_stage "下载权重（1/2）· BaseLM 约 1.6 GB"
 fetch_model "$HF/VoxCPM2-BaseLM-Q8_0.gguf" \
   "$DEST/VoxCPM2-BaseLM-Q8_0.gguf" 1727309920
+lv_stage "下载权重（2/2）· Acoustic 约 1.7 GB"
 fetch_model "$HF/VoxCPM2-Acoustic-F16.gguf" \
   "$DEST/VoxCPM2-Acoustic-F16.gguf" 1825096352
+lv_stage "写入引擎清单"
 
 # 5. Manifest.
 cat > "$DEST/engine.json" <<'EOF'

@@ -10,6 +10,8 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# shellcheck source=laverock-lib.sh
+. "$SCRIPT_DIR/laverock-lib.sh"
 MODELS_DIR="${LAVEROCK_MODELS_DIR:-$ROOT/models}"
 TOOLS="${LAVEROCK_TOOLS_DIR:-$ROOT/.tools}"
 DEST="$MODELS_DIR/qwen3tts"
@@ -53,17 +55,22 @@ mkdir -p "$MODELS_DIR" "$DEST" "$TOOLS"
 
 # 1. Isolated environment — Qwen's torch/transformers pins stay here.
 if [ ! -x "$VENV/bin/python" ]; then
-  echo "Creating venv at $VENV ..."
+  lv_stage "创建 Python 虚拟环境"
   "$PYTHON" -m venv "$VENV"
 fi
-"$VENV/bin/python" -m pip install -q --upgrade pip
-"$VENV/bin/python" -m pip install -q --upgrade "qwen-tts" "huggingface_hub[cli]"
+# Progress bars on even though pip/hf see a pipe, not a terminal.
+export PIP_PROGRESS_BAR=on HF_HUB_DISABLE_PROGRESS_BARS=0
+lv_stage "安装 qwen-tts 依赖（约 2 GB，首次较慢）"
+"$VENV/bin/python" -m pip install --upgrade pip
+"$VENV/bin/python" -m pip install --upgrade "qwen-tts" "huggingface_hub[cli]"
 
 # 2. Weights. A dedicated HF cache keeps them next to the engine and lets
 #    the model resolve its tokenizer repo offline later.
 export HF_HOME="$DEST/.hf-cache"
-"$VENV/bin/huggingface-cli" download Qwen/Qwen3-TTS-Tokenizer-12Hz >/dev/null
-"$VENV/bin/huggingface-cli" download "$MODEL" >/dev/null
+lv_stage "下载分词器"
+"$VENV/bin/huggingface-cli" download Qwen/Qwen3-TTS-Tokenizer-12Hz
+lv_stage "下载模型权重"
+"$VENV/bin/huggingface-cli" download "$MODEL"
 
 # 3. Runner script.
 cp "$SCRIPT_DIR/qwen3tts_runner.py" "$DEST/qwen3tts_runner.py"
