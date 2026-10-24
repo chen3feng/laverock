@@ -148,17 +148,17 @@ impl SpeechEngine for Qwen3TtsEngine {
             cmd.env(key, value);
         }
 
-        // Clone mode: write the reference clip and its transcript (if any).
+        // Clone mode: write the reference clip. The transcript is
+        // deliberately not passed: qwen-tts' ICL mode is very sensitive
+        // to transcript accuracy, and saved profiles often carry an
+        // approximate/empty transcript (VoxCPM2 needs none). A mismatch
+        // produces garbled, truncated or runaway audio. Speaker
+        // embedding-only mode clones from the voice alone and is robust.
         if !req.prompt_samples.is_empty() {
             let path = tmp.join("reference.wav");
             let bytes = encode_wav(&req.prompt_samples, req.prompt_sr)?;
             std::fs::write(&path, bytes).map_err(CoreError::from)?;
             cmd.arg("--ref-audio").arg(&path);
-            if let Some(text) = req.prompt_text.as_deref().map(str::trim) {
-                if !text.is_empty() {
-                    cmd.arg("--ref-text").arg(text);
-                }
-            }
         }
 
         cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
