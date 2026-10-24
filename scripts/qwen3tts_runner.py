@@ -16,6 +16,34 @@ import sys
 import traceback
 import wave
 
+# Synthesis runs against the fully cached snapshot from the download
+# script. transformers/hub probe the network on every launch (metadata and
+# ETag checks); through a slow or dead proxy those requests stall for
+# minutes with the UI stuck at "loading model". Default to offline cache
+# use (set HF_HUB_OFFLINE=0 to override for development).
+os.environ.setdefault("HF_HUB_OFFLINE", "1")
+os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
+os.environ.setdefault("HF_HUB_ETAG_TIMEOUT", "3")
+os.environ.setdefault("HF_HUB_DOWNLOAD_TIMEOUT", "10")
+
+
+def speed_up_cached_loading() -> None:
+    """Skip transformers' mistral-tag hub probe.
+
+    `PreTrainedTokenizerBase._patch_mistral_regex` calls `model_info`
+    (a network round-trip) on every tokenizer load, purely to detect
+    mistralai base models — Qwen repos are never mistral, so a no-op is
+    equivalent and removes the last blocking metadata probe.
+    """
+    try:
+        import transformers.tokenization_utils_base as tub
+
+        tub.PreTrainedTokenizerBase._patch_mistral_regex = classmethod(
+            lambda cls, tokenizer, *_a, **_k: tokenizer
+        )
+    except Exception:
+        pass
+
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser()
@@ -76,6 +104,7 @@ def write_wav(path: str, samples, sample_rate: int) -> None:
 def main() -> int:
     args = parse_args()
 
+    speed_up_cached_loading()
     import torch
     from qwen_tts import Qwen3TTSModel
 
