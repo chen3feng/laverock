@@ -893,6 +893,15 @@ $('speed').addEventListener('change', () => {
   try { localStorage.setItem('laverock.speed', $('speed').value); } catch (_) { /* ignore */ }
 });
 
+// Rough codec-step budget for a text: CJK ~3.8 chars/s of speech,
+// whitespace-split Latin words ~2.6/s; the Qwen codec emits 12.5 steps/s.
+// Used only to scale the bar; it caps below 100% until the audio arrives.
+function estCodecSteps(text) {
+  const cjk = (text.match(/[一-鿿぀-ヿ가-힯]/g) || []).length;
+  const words = text.replace(/[一-鿿぀-ヿ가-힯]/g, ' ').trim().split(/\s+/).filter(Boolean).length;
+  return Math.max(40, Math.round((cjk / 3.8 + words / 2.6) * 12.5));
+}
+
 $('go').onclick = async () => {
   const status = $('status');
   const saved = selectedProfile();
@@ -942,16 +951,75 @@ $('go').onclick = async () => {
     labelEl.querySelector('b').textContent = fmtElapsed();
     status.textContent = text;
   };
+  const fill = pbar.querySelector('.pbar-fill');
+  const setDeterminate = (pct) => {
+    fill.classList.remove('indeterminate');
+    fill.style.width = Math.max(0, Math.min(98, pct)).toFixed(1) + '%';
+  };
+  const setIndeterminate = () => {
+    fill.classList.add('indeterminate');
+    fill.style.width = '';
+  };
+  setIndeterminate();
   setStage(engine && engine.loaded ? '正在合成语音…' : `正在加载模型到内存（${loadNote}）`);
-  const timer = setInterval(() => { labelEl.querySelector('b').textContent = fmtElapsed(); }, 250);
+  let audioText = '';
+  const timer = setInterval(() => {
+    labelEl.querySelector('b').textContent = fmtElapsed() + audioText;
+  }, 250);
   const t0 = performance.now();
   try {
-    const res = await fetch(url, { method: 'POST', body: fd });
+    const res = await fetch(url, {
+      method: 'POST',
+      body: fd,
+      headers: { 'X-Laverock-Stream': '1' },
+    });
     if (!res.ok) {
       const msg = await res.json().then((j) => j.error).catch(() => res.statusText);
       throw new Error(msg);
     }
-    const blob = await res.blob();
+
+    // Framed SSE: `event: stage|steps|wav|error` / `data: …`, blank line.
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '';
+    let blob = null;
+    let lastStage = '';
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      let sep;
+      while ((sep = buf.indexOf('\n\n')) !== -1) {
+        const raw = buf.slice(0, sep);
+        buf = buf.slice(sep + 2);
+        let event = '';
+        const dataLines = [];
+        for (const line of raw.split('\n')) {
+          if (line.startsWith('event:')) event = line.slice(6).trim();
+          else if (line.startsWith('data:')) dataLines.push(line.slice(5).trim());
+        }
+        const data = dataLines.join('\n');
+        if (event === 'stage') {
+          lastStage = data;
+          setStage(data + '…');
+        } else if (event === 'steps') {
+          const steps = Number(data);
+          if (Number.isFinite(steps)) {
+            if (lastStage && !lastStage.includes('合成')) setStage('正在合成语音…');
+            setDeterminate((steps / estCodecSteps(text)) * 100);
+            audioText = ` · 约 ${(steps / 12.5).toFixed(0)}s 音频`;
+          }
+        } else if (event === 'wav') {
+          const bytes = Uint8Array.from(atob(data), (c) => c.charCodeAt(0));
+          blob = new Blob([bytes], { type: 'audio/wav' });
+        } else if (event === 'error') {
+          const j = JSON.parse(data);
+          throw new Error(j.message || '合成失败');
+        }
+      }
+    }
+    if (!blob) throw new Error('没有收到音频数据');
+    setDeterminate(100);
     const audioUrl = URL.createObjectURL(blob);
     const player = $('player');
     if (player.dataset.url) URL.revokeObjectURL(player.dataset.url);

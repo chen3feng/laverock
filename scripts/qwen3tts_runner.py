@@ -12,6 +12,7 @@ Modes:
 
 import argparse
 import os
+import re
 import sys
 import traceback
 import wave
@@ -25,6 +26,38 @@ os.environ.setdefault("HF_HUB_OFFLINE", "1")
 os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
 os.environ.setdefault("HF_HUB_ETAG_TIMEOUT", "3")
 os.environ.setdefault("HF_HUB_DOWNLOAD_TIMEOUT", "10")
+
+
+def emit(event: str, value: str = "") -> None:
+    """Print a progress marker the Rust side parses from stdout."""
+    print(f"@@LV {event} {value}".rstrip(), flush=True)
+
+
+def attach_step_counter(model) -> None:
+    """Count talker decode steps by wrapping its forward.
+
+    qwen-tts does not forward HF generate kwargs (stopping criteria never
+    fire), so we instrument the talker module directly. Its autoregressive
+    generate() calls forward once per codec frame; the 12 Hz codec means
+    one call is ~1/12.5 s of produced audio.
+    """
+    talker = model.model.talker
+    original_forward = talker.forward
+    state = {"n": 0}
+
+    import functools
+
+    @functools.wraps(original_forward)
+    def counting_forward(*args, **kwargs):
+        state["n"] += 1
+        if state["n"] % 4 == 0:
+            emit("gen", str(state["n"]))
+        return original_forward(*args, **kwargs)
+
+    # functools.wraps keeps the inspected signature — transformers'
+    # generate() validates kwargs against forward() and rejects everything
+    # an opaque (*args, **kwargs) wrapper claims not to accept.
+    talker.forward = counting_forward
 
 
 def speed_up_cached_loading() -> None:
@@ -43,6 +76,19 @@ def speed_up_cached_loading() -> None:
         )
     except Exception:
         pass
+
+
+def step_cap(text: str) -> int:
+    """Bound codec steps at roughly 2x the expected audio length.
+
+    A mismatched reference can make the talker miss EOS and run to the
+    package default (2048 frames, several minutes). At 12.5 frames/s the
+    cap clips that runaway instead of hanging the UI.
+    """
+    cjk = len(re.findall(r"[一-鿿぀-ヿ가-힯]", text))
+    words = len(re.sub(r"[一-鿿぀-ヿ가-힯]", " ", text).split())
+    est_seconds = cjk / 3.8 + words / 2.6
+    return max(120, round(est_seconds * 12.5 * 2) + 80)
 
 
 def parse_args() -> argparse.Namespace:
@@ -105,6 +151,7 @@ def main() -> int:
     args = parse_args()
 
     speed_up_cached_loading()
+    emit("stage", "正在加载模型到内存")
     import torch
     from qwen_tts import Qwen3TTSModel
 
@@ -122,6 +169,9 @@ def main() -> int:
         load_kwargs.pop("attn_implementation", None)
         model = Qwen3TTSModel.from_pretrained(args.model, **load_kwargs)
 
+    attach_step_counter(model)
+    emit("stage", "正在合成语音")
+    gen_limit = {"max_new_tokens": step_cap(args.text)}
     if args.mode == "clone":
         if not args.ref_audio:
             print("clone mode requires --ref-audio", file=sys.stderr)
@@ -133,6 +183,7 @@ def main() -> int:
             ref_text=args.ref_text or None,
             x_vector_only_mode=not bool(args.ref_text),
             non_streaming_mode=True,
+            **gen_limit,
         )
     elif args.mode == "custom_voice":
         if not args.speaker:
@@ -144,6 +195,7 @@ def main() -> int:
             language=args.language,
             instruct=args.instruct or None,
             non_streaming_mode=True,
+            **gen_limit,
         )
     else:
         wavs, sr = model.generate_voice_design(
@@ -151,6 +203,7 @@ def main() -> int:
             instruct=args.instruct or "",
             language=args.language,
             non_streaming_mode=True,
+            **gen_limit,
         )
 
     if not wavs:

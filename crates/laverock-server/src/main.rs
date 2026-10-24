@@ -20,7 +20,7 @@ mod remote;
 mod settings;
 
 use axum::{
-    body::Body,
+    body::{Body, Bytes},
     extract::{ConnectInfo, Multipart, Path, State},
     http::{header, Request, StatusCode},
     middleware::{self, Next},
@@ -531,6 +531,7 @@ async fn profile_audio(
 async fn synthesize(
     Path(engine_id): Path<String>,
     State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
     mut multipart: Multipart,
 ) -> Result<Response, ApiError> {
     let mut text: Option<String> = None;
@@ -628,40 +629,116 @@ async fn synthesize(
         None => (Vec::new(), 0),
     };
 
-    let request = SynthRequest {
-        text,
-        prompt_text,
-        prompt_samples,
-        prompt_sr,
-        speed: speed.unwrap_or(defaults.speed),
-        num_steps: num_steps.unwrap_or(defaults.num_steps),
-    };
-
-    // Blocking ONNX inference off the async runtime.
+    let speed = speed.unwrap_or(defaults.speed);
+    let num_steps = num_steps.unwrap_or(defaults.num_steps);
     let manager = state.manager.clone();
-    let Audio {
-        samples,
-        sample_rate,
-    } = tokio::task::spawn_blocking(move || manager.synthesize(&engine_id, &request))
-        .await
+
+    // The desktop UI asks for a Server-Sent-Events stream so long Qwen
+    // generations can report progress; other clients keep getting the WAV.
+    let wants_stream = headers
+        .get("x-laverock-stream")
+        .and_then(|v| v.to_str().ok())
+        == Some("1");
+    if !wants_stream {
+        // Blocking inference off the async runtime.
+        let request = SynthRequest {
+            text: text.clone(),
+            prompt_text: prompt_text.clone(),
+            prompt_samples: prompt_samples.clone(),
+            prompt_sr,
+            speed,
+            num_steps,
+            progress: None,
+        };
+        let Audio {
+            samples,
+            sample_rate,
+        } = tokio::task::spawn_blocking(move || manager.synthesize(&engine_id, &request))
+            .await
+            .map_err(|e| ApiError {
+                status: StatusCode::INTERNAL_SERVER_ERROR,
+                message: format!("engine task panicked: {e}"),
+            })??;
+
+        let wav = encode_wav(&samples, sample_rate)?;
+        return Ok((
+            StatusCode::OK,
+            [
+                (header::CONTENT_TYPE, "audio/wav".to_string()),
+                (
+                    header::CONTENT_DISPOSITION,
+                    "attachment; filename=\"laverock.wav\"".to_string(),
+                ),
+            ],
+            wav,
+        )
+            .into_response());
+    }
+
+    use axum::body::Bytes;
+    use base64::Engine;
+    use tokio::sync::mpsc;
+    use tokio_stream::wrappers::ReceiverStream;
+
+    let sse = |event: &str, data: &str| -> Bytes {
+        Bytes::from(format!("event: {event}\ndata: {data}\n\n"))
+    };
+    let (tx, rx) = mpsc::channel::<std::result::Result<Bytes, std::io::Error>>(16);
+
+    tokio::task::spawn_blocking(move || {
+        let tx2 = tx.clone();
+        let sink: laverock_core::ProgressSink = Arc::new(move |event| {
+            let frame = match event {
+                laverock_core::ProgressEvent::Stage(label) => sse("stage", &label),
+                laverock_core::ProgressEvent::Steps(n) => sse("steps", &n.to_string()),
+            };
+            // Progress frames are lossy: never block the engine on a
+            // disconnected or slow UI. The final WAV frame is allowed to
+            // wait for buffer space (it errors immediately if closed).
+            let _ = tx2.try_send(Ok(frame));
+        });
+        let request = SynthRequest {
+            text,
+            prompt_text,
+            prompt_samples,
+            prompt_sr,
+            speed,
+            num_steps,
+            progress: Some(sink),
+        };
+        match manager.synthesize(&engine_id, &request) {
+            Ok(Audio {
+                samples,
+                sample_rate,
+            }) => match encode_wav(&samples, sample_rate) {
+                Ok(wav) => {
+                    let b64 = base64::engine::general_purpose::STANDARD.encode(&wav);
+                    let _ = tx.blocking_send(Ok(sse("wav", &b64)));
+                }
+                Err(e) => {
+                    let _ = tx.blocking_send(Ok(error_frame(&sse, &e.to_string())));
+                }
+            },
+            Err(e) => {
+                let _ = tx.blocking_send(Ok(error_frame(&sse, &e.to_string())));
+            }
+        }
+    });
+
+    Response::builder()
+        .status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, "text/event-stream")
+        .header(header::CACHE_CONTROL, "no-cache")
+        .body(Body::from_stream(ReceiverStream::new(rx)))
         .map_err(|e| ApiError {
             status: StatusCode::INTERNAL_SERVER_ERROR,
-            message: format!("engine task panicked: {e}"),
-        })??;
+            message: e.to_string(),
+        })
+}
 
-    let wav = encode_wav(&samples, sample_rate)?;
-    Ok((
-        StatusCode::OK,
-        [
-            (header::CONTENT_TYPE, "audio/wav".to_string()),
-            (
-                header::CONTENT_DISPOSITION,
-                "attachment; filename=\"laverock.wav\"".to_string(),
-            ),
-        ],
-        wav,
-    )
-        .into_response())
+fn error_frame(sse: &impl Fn(&str, &str) -> Bytes, message: &str) -> Bytes {
+    let json = serde_json::json!({ "message": message }).to_string();
+    sse("error", &json)
 }
 
 #[tokio::main]

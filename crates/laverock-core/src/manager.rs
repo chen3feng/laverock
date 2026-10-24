@@ -16,6 +16,21 @@ use std::{
     sync::{Arc, Mutex, RwLock},
 };
 
+/// Progress reported by an engine while it works. Long engines (the
+/// Python Qwen3-TTS runner) emit stages and codec-step counts so a UI can
+/// show something more informative than a spinner.
+#[derive(Debug, Clone)]
+pub enum ProgressEvent {
+    /// Human-readable phase, e.g. "model loaded; generating".
+    Stage(String),
+    /// Number of codec steps generated so far.
+    Steps(u32),
+}
+
+/// Optional per-request callback. Engines that cannot report progress
+/// simply never call it.
+pub type ProgressSink = Arc<dyn Fn(ProgressEvent) + Send + Sync>;
+
 /// A loaded, ready-to-run engine.
 pub trait SpeechEngine: Send + Sync {
     fn id(&self) -> &str;
@@ -24,7 +39,7 @@ pub trait SpeechEngine: Send + Sync {
 }
 
 /// A synthesis request. Reference audio is required for cloning engines.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct SynthRequest {
     pub text: String,
     pub prompt_text: Option<String>,
@@ -32,6 +47,22 @@ pub struct SynthRequest {
     pub prompt_sr: i32,
     pub speed: f32,
     pub num_steps: i32,
+    /// Optional progress callback; absent for engines/clients without UI.
+    pub progress: Option<ProgressSink>,
+}
+
+impl std::fmt::Debug for SynthRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SynthRequest")
+            .field("text", &self.text)
+            .field("prompt_text", &self.prompt_text)
+            .field("prompt_samples", &self.prompt_samples.len())
+            .field("prompt_sr", &self.prompt_sr)
+            .field("speed", &self.speed)
+            .field("num_steps", &self.num_steps)
+            .field("progress", &self.progress.is_some())
+            .finish()
+    }
 }
 
 #[derive(Debug, Serialize)]

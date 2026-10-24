@@ -12,7 +12,9 @@ mod voxcpm2;
 mod zipvoice;
 
 pub use audio::{decode_wav, encode_wav};
-pub use manager::{EngineInfo, EngineManager, SpeechEngine, SynthRequest};
+pub use manager::{
+    EngineInfo, EngineManager, ProgressEvent, ProgressSink, SpeechEngine, SynthRequest,
+};
 pub use manifest::{
     EngineKind, Manifest, Qwen3TtsManifest, SynthDefaults, VoxCpm2Manifest, ZipVoiceManifest,
 };

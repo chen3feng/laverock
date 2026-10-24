@@ -11,11 +11,13 @@
 //!   voice_design  voice described in natural language
 
 use crate::{
-    decode_wav, encode_wav, Audio, CoreError, Manifest, Result, SpeechEngine, SynthRequest,
+    decode_wav, encode_wav, Audio, CoreError, Manifest, ProgressEvent, Result, SpeechEngine,
+    SynthRequest,
 };
 use std::{
+    io::{BufRead, BufReader, Read},
     path::{Path, PathBuf},
-    process::Command,
+    process::{Command, Stdio},
     sync::Mutex,
 };
 
@@ -159,16 +161,60 @@ impl SpeechEngine for Qwen3TtsEngine {
             }
         }
 
-        let output = cmd.output().map_err(|e| {
+        cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
+        let mut child = cmd.spawn().map_err(|e| {
             CoreError::Synth(format!(
                 "failed to run {} {}: {e} (is the qwen-tts venv set up?)",
                 self.python.display(),
                 self.script.display()
             ))
         })?;
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            let tail: String = stderr
+
+        // The runner prints `@@LV stage/gen …` markers on stdout; forward
+        // them to the per-request progress sink while generation runs.
+        let stdout = child.stdout.take().expect("piped stdout");
+        let sink = req.progress.clone();
+        let stdout_handle = std::thread::spawn(move || {
+            let mut unexpected = Vec::new();
+            for line in BufReader::new(stdout).lines() {
+                let Ok(line) = line else { break };
+                if let Some(rest) = line.strip_prefix("@@LV ") {
+                    let mut parts = rest.splitn(2, ' ');
+                    match (parts.next(), parts.next()) {
+                        (Some("stage"), Some(label)) => {
+                            if let Some(cb) = &sink {
+                                cb(ProgressEvent::Stage(label.trim().to_string()));
+                            }
+                        }
+                        (Some("gen"), Some(value)) => {
+                            if let Ok(steps) = value.trim().parse::<u32>() {
+                                if let Some(cb) = &sink {
+                                    cb(ProgressEvent::Steps(steps));
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
+                } else if !line.trim().is_empty() {
+                    unexpected.push(line);
+                }
+            }
+            unexpected
+        });
+        let stderr = child.stderr.take().expect("piped stderr");
+        let stderr_handle = std::thread::spawn(move || {
+            let mut buf = Vec::new();
+            BufReader::new(stderr).read_to_end(&mut buf).ok();
+            buf
+        });
+
+        let status = child.wait().map_err(CoreError::from)?;
+        let stdout_lines = stdout_handle.join().unwrap_or_default();
+        let stderr_bytes = stderr_handle.join().unwrap_or_default();
+
+        if !status.success() {
+            let stderr = String::from_utf8_lossy(&stderr_bytes);
+            let mut tail: String = stderr
                 .lines()
                 .rev()
                 .take(12)
@@ -177,9 +223,20 @@ impl SpeechEngine for Qwen3TtsEngine {
                 .rev()
                 .collect::<Vec<_>>()
                 .join("\n");
+            // Runner diagnostics that landed on stdout for some reason.
+            let extra: String = stdout_lines
+                .into_iter()
+                .rev()
+                .take(6)
+                .rev()
+                .collect::<Vec<_>>()
+                .join("\n");
+            if !extra.trim().is_empty() {
+                tail = format!("{tail}\n{extra}");
+            }
             return Err(CoreError::Synth(format!(
                 "qwen3-tts runner exited {:?}:\n{}",
-                output.status.code(),
+                status.code(),
                 tail.trim()
             )));
         }
