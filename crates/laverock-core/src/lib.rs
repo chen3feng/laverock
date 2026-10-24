@@ -16,7 +16,8 @@ pub use manager::{
     EngineInfo, EngineManager, ProgressEvent, ProgressSink, SpeechEngine, SynthRequest,
 };
 pub use manifest::{
-    EngineKind, Manifest, Qwen3TtsManifest, SynthDefaults, VoxCpm2Manifest, ZipVoiceManifest,
+    EngineKind, Manifest, ParamKind, ParamOption, ParamSpec, Qwen3TtsManifest, SynthDefaults,
+    VoxCpm2Manifest, ZipVoiceManifest,
 };
 
 /// Re-exported for engines that need the underlying runtime.

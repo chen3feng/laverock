@@ -46,6 +46,176 @@ pub struct Manifest {
     pub qwen3tts: Option<Qwen3TtsManifest>,
     #[serde(default)]
     pub defaults: SynthDefaults,
+    /// User-tunable synthesis parameters shown by the UI. When absent,
+    /// [`Manifest::default_parameters`] supplies the built-in set per kind.
+    #[serde(default)]
+    pub parameters: Vec<ParamSpec>,
+}
+
+impl Manifest {
+    /// Declared parameters, or the built-in set for this engine kind.
+    pub fn parameters_or_defaults(&self) -> Vec<ParamSpec> {
+        if self.parameters.is_empty() {
+            Self::default_parameters(self.kind)
+        } else {
+            self.parameters.clone()
+        }
+    }
+
+    /// Parameters a manifest ships unless it declares its own list.
+    pub fn default_parameters(kind: EngineKind) -> Vec<ParamSpec> {
+        use serde_json::json;
+        match kind {
+            EngineKind::ZipVoice => vec![
+                ParamSpec::slider(
+                    "speed",
+                    "语速",
+                    1.0,
+                    0.5,
+                    2.0,
+                    0.1,
+                    "越大语速越快，不改变音色",
+                ),
+                ParamSpec::int_slider("num_steps", "扩散步数", 4, 1, 16, 1, "越多越稳但越慢"),
+            ],
+            EngineKind::VoxCpm2 => vec![
+                ParamSpec::slider(
+                    "speed",
+                    "语速",
+                    1.0,
+                    0.5,
+                    2.0,
+                    0.1,
+                    "越大语速越快，不改变音色",
+                ),
+                ParamSpec::int_slider("num_steps", "扩散步数", 10, 1, 30, 1, "越多越稳但越慢"),
+                ParamSpec::slider("cfg", "提示词强度 (CFG)", 2.0, 0.0, 5.0, 0.1, "过高会失真"),
+                ParamSpec::slider(
+                    "temperature",
+                    "随机性",
+                    1.0,
+                    0.1,
+                    2.0,
+                    0.05,
+                    "越高变化越大，越低越确定",
+                ),
+                ParamSpec {
+                    name: "seed".into(),
+                    label: "随机种子".into(),
+                    kind: ParamKind::Int,
+                    min: Some(json!(-1)),
+                    max: Some(json!(2_147_483_647)),
+                    step: None,
+                    options: Vec::new(),
+                    default: json!(42),
+                    hint: "相同种子 + 文本得到可复现的声音；-1 每次随机".into(),
+                },
+            ],
+            // Non-diffusion autoregressive models expose no step control.
+            EngineKind::Qwen3Tts => Vec::new(),
+        }
+    }
+}
+
+/// A user-tunable synthesis parameter declared by an engine manifest.
+///
+/// The list drives both the generated UI (control type, range, hint) and
+/// request validation; unknown names are ignored by the engines.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ParamSpec {
+    /// Form field / engine option name, e.g. `num_steps` or `cfg`.
+    pub name: String,
+    /// UI label.
+    pub label: String,
+    #[serde(rename = "type")]
+    pub kind: ParamKind,
+    #[serde(default)]
+    pub min: Option<serde_json::Value>,
+    #[serde(default)]
+    pub max: Option<serde_json::Value>,
+    #[serde(default)]
+    pub step: Option<serde_json::Value>,
+    /// Radio/select options for `choice`; `[label, value]` pairs.
+    #[serde(default)]
+    pub options: Vec<ParamOption>,
+    pub default: serde_json::Value,
+    #[serde(default)]
+    pub hint: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ParamKind {
+    Float,
+    Int,
+    Bool,
+    Choice,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ParamOption {
+    pub label: String,
+    pub value: String,
+}
+
+impl ParamSpec {
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        name: &str,
+        label: &str,
+        kind: ParamKind,
+        default: serde_json::Value,
+        hint: &str,
+    ) -> Self {
+        Self {
+            name: name.into(),
+            label: label.into(),
+            kind,
+            min: None,
+            max: None,
+            step: None,
+            options: Vec::new(),
+            default,
+            hint: hint.into(),
+        }
+    }
+
+    pub fn slider(
+        name: &str,
+        label: &str,
+        default: f64,
+        min: f64,
+        max: f64,
+        step: f64,
+        hint: &str,
+    ) -> Self {
+        use serde_json::json;
+        Self {
+            min: Some(json!(min)),
+            max: Some(json!(max)),
+            step: Some(json!(step)),
+            ..Self::new(name, label, ParamKind::Float, json!(default), hint)
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn int_slider(
+        name: &str,
+        label: &str,
+        default: i64,
+        min: i64,
+        max: i64,
+        step: i64,
+        hint: &str,
+    ) -> Self {
+        use serde_json::json;
+        Self {
+            min: Some(json!(min)),
+            max: Some(json!(max)),
+            step: Some(json!(step)),
+            ..Self::new(name, label, ParamKind::Int, json!(default), hint)
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

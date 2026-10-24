@@ -538,15 +538,17 @@ async fn synthesize(
     let mut prompt_bytes: Option<Vec<u8>> = None;
     let mut prompt_text: Option<String> = None;
     let mut profile_id: Option<String> = None;
-    let mut speed: Option<f32> = None;
-    let mut num_steps: Option<i32> = None;
+    // Raw values for manifest-declared synthesis parameters.
+    let mut raw_params: std::collections::BTreeMap<String, String> =
+        std::collections::BTreeMap::new();
 
     while let Some(field) = multipart
         .next_field()
         .await
         .map_err(|e| ApiError::bad_request(format!("malformed multipart: {e}")))?
     {
-        match field.name() {
+        let name = field.name().map(str::to_string);
+        match name.as_deref() {
             Some("text") => {
                 text = Some(
                     field
@@ -581,21 +583,16 @@ async fn synthesize(
                     profile_id = Some(raw.trim().to_string());
                 }
             }
-            Some("speed") => {
+            Some(other) => {
+                // Anything else is a candidate engine parameter; validated
+                // against the engine's declared parameter list below.
                 let raw = field
                     .text()
                     .await
-                    .map_err(|e| ApiError::bad_request(format!("bad speed: {e}")))?;
-                speed = raw.parse().ok().filter(|v: &f32| (0.2..=3.0).contains(v));
+                    .map_err(|e| ApiError::bad_request(format!("bad {other} field: {e}")))?;
+                raw_params.insert(other.to_string(), raw);
             }
-            Some("num_steps") => {
-                let raw = field
-                    .text()
-                    .await
-                    .map_err(|e| ApiError::bad_request(format!("bad num_steps: {e}")))?;
-                num_steps = raw.parse().ok().filter(|v: &i32| (1..=30).contains(v));
-            }
-            _ => {}
+            None => {}
         }
     }
 
@@ -616,8 +613,23 @@ async fn synthesize(
         (prompt_bytes.filter(|b| !b.is_empty()), text)
     };
 
-    // Defaults come from the engine manifest.
+    // Validate all engine parameters against the manifest's list.
+    let param_specs = state.manager.parameters(&engine_id)?;
+    let params = resolve_params(&param_specs, &raw_params)?;
+
+    // The two historical typed fields live in the parameter list too.
     let defaults = state.manager.manifest_defaults(&engine_id)?;
+    let speed = params
+        .get("speed")
+        .and_then(|v| v.as_f64())
+        .map(|v| v as f32)
+        .unwrap_or(defaults.speed);
+    let num_steps = params
+        .get("num_steps")
+        .and_then(|v| v.as_i64())
+        .map(|v| v as i32)
+        .unwrap_or(defaults.num_steps);
+
     let (prompt_samples, prompt_sr) = match prompt_bytes {
         Some(bytes) => {
             let (samples, rate) = decode_wav(&bytes)?;
@@ -629,8 +641,6 @@ async fn synthesize(
         None => (Vec::new(), 0),
     };
 
-    let speed = speed.unwrap_or(defaults.speed);
-    let num_steps = num_steps.unwrap_or(defaults.num_steps);
     let manager = state.manager.clone();
 
     // The desktop UI asks for a Server-Sent-Events stream so long Qwen
@@ -648,6 +658,7 @@ async fn synthesize(
             prompt_sr,
             speed,
             num_steps,
+            params: params.clone(),
             progress: None,
         };
         let Audio {
@@ -704,6 +715,7 @@ async fn synthesize(
             prompt_sr,
             speed,
             num_steps,
+            params,
             progress: Some(sink),
         };
         match manager.synthesize(&engine_id, &request) {
@@ -739,6 +751,89 @@ async fn synthesize(
 fn error_frame(sse: &impl Fn(&str, &str) -> Bytes, message: &str) -> Bytes {
     let json = serde_json::json!({ "message": message }).to_string();
     sse("error", &json)
+}
+
+/// Parse and range-check raw form fields against the engine's declared
+/// parameter list. Unknown fields are rejected; absent fields take the
+/// manifest defaults.
+fn resolve_params(
+    specs: &[laverock_core::ParamSpec],
+    raw: &std::collections::BTreeMap<String, String>,
+) -> Result<std::collections::BTreeMap<String, serde_json::Value>, ApiError> {
+    use laverock_core::{ParamKind, ParamSpec};
+    let mut out = std::collections::BTreeMap::new();
+    for spec in specs {
+        let ParamSpec {
+            name,
+            kind,
+            min,
+            max,
+            options,
+            default,
+            hint,
+            ..
+        } = spec;
+        let value = match raw.get(name) {
+            Some(v) if !v.trim().is_empty() => parse_param(spec, v.trim())?,
+            _ => default.clone(),
+        };
+        let _ = (min, max, hint, kind);
+        if *kind == ParamKind::Choice {
+            if let serde_json::Value::String(choice) = &value {
+                if !options.iter().any(|o| &o.value == choice) {
+                    return Err(ApiError::bad_request(format!("{name}: invalid option")));
+                }
+            }
+        }
+        out.insert(name.clone(), value);
+    }
+    let known: std::collections::HashSet<&str> = specs.iter().map(|p| p.name.as_str()).collect();
+    if let Some(name) = raw.keys().map(String::as_str).find(|n| !known.contains(n)) {
+        return Err(ApiError::bad_request(format!("unknown parameter: {name}")));
+    }
+    Ok(out)
+}
+
+fn parse_param(spec: &laverock_core::ParamSpec, raw: &str) -> Result<serde_json::Value, ApiError> {
+    use laverock_core::ParamKind;
+    let name = &spec.name;
+    let range_ok = |n: f64| -> bool {
+        spec.min
+            .as_ref()
+            .and_then(|v| v.as_f64())
+            .is_none_or(|min| n >= min)
+            && spec
+                .max
+                .as_ref()
+                .and_then(|v| v.as_f64())
+                .is_none_or(|max| n <= max)
+    };
+    let value = match spec.kind {
+        ParamKind::Float => {
+            let n: f64 = raw
+                .parse()
+                .map_err(|_| ApiError::bad_request(format!("{name}: expected a number")))?;
+            if !range_ok(n) {
+                return Err(ApiError::bad_request(format!("{name}: out of range")));
+            }
+            serde_json::json!(n)
+        }
+        ParamKind::Int => {
+            let n: i64 = raw
+                .parse()
+                .map_err(|_| ApiError::bad_request(format!("{name}: expected an integer")))?;
+            if !range_ok(n as f64) {
+                return Err(ApiError::bad_request(format!("{name}: out of range")));
+            }
+            serde_json::json!(n)
+        }
+        ParamKind::Bool => serde_json::json!(matches!(
+            raw.to_ascii_lowercase().as_str(),
+            "1" | "true" | "on" | "yes"
+        )),
+        ParamKind::Choice => serde_json::Value::String(raw.to_string()),
+    };
+    Ok(value)
 }
 
 #[tokio::main]

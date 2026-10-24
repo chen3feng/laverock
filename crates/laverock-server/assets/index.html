@@ -271,8 +271,8 @@
         <div class="hint">录音会在浏览器内转成 24kHz 单声道 WAV；也可以直接上传 WAV。</div>
         <div style="margin-top:14px">
           <label for="prompt_text">参考音频对应文字（ZipVoice 必填）</label>
-          <input type="text" id="prompt_text" placeholder="例如：那还是三十六年前，一九八七年。" />
-          <div class="hint">录音说了什么就填什么。VoxCPM2 与 Qwen3-TTS 仅凭声音即可克隆，可留空。</div>
+          <textarea id="prompt_text" rows="2" placeholder="例如：那还是三十六年前，一九八七年。"></textarea>
+          <div class="hint">录音说了什么就填什么，可多行。VoxCPM2 与 Qwen3-TTS 仅凭声音即可克隆，可留空。</div>
         </div>
         <div style="margin-top:14px">
           <label for="profilename">保存到声音库（可选，便于下次直接复用）</label>
@@ -287,17 +287,11 @@
       <div class="card">
         <label for="text">要合成的文字</label>
         <textarea id="text" placeholder="输入中文或 English 文本……"></textarea>
-        <div class="row" style="margin-top:14px">
-          <div>
-            <label for="speed">语速 <span id="speedv">1.0</span></label>
-            <input type="range" id="speed" min="0.5" max="2" step="0.1" value="1" />
-          </div>
-          <div>
-            <label for="steps">扩散步数 <span id="stepsv">4</span>（越多越稳、越慢）</label>
-            <input type="range" id="steps" min="1" max="16" step="1" value="4" />
-          </div>
-        </div>
       </div>
+
+      <!-- Controls are generated from the engine's manifest parameters.
+           Non-diffusion engines (Qwen3-TTS) simply have none. -->
+      <div class="card" id="engineParams" hidden></div>
 
       <div class="actions">
         <button id="go" type="button">生成语音</button>
@@ -866,32 +860,122 @@ async function loadEngines() {
   }
 }
 
+// Build tuning controls from the engine manifest's parameter list.
+// The backend declares name/label/type/range/default/hint, so new engines
+// and custom manifests need no UI changes.
+function renderEngineParams(e) {
+  const host = $('engineParams');
+  host.innerHTML = '';
+  const specs = (e && e.parameters) || [];
+  host.hidden = specs.length === 0;
+  if (!specs.length) return;
+
+  host.appendChild(Object.assign(document.createElement('label'), { textContent: '引擎参数' }));
+  const grid = document.createElement('div');
+  grid.className = 'row';
+  grid.style.marginTop = '10px';
+  for (const p of specs) {
+    const wrap = document.createElement('div');
+    wrap.appendChild(paramControl(p));
+    if (p.hint) {
+      const h = document.createElement('div');
+      h.className = 'hint';
+      h.textContent = p.hint;
+      wrap.appendChild(h);
+    }
+    grid.appendChild(wrap);
+  }
+  host.appendChild(grid);
+}
+
+function fmtParamValue(p, v) {
+  if (v === null || v === undefined) return '';
+  return p.type === 'float' ? String(Number(v)) : String(v);
+}
+
+function paramControl(p) {
+  const id = 'param-' + p.name;
+  const min = Number(p.min), max = Number(p.max), step = p.step != null ? Number(p.step) : null;
+  const wideRange = p.type === 'int' && (min < 0 || max - min > 1000);
+
+  const box = document.createElement('div');
+  const lab = document.createElement('label');
+  lab.htmlFor = id;
+  lab.textContent = p.label || p.name;
+  box.appendChild(lab);
+
+  let input;
+  if (p.type === 'bool') {
+    input = document.createElement('input');
+    input.type = 'checkbox';
+    input.checked = !!p.default;
+  } else if (p.type === 'choice') {
+    input = document.createElement('select');
+    for (const o of p.options || []) {
+      const opt = document.createElement('option');
+      opt.value = o.value;
+      opt.textContent = o.label || o.value;
+      if (o.value === String(p.default)) opt.selected = true;
+      input.appendChild(opt);
+    }
+  } else if (p.type === 'int' && wideRange) {
+    input = document.createElement('input');
+    input.type = 'number';
+    input.value = fmtParamValue(p, p.default);
+    if (p.min != null) input.min = String(p.min);
+    if (p.max != null) input.max = String(p.max);
+  } else {
+    const row = document.createElement('div');
+    row.className = 'prompt-box';
+    input = document.createElement('input');
+    input.type = 'range';
+    input.min = p.min != null ? String(p.min) : '0';
+    input.max = p.max != null ? String(p.max) : '100';
+    if (step != null) input.step = String(step);
+    input.value = fmtParamValue(p, p.default);
+    const out = document.createElement('span');
+    out.className = 'fileinfo';
+    out.style.minWidth = '3.2em';
+    out.textContent = input.value;
+    input.addEventListener('input', () => { out.textContent = input.value; });
+    row.appendChild(input);
+    row.appendChild(out);
+    input._outerRow = row;
+  }
+  input.id = id;
+  input.dataset.param = p.name;
+  input.dataset.type = p.type;
+  if (input._outerRow) {
+    box.appendChild(input._outerRow);
+    delete input._outerRow;
+  } else {
+    box.appendChild(input);
+  }
+  return box;
+}
+
+function collectEngineParams() {
+  const out = {};
+  for (const el of document.querySelectorAll('#engineParams [data-param]')) {
+    const type = el.dataset.type;
+    out[el.dataset.param] = type === 'bool' ? String(el.checked) : el.value;
+  }
+  return out;
+}
+
 function syncEngine() {
   const e = engines.find((x) => x.id === $('engine').value);
   if (!e) {
     $('engineHint').textContent = '';
+    renderEngineParams(null);
     return;
   }
   $('engineHint').textContent =
     `${e.kind} · ${(e.languages || []).join(' / ')} · ${(e.capabilities || []).join(', ')}`;
-  if (e.defaults && e.defaults.num_steps) {
-    $('steps').value = e.defaults.num_steps;
-    $('stepsv').textContent = e.defaults.num_steps;
-  }
+  renderEngineParams(e);
 }
 
 $('engine').onchange = syncEngine;
-$('speed').oninput = (e) => { $('speedv').textContent = e.target.value; };
-$('steps').oninput = (e) => { $('stepsv').textContent = e.target.value; };
-
-try {
-  $('speed').value = localStorage.getItem('laverock.speed') || '1';
-  $('speedv').textContent = $('speed').value;
-} catch (_) { /* storage blocked */ }
-
-$('speed').addEventListener('change', () => {
-  try { localStorage.setItem('laverock.speed', $('speed').value); } catch (_) { /* ignore */ }
-});
 
 // Rough codec-step budget for a text: CJK ~3.8 chars/s of speech,
 // whitespace-split Latin words ~2.6/s; the Qwen codec emits 12.5 steps/s.
@@ -922,8 +1006,9 @@ $('go').onclick = async () => {
     const pt = $('prompt_text').value.trim();
     if (pt) fd.append('prompt_text', pt);
   }
-  fd.append('speed', $('speed').value);
-  fd.append('num_steps', $('steps').value);
+  for (const [name, value] of Object.entries(collectEngineParams())) {
+    fd.append(name, value);
+  }
 
   const url = `/api/engines/${encodeURIComponent($('engine').value)}/synthesize`;
   $('go').disabled = true;

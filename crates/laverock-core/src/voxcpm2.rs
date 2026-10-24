@@ -101,17 +101,44 @@ impl SpeechEngine for VoxCpm2Engine {
         std::fs::create_dir_all(&tmp).map_err(CoreError::from)?;
         let out_wav = tmp.join("out.wav");
 
+        // Per-request overrides from the manifest-driven parameter list,
+        // falling back to the values baked into the engine manifest.
+        let p_f32 = |name: &str, built_in: f32| -> f32 {
+            req.params
+                .get(name)
+                .and_then(|v| v.as_f64())
+                .map(|v| v as f32)
+                .unwrap_or(built_in)
+        };
+        let cfg = p_f32("cfg", self.cfg);
+        let temperature = p_f32("temperature", self.temperature);
+        let seed = req
+            .params
+            .get("seed")
+            .and_then(|v| v.as_i64())
+            .map(|v| v as i32)
+            .unwrap_or(self.seed);
+        // -1 means "random per request" (the CLI itself treats -1 oddly).
+        let seed = if seed < 0 {
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| (d.subsec_nanos() & 0x7fff_ffff) as i32)
+                .unwrap_or(self.seed)
+        } else {
+            seed
+        };
+
         let mut cmd = Command::new(&self.binary);
         cmd.arg("-t")
             .arg(&req.text)
             .arg("--timesteps")
             .arg(req.num_steps.to_string())
             .arg("--cfg")
-            .arg(format!("{}", self.cfg))
+            .arg(format!("{cfg}"))
             .arg("--temperature")
-            .arg(format!("{}", self.temperature))
+            .arg(format!("{temperature}"))
             .arg("--seed")
-            .arg(self.seed.to_string())
+            .arg(seed.to_string())
             .arg("-o")
             .arg(&out_wav);
 

@@ -6,7 +6,7 @@
 
 use crate::{
     qwen3tts::Qwen3TtsEngine, voxcpm2::VoxCpm2Engine, zipvoice::ZipVoiceEngine, Audio, CoreError,
-    EngineKind, Manifest, Result,
+    EngineKind, Manifest, ParamSpec, Result,
 };
 use serde::Serialize;
 use std::{
@@ -47,6 +47,10 @@ pub struct SynthRequest {
     pub prompt_sr: i32,
     pub speed: f32,
     pub num_steps: i32,
+    /// Engine-specific options declared by the manifest parameter list
+    /// (e.g. voxcpm2 cfg/temperature/seed). Values are validated server
+    /// side against the ParamSpec range.
+    pub params: std::collections::BTreeMap<String, serde_json::Value>,
     /// Optional progress callback; absent for engines/clients without UI.
     pub progress: Option<ProgressSink>,
 }
@@ -60,6 +64,7 @@ impl std::fmt::Debug for SynthRequest {
             .field("prompt_sr", &self.prompt_sr)
             .field("speed", &self.speed)
             .field("num_steps", &self.num_steps)
+            .field("params", &self.params)
             .field("progress", &self.progress.is_some())
             .finish()
     }
@@ -74,6 +79,7 @@ pub struct EngineInfo {
     pub capabilities: Vec<String>,
     pub loaded: bool,
     pub defaults: serde_json::Value,
+    pub parameters: Vec<ParamSpec>,
 }
 
 pub struct EngineManager {
@@ -132,8 +138,15 @@ impl EngineManager {
                 capabilities: m.capabilities.clone(),
                 loaded: loaded.contains_key(&m.id),
                 defaults: serde_json::to_value(&m.defaults).unwrap_or(serde_json::json!({})),
+                parameters: m.parameters_or_defaults(),
             })
             .collect()
+    }
+
+    /// Tunable parameters declared by the manifest, or the kind
+    /// defaults. Used both for the UI and request validation.
+    pub fn parameters(&self, id: &str) -> Result<Vec<ParamSpec>> {
+        Ok(self.manifest(id)?.parameters_or_defaults())
     }
 
     /// Manifests are cloned out so no lock is held while an engine is

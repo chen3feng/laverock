@@ -35,6 +35,13 @@ above passed as environment variables.
 
 - Adding a model of a supported kind is just a directory with an
   `engine.json` manifest under `models/` — no code changes.
+- A manifest may declare a `parameters` array; the synthesis page builds
+  its controls from it (label, `float`/`int`/`bool`/`choice` type,
+  min/max/step, options, default, hint) and the server validates every
+  submitted value against the same list. Without one, each kind gets its
+  built-in set: speed and diffusion steps for ZipVoice, plus
+  CFG/temperature/seed for VoxCPM2, and nothing for the non-diffusion
+  Qwen3-TTS runner.
 - Inference uses the official [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx)
   Rust crate (static, prebuilt ONNX Runtime; no Python, no system libraries).
 
