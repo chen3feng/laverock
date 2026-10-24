@@ -24,7 +24,8 @@
       "../../scripts/qwen3tts_runner.py": "scripts/qwen3tts_runner.py"
     },
     "macOS": {
-      "signingIdentity": "-"
+      "signingIdentity": "-",
+      "entitlements": "entitlements.plist"
     },
     "icon": [
       "icons/32x32.png",
