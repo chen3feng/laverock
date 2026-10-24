@@ -176,6 +176,16 @@
   }
   .pbar-label b { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
 
+  /* ---------- history ---------- */
+  .ghost.danger { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 45%, var(--line)); }
+  .hist-text { margin: 8px 0 10px; line-height: 1.5; }
+  .hist-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .hist-row audio { height: 34px; flex: 1; min-width: 220px; }
+  .hist-meta { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  @media (max-width: 760px) {
+    .hist-row audio { min-width: 0; width: 100%; order: 3; }
+  }
+
   /* ---------- overlay / toast ---------- */
   .overlay { position: fixed; inset: 0; background: rgba(8, 9, 12, .94);
     display: none; place-items: center; z-index: 50; padding: 20px; }
@@ -234,6 +244,10 @@
     <a href="#/models" data-page="models">
       <svg viewBox="0 0 24 24"><path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/></svg>
       <span>模型</span>
+    </a>
+    <a href="#/history" data-page="history">
+      <svg viewBox="0 0 24 24"><path d="M3 3v5h5"/><path d="M3.05 13A9 9 0 1 0 6 5.3L3 8"/><path d="M12 7v5l4 2"/></svg>
+      <span>历史</span>
     </a>
     <a href="#/settings" data-page="settings">
       <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9c.14.63.63 1.13 1.26 1.27H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z"/></svg>
@@ -361,6 +375,16 @@
       </div>
     </section>
 
+    <!-- ================= 历史 ================= -->
+    <section id="page-history" class="page">
+      <div class="page-head" style="display:flex;align-items:flex-end;justify-content:space-between;gap:12px;flex-wrap:wrap">
+        <div><h1>历史</h1><p class="sub">本机生成的语音，最多保留 100 条或 1 GB。</p></div>
+        <button class="ghost danger" id="clearHistory" type="button" hidden>清空全部</button>
+      </div>
+      <div id="historyList"></div>
+      <div class="empty" id="historyEmpty" hidden>还没有生成记录。去「合成」生成第一条吧。</div>
+    </section>
+
     <!-- ================= 设置 ================= -->
     <section id="page-settings" class="page">
       <div class="page-head"><h1>设置</h1><p class="sub">下载网络、手机遥控与关于信息。</p></div>
@@ -464,8 +488,8 @@
 
 <script>
 const $ = (id) => document.getElementById(id);
-const PAGES = ['synthesize', 'voices', 'models', 'settings'];
-const PAGE_TITLES = { synthesize: '合成', voices: '语音素材', models: '模型', settings: '设置' };
+const PAGES = ['synthesize', 'voices', 'history', 'models', 'settings'];
+const PAGE_TITLES = { synthesize: '合成', voices: '语音素材', history: '历史', models: '模型', settings: '设置' };
 const HF_PRESETS = [
   { value: '', label: '官方（huggingface.co）' },
   { value: 'https://hf-mirror.com', label: 'hf-mirror.com（国内加速）' },
@@ -1297,6 +1321,98 @@ function schedulePoll() {
   }, 1500);
 }
 
+// ---------------------------------------------------------------- history
+
+let historyItems = [];
+
+async function loadHistory() {
+  try {
+    const d = await api('/api/history');
+    historyItems = d.history || [];
+  } catch (e) {
+    toast('读取历史失败：' + e.message, true);
+    return;
+  }
+  renderHistory();
+}
+
+function renderHistory() {
+  const box = $('historyList');
+  box.innerHTML = '';
+  $('historyEmpty').hidden = historyItems.length > 0;
+  $('clearHistory').hidden = historyItems.length === 0;
+  const engineName = Object.fromEntries(engines.map((e) => [e.id, e.name]));
+
+  for (const h of historyItems) {
+    const card = document.createElement('div');
+    card.className = 'card';
+
+    const meta = document.createElement('div');
+    meta.className = 'hist-meta';
+    const chip = document.createElement('span');
+    chip.className = 'chip';
+    chip.textContent = engineName[h.engine_id] || h.engine_name || h.engine_id;
+    const when = document.createElement('span');
+    when.className = 'hint';
+    when.textContent =
+      new Date(h.created_at * 1000).toLocaleString('zh-CN', { hour12: false }) +
+      ` · ${fmtDur(h.duration_secs)} · ${fmtBytes(h.bytes)}`;
+    meta.append(chip, when);
+
+    const text = document.createElement('div');
+    text.className = 'hist-text';
+    text.textContent = h.text;
+
+    const row = document.createElement('div');
+    row.className = 'hist-row';
+    const audio = document.createElement('audio');
+    audio.controls = true;
+    audio.preload = 'none';
+    audio.src = `/api/history/${encodeURIComponent(h.id)}/audio`;
+
+    const dl = document.createElement('a');
+    dl.className = 'hint';
+    dl.href = audio.src;
+    dl.download = `laverock-${h.id}.wav`;
+    dl.textContent = '下载 WAV';
+
+    const del = document.createElement('button');
+    del.className = 'ghost danger';
+    del.type = 'button';
+    del.textContent = '删除';
+    del.onclick = async () => {
+      if (!confirm('删除这条生成记录？音频文件会一并删除。')) return;
+      del.disabled = true;
+      try {
+        await api(`/api/history/${encodeURIComponent(h.id)}`, { method: 'DELETE' });
+        card.remove();
+        historyItems = historyItems.filter((x) => x.id !== h.id);
+        $('historyEmpty').hidden = historyItems.length > 0;
+        $('clearHistory').hidden = historyItems.length === 0;
+      } catch (e) {
+        del.disabled = false;
+        toast('删除失败：' + e.message, true);
+      }
+    };
+
+    row.append(audio, dl, del);
+    card.append(meta, text, row);
+    box.appendChild(card);
+  }
+}
+
+$('clearHistory').onclick = async () => {
+  if (!confirm('清空全部生成记录？此操作不可恢复。')) return;
+  try {
+    await api('/api/history', { method: 'DELETE' });
+    historyItems = [];
+    renderHistory();
+    toast('已清空历史');
+  } catch (e) {
+    toast('清空失败：' + e.message, true);
+  }
+};
+
 // ---------------------------------------------------------------- settings
 
 function fillPreset(sel, presets) {
@@ -1590,6 +1706,7 @@ function showPage(page) {
     modelsTimer = null;
   }
   if (page === 'voices') loadProfiles();
+  if (page === 'history') loadHistory();
   if (page === 'models') loadModels();
   if (page === 'settings') loadSettingsPage();
 }

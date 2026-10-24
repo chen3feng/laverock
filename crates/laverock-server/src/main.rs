@@ -13,6 +13,7 @@
 //! Phone/LAN access (pairing, TLS, device tokens) comes later; until
 //! then the server binds loopback only.
 
+mod history;
 mod models;
 mod profiles;
 mod proxy;
@@ -40,6 +41,7 @@ use tracing::error;
 struct AppState {
     manager: Arc<EngineManager>,
     profiles: Arc<ProfileStore>,
+    history: Arc<history::HistoryStore>,
     remote: Arc<RemoteState>,
     settings: Arc<SettingsStore>,
     models: Arc<ModelService>,
@@ -527,6 +529,39 @@ async fn profile_audio(
         .into_response())
 }
 
+// ---------------------------------------------------------------- history
+
+async fn list_history(State(state): State<AppState>) -> Json<serde_json::Value> {
+    Json(serde_json::json!({ "history": state.history.list() }))
+}
+
+async fn delete_history(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<StatusCode, ApiError> {
+    state.history.delete(&id)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn clear_history(State(state): State<AppState>) -> Result<StatusCode, ApiError> {
+    state.history.clear()?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn history_audio(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Response, ApiError> {
+    let path = state.history.audio_path(&id)?;
+    let bytes = tokio::fs::read(&path).await?;
+    Ok((
+        StatusCode::OK,
+        [(header::CONTENT_TYPE, "audio/wav".to_string())],
+        bytes,
+    )
+        .into_response())
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn synthesize(
     Path(engine_id): Path<String>,
@@ -642,6 +677,14 @@ async fn synthesize(
     };
 
     let manager = state.manager.clone();
+    let history = state.history.clone();
+    let engine_name = state
+        .manager
+        .list()
+        .into_iter()
+        .find(|e| e.id == engine_id)
+        .map(|e| e.name)
+        .unwrap_or_else(|| engine_id.clone());
 
     // The desktop UI asks for a Server-Sent-Events stream so long Qwen
     // generations can report progress; other clients keep getting the WAV.
@@ -661,10 +704,11 @@ async fn synthesize(
             params: params.clone(),
             progress: None,
         };
+        let history_engine = engine_id.clone();
         let Audio {
             samples,
             sample_rate,
-        } = tokio::task::spawn_blocking(move || manager.synthesize(&engine_id, &request))
+        } = tokio::task::spawn_blocking(move || manager.synthesize(&history_engine, &request))
             .await
             .map_err(|e| ApiError {
                 status: StatusCode::INTERNAL_SERVER_ERROR,
@@ -672,6 +716,9 @@ async fn synthesize(
             })??;
 
         let wav = encode_wav(&samples, sample_rate)?;
+        if let Err(e) = history.add(&engine_id, &engine_name, &text, &wav, sample_rate) {
+            tracing::warn!("history add failed: {e}");
+        }
         return Ok((
             StatusCode::OK,
             [
@@ -696,6 +743,7 @@ async fn synthesize(
     };
     let (tx, rx) = mpsc::channel::<std::result::Result<Bytes, std::io::Error>>(16);
 
+    let history_text = text.clone();
     tokio::task::spawn_blocking(move || {
         let tx2 = tx.clone();
         let sink: laverock_core::ProgressSink = Arc::new(move |event| {
@@ -724,6 +772,11 @@ async fn synthesize(
                 sample_rate,
             }) => match encode_wav(&samples, sample_rate) {
                 Ok(wav) => {
+                    if let Err(e) =
+                        history.add(&engine_id, &engine_name, &history_text, &wav, sample_rate)
+                    {
+                        tracing::warn!("history add failed: {e}");
+                    }
                     let b64 = base64::engine::general_purpose::STANDARD.encode(&wav);
                     let _ = tx.blocking_send(Ok(sse("wav", &b64)));
                 }
@@ -855,6 +908,7 @@ async fn main() {
 
     let manager = Arc::new(EngineManager::open(&models_dir).expect("scan models dir"));
     let profiles = Arc::new(ProfileStore::open(&data_dir).expect("open data dir"));
+    let history = Arc::new(history::HistoryStore::open(&data_dir).expect("open history"));
     let remote = Arc::new(RemoteState::open(&data_dir).expect("open remote state"));
     let settings = Arc::new(SettingsStore::open(&data_dir).expect("open settings"));
     let scripts_dir = models::resolve_scripts_dir();
@@ -878,6 +932,7 @@ async fn main() {
     let state = AppState {
         manager,
         profiles,
+        history,
         remote: remote.clone(),
         settings,
         models: model_service,
@@ -893,6 +948,9 @@ async fn main() {
         .route("/api/profiles", get(list_profiles).post(create_profile))
         .route("/api/profiles/{id}", delete(delete_profile))
         .route("/api/profiles/{id}/audio", get(profile_audio))
+        .route("/api/history", get(list_history).delete(clear_history))
+        .route("/api/history/{id}", delete(delete_history))
+        .route("/api/history/{id}/audio", get(history_audio))
         .route("/api/session", get(session))
         .route("/api/pair/start", post(start_pairing))
         .route("/api/pair/claim", post(claim))
