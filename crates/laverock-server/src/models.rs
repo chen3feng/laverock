@@ -689,6 +689,10 @@ mod tests {
         assert!(cut.chars().count() <= 2);
     }
 
+    // The installer runs download scripts with `bash`, which the Windows
+    // CI image does not put on PATH; in-app installs there require Git
+    // Bash anyway, so exercise this path on Unix only.
+    #[cfg(unix)]
     #[test]
     fn installer_records_output_and_finishes() {
         let base = std::env::temp_dir().join(format!(

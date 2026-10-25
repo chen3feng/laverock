@@ -12,6 +12,7 @@
 //! PAC scripts are not evaluated. If one is configured the user can pick
 //! "手动指定" and type the proxy directly.
 
+#[cfg(any(target_os = "macos", windows))]
 use std::process::Command;
 
 /// Environment variable (either case) that specifies a proxy, in

@@ -166,6 +166,35 @@ def normalize_volume(y, target_dbfs: float = -6.0):
     return torch.clip(y * gain, -1.0, 1.0)
 
 
+def trim_to_silence(audio, limit_sec: float, sr: int):
+    """Cut a long prompt near `limit_sec`, preferring a quiet point.
+
+    Cutting mid-word makes the model continue the reference's last
+    syllable at the start of the generated audio, so look for the
+    quietest 50 ms window before the limit and append a short pause.
+    """
+    import torch
+
+    dtype = audio.dtype
+    end = min(audio.shape[-1], int(limit_sec * sr))
+    win = max(1, int(0.05 * sr))
+    step = max(1, int(0.02 * sr))
+    search_from = max(0, end - int(1.0 * sr))
+    best = None
+    for start in range(search_from, end - win + 1, step):
+        seg = audio[..., start:start + win]
+        if seg.shape[-1] < win:
+            break
+        rms = float(seg.pow(2).mean().sqrt())
+        if best is None or rms < best[0]:
+            best = (rms, start + win)
+    cut = best[1] if best is not None and best[0] < 0.01 else end
+    cut = max(cut, int(0.5 * sr))
+    trimmed = audio[..., :cut]
+    pause = torch.zeros(*audio.shape[:-1], int(0.1 * sr), dtype=dtype)
+    return torch.cat([trimmed, pause], dim=-1)
+
+
 def load_audio(path: str, sr: int):
     """Reference clip at `sr`, mono, volume-normalized like upstream."""
     import librosa
@@ -245,15 +274,17 @@ def main() -> int:
         # sliced away before decoding — the first sentence disappears.
         # Trim the clip to a duration consistent with the transcript.
         approx_pd = approx_duration_from_text(prompt_text, max_duration=max_duration)
-        limit = max(2.0, approx_pd * 1.4)
         audio = load_audio(args.ref_audio, sr)
-        if audio.shape[-1] / sr > limit:
-            audio = audio[..., : int(limit * sr)]
+        clip_secs = audio.shape[-1] / sr
+        # Only intervene when the mismatch is extreme; moderate differences
+        # are handled fine by the model and trimming risks cutting mid-word.
+        if clip_secs > max(2.0, approx_pd * 2.0):
+            audio = trim_to_silence(audio, max(2.0, approx_pd * 1.4), sr)
             emit(
                 "stage",
-                f"参考音频较长，已裁剪到 {limit:.1f} 秒以匹配文字稿",
+                f"参考音频较长，已裁剪到 {audio.shape[-1] / sr:.1f} 秒以匹配文字稿",
             )
-        elif audio.shape[-1] / sr < approx_pd / 1.8:
+        elif clip_secs < approx_pd / 1.8:
             emit("stage", "提示：文字稿明显长于参考音频，开头可能不完整")
         prompt_wav = audio.unsqueeze(0).to(device)
 
