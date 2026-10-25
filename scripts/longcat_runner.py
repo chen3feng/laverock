@@ -82,6 +82,81 @@ def normalize_text(text: str) -> str:
     return text
 
 
+_DIGIT_CN = {
+    "0": "零", "1": "一", "2": "二", "3": "三", "4": "四",
+    "5": "五", "6": "六", "7": "七", "8": "八", "9": "九",
+}
+
+
+def normalize_numbers(text: str) -> str:
+    """Read digit strings as Chinese numerals.
+
+    Upstream notes the model handles Arabic numerals poorly (issue #9)
+    and recommends text normalization. Digit-by-digit reading matches how
+    people typically read phone numbers, years and digit sequences, which
+    is also what reference clips usually contain.
+    """
+    text = re.sub(r"(?<=\d),(?=\d)", "", text)
+    text = re.sub(r"[０-９]", lambda m: chr(ord(m.group(0)) - 0xFF10 + ord("0")), text)
+
+    def repl(match: re.Match) -> str:
+        return "".join(
+            "点" if c in ".．" else _DIGIT_CN[c] for c in match.group(0)
+        )
+
+    return re.sub(r"\d+(?:[.．]\d+)?", repl, text)
+
+
+def split_into_chunks(text: str, budget_seconds: float) -> list:
+    """Split text so each chunk's estimated speech fits the budget.
+
+    LongCat can only produce `max_wav_duration` (30 s) per call, prompt
+    included. Handing it more text than fits makes it drop the beginning,
+    so split on sentence punctuation and, when a single sentence is still
+    too long, on commas and finally characters.
+    """
+    budget = max(1.0, budget_seconds)
+
+    def fits(part: str) -> bool:
+        return approx_duration_from_text(part, max_duration=1e9) <= budget
+
+    units = [u for u in re.split(r"(?<=[。！？!?；;\n])", text) if u.strip()]
+    chunks: list = []
+    current = ""
+    for unit in units:
+        candidate = current + unit
+        if fits(candidate):
+            current = candidate
+            continue
+        if current.strip():
+            chunks.append(current.strip())
+        current = ""
+        if fits(unit):
+            current = unit
+            continue
+        # A single sentence over budget: prefer comma-level pieces.
+        parts = [p for p in re.split(r"(?<=[，,、：:])", unit) if p.strip()]
+        for part in parts:
+            candidate = current + part
+            if fits(candidate):
+                current = candidate
+            else:
+                if current.strip():
+                    chunks.append(current.strip())
+                current = ""
+                if fits(part):
+                    current = part
+                else:
+                    # Last resort: fixed-size slices by estimated chars.
+                    per_char = 0.21
+                    step = max(1, int(budget / per_char))
+                    for i in range(0, len(part), step):
+                        chunks.append(part[i:i + step])
+    if current.strip():
+        chunks.append(current.strip())
+    return chunks or [text]
+
+
 def normalize_volume(y, target_dbfs: float = -6.0):
     import torch
 
@@ -150,21 +225,19 @@ def main() -> int:
     full_hop = model.config.latent_hop
     max_duration = model.config.max_wav_duration
 
-    text = normalize_text(args.text)
+    text = normalize_text(normalize_numbers(args.text))
     no_prompt = not args.ref_audio
 
     prompt_wav = None
     prompt_dur = 0
     prompt_time = 0.0
     approx_pd = 0.0
-    if no_prompt:
-        full_text = text
-    else:
-        prompt_text = normalize_text(args.ref_text or "")
+    prompt_text = ""
+    if not no_prompt:
+        prompt_text = normalize_text(normalize_numbers(args.ref_text or ""))
         if not prompt_text:
             print("clone mode requires --ref-text", file=sys.stderr)
             return 2
-        full_text = f"{prompt_text} {text}"
 
         # LongCat aligns the text condition against the prompt *duration*.
         # If the clip runs much longer than its transcript implies, the
@@ -198,8 +271,6 @@ def main() -> int:
         prompt_dur = plt.shape[-1]
         prompt_time = prompt_dur * full_hop / sr
 
-    inputs = tokenizer([full_text], padding="longest", return_tensors="pt")
-
     if prompt_time >= max_duration - 0.5:
         print(
             f"reference audio is {prompt_time:.1f}s, but LongCat-AudioDiT "
@@ -208,27 +279,48 @@ def main() -> int:
             file=sys.stderr,
         )
         return 2
-    dur_sec = approx_duration_from_text(text, max_duration=max_duration - prompt_time)
-    if not no_prompt:
-        ratio = np.clip(prompt_time / max(approx_pd, 1e-3), 1.0, 1.5)
-        dur_sec = dur_sec * ratio
-    duration = int(dur_sec * sr // full_hop)
-    duration = min(duration + prompt_dur, int(max_duration * sr // full_hop))
-    emit("stage", f"正在合成语音（{dur_sec:.1f} 秒）")
 
-    with torch.no_grad():
-        output = model(
-            input_ids=inputs.input_ids,
-            attention_mask=inputs.attention_mask,
-            prompt_audio=prompt_wav,
-            duration=duration,
-            steps=args.steps,
-            cfg_strength=args.cfg,
-            guidance_method=args.guidance,
+    ratio = 1.0
+    if not no_prompt:
+        ratio = float(np.clip(prompt_time / max(approx_pd, 1e-3), 1.0, 1.5))
+    # Text seconds that fit in one call, after accounting for the prompt.
+    budget = max(1.0, (max_duration - prompt_time - 0.5) / ratio)
+    chunks = split_into_chunks(text, budget)
+    if len(chunks) > 1:
+        emit("stage", f"文本较长，分 {len(chunks)} 段合成")
+
+    pieces = []
+    for index, chunk in enumerate(chunks):
+        if len(chunks) > 1:
+            emit("stage", f"正在合成第 {index + 1}/{len(chunks)} 段")
+        full_text = chunk if no_prompt else f"{prompt_text} {chunk}"
+        inputs = tokenizer([full_text], padding="longest", return_tensors="pt")
+        dur_sec = approx_duration_from_text(chunk, max_duration=budget) * ratio
+        duration = int(dur_sec * sr // full_hop)
+        duration = min(duration + prompt_dur, int(max_duration * sr // full_hop))
+        if len(chunks) == 1:
+            emit("stage", f"正在合成语音（{dur_sec:.1f} 秒）")
+        torch.manual_seed(args.seed + index)
+        with torch.no_grad():
+            output = model(
+                input_ids=inputs.input_ids,
+                attention_mask=inputs.attention_mask,
+                prompt_audio=prompt_wav,
+                duration=duration,
+                steps=args.steps,
+                cfg_strength=args.cfg,
+                guidance_method=args.guidance,
+            )
+        pieces.append(
+            output.waveform.squeeze().detach().to(torch.float32).cpu().numpy()
         )
 
-    wav = output.waveform.squeeze().detach().to(torch.float32).cpu().numpy()
-    wav = np.clip(wav, -1.0, 1.0)
+    # A short pause between chunks keeps sentence boundaries audible.
+    gap = np.zeros(int(0.12 * sr), dtype=np.float32)
+    merged = pieces[0]
+    for piece in pieces[1:]:
+        merged = np.concatenate([merged, gap, piece])
+    wav = np.clip(merged, -1.0, 1.0)
     pcm = (wav * 32767.0).astype("<i2")
     os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
     import wave
