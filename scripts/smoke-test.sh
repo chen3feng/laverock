@@ -94,6 +94,22 @@ synth mixed "人工智能 artificial intelligence 正在改变生活。" news-fe
   "本台消息, 中共中央国务院, 近日印发关于构建数据基础制度, 更好发挥数据要素作用的意见." \
   -F 'speed=1.1'
 
+echo "mp3 export"
+if curl -s "$BASE/api/health" | grep -q '"mp3":true'; then
+  code=$(curl -s -o "$OUT/zh.mp3" -w '%{http_code}' -X POST "$BASE/api/audio/mp3" \
+    --data-binary @"$OUT/zh.wav")
+  [ "$code" = "200" ] && head -c 3 "$OUT/zh.mp3" | grep -q ID3 \
+    && ok "wav -> mp3" || bad "wav -> mp3 (HTTP $code)"
+
+  hid=$(curl -s "$BASE/api/history" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p' | head -1)
+  code=$(curl -s -o "$OUT/hist.mp3" -w '%{http_code}' \
+    "$BASE/api/history/$hid/audio?format=mp3")
+  [ "$code" = "200" ] && head -c 3 "$OUT/hist.mp3" | grep -q ID3 \
+    && ok "history mp3" || bad "history mp3 (HTTP $code)"
+else
+  echo "  skip (no ffmpeg/lame)"
+fi
+
 echo "validation"
 code=$(curl -s -o /dev/null -w '%{http_code}' -X POST \
   "$BASE/api/engines/$MODEL/synthesize" \

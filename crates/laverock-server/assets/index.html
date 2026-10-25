@@ -311,6 +311,7 @@
         <button id="go" type="button">生成语音</button>
         <span id="status"></span>
         <a id="download" class="hint" download="laverock.wav" hidden>下载 WAV</a>
+        <a id="downloadMp3" class="hint" href="#" hidden>下载 MP3</a>
       </div>
       <div id="synthProgress" class="pbar" hidden><div class="pbar-fill indeterminate"></div></div>
       <div id="synthProgressLabel" class="pbar-label" hidden><span></span><b></b></div>
@@ -519,6 +520,8 @@ let modelsData = null;
 let modelsTimer = null;
 let previewId = null;
 let toastTimer = null;
+let mp3Supported = false;
+let lastSynthBlob = null;
 
 const esc = (value) => String(value ?? '').replace(/[&<>"']/g, (c) => (
   { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
@@ -1525,6 +1528,15 @@ function renderHistory() {
     dl.download = `laverock-${h.id}.wav`;
     dl.textContent = '下载 WAV';
 
+    let mp3 = null;
+    if (mp3Supported) {
+      mp3 = document.createElement('a');
+      mp3.className = 'hint';
+      mp3.href = `/api/history/${encodeURIComponent(h.id)}/audio?format=mp3`;
+      mp3.download = `laverock-${h.id}.mp3`;
+      mp3.textContent = '下载 MP3';
+    }
+
     const del = document.createElement('button');
     del.className = 'ghost danger';
     del.type = 'button';
@@ -1548,7 +1560,9 @@ function renderHistory() {
       }
     };
 
-    row.append(audio, dl, del);
+    row.append(audio, dl);
+    if (mp3) row.append(mp3);
+    row.append(del);
     card.append(meta, text, row);
     box.appendChild(card);
   }
@@ -1874,6 +1888,29 @@ function showPage(page) {
 
 window.addEventListener('hashchange', () => showPage(currentPage()));
 
+$('downloadMp3').onclick = async (event) => {
+  event.preventDefault();
+  if (!lastSynthBlob) return;
+  try {
+    const res = await fetch('/api/audio/mp3', { method: 'POST', body: lastSynthBlob });
+    if (!res.ok) {
+      const msg = await res.json().then((j) => j.error).catch(() => res.statusText);
+      throw new Error(msg);
+    }
+    const mp3 = await res.blob();
+    const url = URL.createObjectURL(mp3);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'laverock.mp3';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 10000);
+  } catch (e) {
+    toast('导出 MP3 失败：' + e.message, true);
+  }
+};
+
 async function loadHealth() {
   try {
     const h = await api('/api/health');
@@ -1881,6 +1918,8 @@ async function loadHealth() {
     $('version').textContent = v ? 'v' + v : '';
     $('aboutVersion').textContent = v ? 'v' + v : '—';
     $('connState').classList.remove('off');
+    mp3Supported = !!h.mp3;
+    if (!mp3Supported) $('downloadMp3').hidden = true;
   } catch (_) {
     $('connState').classList.add('off');
   }

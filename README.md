@@ -21,7 +21,7 @@ laverock-desktop  Tauri shell: tray, autostart, server supervision
 The UI has a sidebar with four sections:
 
 - **合成** — pick an engine and a saved voice (or record/upload one), type
-  the text, generate and play or download the WAV.
+  the text, generate and play or download the result as WAV or MP3.
 - **语音素材** — the saved reference voices: play, create, edit (name,
   transcript, replace the clip) and delete. Confirmations use an in-app
   dialog because WebKit in the desktop shell does not implement
@@ -203,7 +203,12 @@ off and on again.
 | GET | `/api/profiles` | saved voices with duration/size |
 | POST | `/api/profiles` | multipart `name`, `prompt_text`, `prompt` (WAV) → saved voice |
 | GET | `/api/profiles/:id/audio` | reference clip of a saved voice |
+| POST | `/api/audio/mp3` | body: WAV → MP3 (needs ffmpeg or lame) |
+| POST | `/api/profiles/:id` | multipart `name`, `prompt_text`, optional `prompt` → edit a saved voice |
 | DELETE | `/api/profiles/:id` | delete a saved voice |
+| GET | `/api/history` | generated audio, newest first |
+| GET | `/api/history/:id/audio` | generated audio (`?format=mp3` to export) |
+| DELETE | `/api/history/:id` · `/api/history` | delete one/all generations |
 | GET | `/api/session` | loopback/paired state (public) |
 | POST | `/api/pair/start` | desktop-only: create a 5-minute pairing code + QR |
 | POST | `/api/pair/claim` | exchange a pairing code for a device cookie (public) |
@@ -233,6 +238,7 @@ curl -X POST http://127.0.0.1:8787/api/engines/sherpa-onnx-zipvoice-distill-int8
 | `LAVEROCK_MODELS_DIR` | `models` | directory scanned for `*/engine.json` |
 | `LAVEROCK_DATA_DIR` | `data` | profiles, settings, pairing state, TLS certs |
 | `LAVEROCK_SCRIPTS_DIR` | auto-detected | `scripts/` used by the model installer |
+| `LAVEROCK_FFMPEG` / `LAVEROCK_LAME` | auto-detected | explicit MP3 encoder path |
 | `LAVEROCK_TOOLS_DIR` | `<repo>/.tools` | build tools and Python venvs for engines |
 
 Packaged desktop builds ship `scripts/` inside the app bundle (macOS

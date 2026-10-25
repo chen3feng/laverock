@@ -13,6 +13,7 @@
 //! Phone/LAN access (pairing, TLS, device tokens) comes later; until
 //! then the server binds loopback only.
 
+mod export;
 mod history;
 mod models;
 mod profiles;
@@ -22,7 +23,7 @@ mod settings;
 
 use axum::{
     body::{Body, Bytes},
-    extract::{ConnectInfo, Multipart, Path, State},
+    extract::{ConnectInfo, DefaultBodyLimit, Multipart, Path, Query, State},
     http::{header, Request, StatusCode},
     middleware::{self, Next},
     response::{Html, IntoResponse, Response},
@@ -131,6 +132,7 @@ async fn health(State(state): State<AppState>) -> impl IntoResponse {
         "status": "ok",
         "version": env!("CARGO_PKG_VERSION"),
         "engines": state.manager.len(),
+        "mp3": export::mp3_available(),
     }))
 }
 
@@ -604,16 +606,64 @@ async fn clear_history(State(state): State<AppState>) -> Result<StatusCode, ApiE
     Ok(StatusCode::NO_CONTENT)
 }
 
+#[derive(serde::Deserialize)]
+struct AudioQuery {
+    #[serde(default)]
+    format: Option<String>,
+}
+
 async fn history_audio(
     State(state): State<AppState>,
     Path(id): Path<String>,
+    Query(query): Query<AudioQuery>,
 ) -> Result<Response, ApiError> {
-    let path = state.history.audio_path(&id)?;
-    let bytes = tokio::fs::read(&path).await?;
+    let wav_path = state.history.audio_path(&id)?;
+    if query.format.as_deref() != Some("mp3") {
+        let bytes = tokio::fs::read(&wav_path).await?;
+        return Ok((
+            StatusCode::OK,
+            [(header::CONTENT_TYPE, "audio/wav".to_string())],
+            bytes,
+        )
+            .into_response());
+    }
+
+    // Encode once and cache next to the WAV (history audio is immutable).
+    let mp3_path = wav_path.with_file_name("audio.mp3");
+    let bytes = if mp3_path.is_file() {
+        tokio::fs::read(&mp3_path).await?
+    } else {
+        let wav = tokio::fs::read(&wav_path).await?;
+        let mp3 = tokio::task::spawn_blocking(move || export::wav_to_mp3(&wav))
+            .await
+            .map_err(|e| ApiError {
+                status: StatusCode::INTERNAL_SERVER_ERROR,
+                message: format!("mp3 task panicked: {e}"),
+            })??;
+        let tmp = mp3_path.with_extension("mp3.tmp");
+        tokio::fs::write(&tmp, &mp3).await?;
+        let _ = tokio::fs::rename(&tmp, &mp3_path).await;
+        mp3
+    };
     Ok((
         StatusCode::OK,
-        [(header::CONTENT_TYPE, "audio/wav".to_string())],
+        [(header::CONTENT_TYPE, "audio/mpeg".to_string())],
         bytes,
+    )
+        .into_response())
+}
+
+async fn export_mp3(body: Bytes) -> Result<Response, ApiError> {
+    let mp3 = tokio::task::spawn_blocking(move || export::wav_to_mp3(&body))
+        .await
+        .map_err(|e| ApiError {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            message: format!("mp3 task panicked: {e}"),
+        })??;
+    Ok((
+        StatusCode::OK,
+        [(header::CONTENT_TYPE, "audio/mpeg".to_string())],
+        mp3,
     )
         .into_response())
 }
@@ -1010,6 +1060,11 @@ async fn main() {
         .route("/api/history", get(list_history).delete(clear_history))
         .route("/api/history/{id}", delete(delete_history))
         .route("/api/history/{id}/audio", get(history_audio))
+        .route(
+            "/api/audio/mp3",
+            // A minute of 48 kHz WAV exceeds axum's 2 MB default.
+            post(export_mp3).layer(DefaultBodyLimit::max(64 * 1024 * 1024)),
+        )
         .route("/api/session", get(session))
         .route("/api/pair/start", post(start_pairing))
         .route("/api/pair/claim", post(claim))

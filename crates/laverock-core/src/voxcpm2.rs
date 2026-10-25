@@ -131,6 +131,11 @@ impl SpeechEngine for VoxCpm2Engine {
         let mut cmd = Command::new(&self.binary);
         cmd.arg("-t")
             .arg(&req.text)
+            // `--steps` caps decoding at ~0.16 s of audio per step and
+            // defaults to 200, silently truncating anything past ~32 s.
+            // Scale it with the text; the model still stops at EOS.
+            .arg("--steps")
+            .arg(decode_steps(&req.text).to_string())
             .arg("--timesteps")
             .arg(req.num_steps.to_string())
             .arg("--cfg")
@@ -183,5 +188,38 @@ impl SpeechEngine for VoxCpm2Engine {
             samples,
             sample_rate,
         })
+    }
+}
+
+/// Decode-step cap for a text.
+///
+/// voxcpm2-cli emits roughly 0.16 s of audio per step and defaults to 200
+/// steps (≈32 s), which is what truncated long paragraphs. Estimate the
+/// spoken length with a margin; EOS still ends generation earlier.
+fn decode_steps(text: &str) -> i64 {
+    let cjk = text
+        .chars()
+        .filter(|c| ('\u{4e00}'..='\u{9fff}').contains(c))
+        .count() as f32;
+    let words = text.split_whitespace().filter(|w| !w.is_empty()).count() as f32;
+    let seconds = cjk * 0.25 + words * 0.45 + 3.0;
+    let steps = (seconds / 0.16 * 1.15).ceil() as i64;
+    steps.clamp(200, 4000)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::decode_steps;
+
+    #[test]
+    fn scales_steps_with_text_length() {
+        // Short text keeps the CLI default (200 steps ≈ 32 s).
+        assert_eq!(decode_steps("你好"), 200);
+        // A ~200 character paragraph needs well over the default.
+        let long = "人工智能技术正在快速发展。".repeat(14);
+        assert!(decode_steps(&long) > 300, "{}", decode_steps(&long));
+        // Very long input is bounded.
+        let huge = "很长的一段文字。".repeat(2000);
+        assert_eq!(decode_steps(&huge), 4000);
     }
 }
