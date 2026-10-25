@@ -40,6 +40,70 @@ lv_content_length() {
     END { printf "%d", v + 0 }'
 }
 
+# lv_fetch_parallel <url> <dest> <total_bytes> [workers]
+#
+# Split a large file into ranged requests and resume per slice (Hugging
+# Face's single-connection download is often ~5x slower than parallel
+# ranges through a mirror). Emits @@LV progress; verifies the final size.
+lv_fetch_parallel() {
+  local url="$1" dest="$2" total="$3" workers="${4:-8}"
+  local i s e want have got alive pid
+  local chunk=$(( (total + workers - 1) / workers ))
+  local pids=()
+
+  for i in $(seq 0 $((workers - 1))); do
+    s=$((i * chunk)); e=$((s + chunk - 1))
+    [ "$e" -ge "$total" ] && e=$((total - 1))
+    want=$((e - s + 1))
+    have=$(lv_filesize "$dest.part$i")
+    if [ "$have" -gt "$want" ]; then
+      have=0
+      : >"$dest.part$i"
+    fi
+    if [ "$have" -lt "$want" ]; then
+      curl -sSL --fail --retry 3 --retry-delay 2 \
+        -r "$((s + have))-$e" "$url" >>"$dest.part$i" &
+      pids+=($!)
+    fi
+  done
+
+  while :; do
+    alive=0
+    for pid in "${pids[@]}"; do
+      kill -0 "$pid" 2>/dev/null && alive=1
+    done
+    [ "$alive" -eq 0 ] && break
+    sleep 2
+    got=0
+    for i in $(seq 0 $((workers - 1))); do
+      got=$((got + $(lv_filesize "$dest.part$i")))
+    done
+    lv_progress "$(awk -v s="$got" -v t="$total" 'BEGIN { if (t > 0) printf "%.1f", s * 100 / t }')"
+  done
+  for pid in "${pids[@]}"; do
+    wait "$pid" || return 1
+  done
+
+  : >"$dest"
+  for i in $(seq 0 $((workers - 1))); do
+    s=$((i * chunk)); e=$((s + chunk - 1))
+    [ "$e" -ge "$total" ] && e=$((total - 1))
+    want=$((e - s + 1))
+    have=$(lv_filesize "$dest.part$i")
+    if [ "$have" -ne "$want" ]; then
+      echo "part $i is $have bytes, expected $want" >&2
+      return 1
+    fi
+    cat "$dest.part$i" >>"$dest"
+    rm -f "$dest.part$i"
+  done
+  if [ "$(lv_filesize "$dest")" -ne "$total" ]; then
+    echo "assembled file has the wrong size" >&2
+    return 1
+  fi
+  lv_progress 100
+}
+
 # lv_track <dir> <total_bytes> <command...>
 #
 # Run a command that fills <dir> (e.g. `hf download --local-dir`) and

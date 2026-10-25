@@ -167,6 +167,18 @@ else
   echo "  skip qwen3tts (not installed)"
 fi
 
+if case "$engines_json" in *'"id":"dots"'*) true ;; *) false ;; esac; then
+  echo "dots"
+  code=$(curl -s -o "$OUT/dots.wav" -w '%{http_code}' --max-time 600 -X POST \
+    "$BASE/api/engines/dots/synthesize" \
+    -F 'text=你好，我是 dots.tts，通过 laverock 调用。' \
+    -F "prompt=@$DIR/test_wavs/leijun-1.wav")
+  [ "$code" = "200" ] && head -c 4 "$OUT/dots.wav" | grep -q RIFF \
+    && ok "dots clone" || bad "dots (HTTP $code)"
+else
+  echo "  skip dots (not installed)"
+fi
+
 if case "$engines_json" in *'"id":"longcat"'*) true ;; *) false ;; esac; then
   echo "longcat"
   code=$(curl -s -o "$OUT/longcat.wav" -w '%{http_code}' --max-time 600 -X POST \

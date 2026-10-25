@@ -24,6 +24,7 @@
       "../../scripts/download-qwen3tts.sh": "scripts/download-qwen3tts.sh",
       "../../scripts/qwen3tts_runner.py": "scripts/qwen3tts_runner.py",
       "../../scripts/download-longcat.sh": "scripts/download-longcat.sh",
+      "../../scripts/download-dots.sh": "scripts/download-dots.sh",
       "../../scripts/longcat_runner.py": "scripts/longcat_runner.py"
     },
     "macOS": {

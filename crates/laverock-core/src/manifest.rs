@@ -18,6 +18,8 @@ pub enum EngineKind {
     Qwen3Tts,
     #[serde(rename = "longcat")]
     LongCat,
+    #[serde(rename = "dots")]
+    Dots,
 }
 
 impl EngineKind {
@@ -27,6 +29,7 @@ impl EngineKind {
             EngineKind::VoxCpm2 => "voxcpm2",
             EngineKind::Qwen3Tts => "qwen3tts",
             EngineKind::LongCat => "longcat",
+            EngineKind::Dots => "dots",
         }
     }
 }
@@ -49,6 +52,8 @@ pub struct Manifest {
     pub qwen3tts: Option<Qwen3TtsManifest>,
     #[serde(default)]
     pub longcat: Option<LongCatManifest>,
+    #[serde(default)]
+    pub dots: Option<DotsManifest>,
     #[serde(default)]
     pub defaults: SynthDefaults,
     /// User-tunable synthesis parameters shown by the UI. When absent,
@@ -167,6 +172,102 @@ impl Manifest {
                     step: None,
                     options: Vec::new(),
                     default: serde_json::json!(1024),
+                    hint: "相同种子 + 文本得到可复现的声音".into(),
+                },
+            ],
+            // Continuous-AR flow matching; 48 kHz output.
+            EngineKind::Dots => vec![
+                ParamSpec::int_slider(
+                    "num_steps",
+                    "采样步数",
+                    10,
+                    1,
+                    32,
+                    1,
+                    "SOAR 推荐 10 步；变多会更慢",
+                ),
+                ParamSpec::slider(
+                    "guidance",
+                    "引导强度",
+                    1.2,
+                    0.0,
+                    3.0,
+                    0.1,
+                    "越高越贴近参考音色，过高可能失真",
+                ),
+                ParamSpec {
+                    name: "clone_mode".into(),
+                    label: "克隆方式".into(),
+                    kind: ParamKind::Choice,
+                    min: None,
+                    max: None,
+                    step: None,
+                    options: vec![
+                        ParamOption {
+                            label: "仅声纹（只凭声音，推荐）".into(),
+                            value: "xvector".into(),
+                        },
+                        ParamOption {
+                            label: "声纹 + 文字（文字稿准确时更相似）".into(),
+                            value: "continuation".into(),
+                        },
+                    ],
+                    default: serde_json::json!("xvector"),
+                    hint: "文字稿不准确时选「仅声纹」更稳".into(),
+                },
+                ParamSpec {
+                    name: "language".into(),
+                    label: "语言标签".into(),
+                    kind: ParamKind::Choice,
+                    min: None,
+                    max: None,
+                    step: None,
+                    options: vec![
+                        ParamOption {
+                            label: "自动".into(),
+                            value: "".into(),
+                        },
+                        ParamOption {
+                            label: "中文".into(),
+                            value: "zh".into(),
+                        },
+                        ParamOption {
+                            label: "English".into(),
+                            value: "en".into(),
+                        },
+                        ParamOption {
+                            label: "日本語".into(),
+                            value: "ja".into(),
+                        },
+                        ParamOption {
+                            label: "한국어".into(),
+                            value: "ko".into(),
+                        },
+                        ParamOption {
+                            label: "Français".into(),
+                            value: "fr".into(),
+                        },
+                        ParamOption {
+                            label: "Deutsch".into(),
+                            value: "de".into(),
+                        },
+                        ParamOption {
+                            label: "Español".into(),
+                            value: "es".into(),
+                        },
+                    ],
+                    default: serde_json::json!(""),
+                    hint: "多语言或混合语言时固定标签有帮助".into(),
+                },
+                ParamSpec {
+                    name: "seed".into(),
+                    label: "随机种子".into(),
+                    kind: ParamKind::Int,
+                    min: Some(serde_json::json!(0)),
+                    max: Some(serde_json::json!(2_147_483_647)),
+                    step: None,
+                    options: Vec::new(),
+                    default: serde_json::json!(42),
                     hint: "相同种子 + 文本得到可复现的声音".into(),
                 },
             ],
@@ -445,6 +546,43 @@ fn default_longcat_cfg() -> f32 {
 }
 fn default_longcat_seed() -> i64 {
     1024
+}
+
+/// dots.tts (Studio Dots): a 2B continuous-AR model with a flow-matching
+/// acoustic head over a 48 kHz AudioVAE. Laverock runs the GGUF export
+/// through audio.cpp's native runtime (Metal on macOS, CUDA/Vulkan/CPU
+/// elsewhere), which keeps a large model out of Python.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DotsManifest {
+    /// `audiocpp_cli` path, absolute or relative to the model directory.
+    pub binary: String,
+    /// GGUF weights, absolute or relative to the model directory.
+    pub model: String,
+    /// audio.cpp backend: `best`, `metal`, `cuda`, `vulkan`, `cpu`…
+    #[serde(default = "default_dots_backend")]
+    pub backend: String,
+    /// Default language tag for the model (empty = none/auto).
+    #[serde(default)]
+    pub language: Option<String>,
+    #[serde(default = "default_dots_guidance")]
+    pub guidance: f32,
+    #[serde(default = "default_dots_seed")]
+    pub seed: i64,
+    /// Optional prompt trim in seconds (audio.cpp's own trimmer).
+    #[serde(default)]
+    pub reference_duration_sec: Option<f32>,
+    #[serde(default)]
+    pub env: std::collections::BTreeMap<String, String>,
+}
+
+fn default_dots_backend() -> String {
+    "best".to_string()
+}
+fn default_dots_guidance() -> f32 {
+    1.2
+}
+fn default_dots_seed() -> i64 {
+    42
 }
 
 fn default_python() -> String {

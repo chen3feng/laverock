@@ -3,12 +3,13 @@
 Local-first voice cloning studio. Models run on your own computer; a phone
 on the same network will later be able to connect as a remote control.
 
-Status: **MVP**. Four engines — ZipVoice (Chinese/English, ONNX, ~160 MB),
+Status: **MVP**. Five engines — ZipVoice (Chinese/English, ONNX, ~160 MB),
 VoxCPM2 (30 languages, GGUF/llama.cpp, ~3.3 GB), Qwen3-TTS (10 languages,
-official Python package in an isolated venv) and LongCat-AudioDiT
-(waveform-latent diffusion, zh/en, ~7 GB with its venv) — behind one local
-HTTP server with an embedded web UI, a saved-voice library, and phone
-remote control over LAN.
+official Python package in an isolated venv), LongCat-AudioDiT
+(waveform-latent diffusion, zh/en, ~7 GB with its venv) and dots.tts
+(2B continuous AR, 48 kHz, 24 languages, ~3 GB GGUF through the native
+audio.cpp runtime) — behind one local HTTP server with an embedded web
+UI, a saved-voice library, and phone remote control over LAN.
 
 ## Architecture
 
@@ -79,6 +80,7 @@ a one-time Gatekeeper/SmartScreen prompt.
 ./scripts/download-voxcpm2.sh      # VoxCPM2, ~3.3 GB, 30 langs, GGUF
 ./scripts/download-qwen3tts.sh     # Qwen3-TTS, isolated venv + ~1.5 GB model
 ./scripts/download-longcat.sh      # LongCat-AudioDiT 1B, isolated venv + 5.7 GB weights
+./scripts/download-dots.sh         # dots.tts SOAR, 48 kHz, audio.cpp runtime + 3 GB GGUF
 
 # 2. Run
 cargo run -p laverock-server
@@ -118,6 +120,19 @@ exceed the per-call budget is split into chunks joined with short pauses
 instead of being squeezed, which is what silently dropped the opening
 sentence on long passages. Install the larger 3.5B variant with
 `LONGCAT_MODEL=meituan-longcat/LongCat-AudioDiT-3.5B ./scripts/download-longcat.sh`.
+
+dots.tts (Studio Dots) is a 2B continuous-AR model whose flow-matching
+head drives a 48 kHz AudioVAE. Laverock runs its GGUF export through
+audio.cpp's native runtime — Metal on macOS, CPU (or a user-supplied
+CUDA/Vulkan build) elsewhere — so there is no Python environment and the
+whole install is ~3 GB. Cloning defaults to the x-vector mode (reference
+audio only), which stays stable even when the saved transcript is
+approximate; "声纹 + 文字" adds the transcript for higher similarity when
+it is accurate. Long passages are chunked by the runtime. Measured on an
+M4 Pro with the Q8_0 checkpoint: RTF 1.3–1.9, 48 kHz output, about 6 GB
+peak memory. The runtime is pinned in `scripts/download-dots.sh`
+(`DOTS_VERSION`), and `DOTS_MODEL=dots.tts-mf` selects the 4-step
+MeanFlow export.
 
 Pick or record 3–10 s of reference speech, type its exact transcript
 (required by ZipVoice for timbre/prosody alignment), type the text to
@@ -258,6 +273,13 @@ ZipVoice model weights are Apache-2.0, released by
 LongCat-AudioDiT code and weights are MIT, released by
 [meituan-longcat/LongCat-AudioDiT](https://github.com/meituan-longcat/LongCat-AudioDiT);
 its UMT5 tokenizer comes from `google/umt5-base`.
+
+dots.tts code and checkpoints are Apache-2.0, released by
+[studio-dots-ai/dots.tts](https://github.com/studio-dots-ai/dots.tts).
+The GGUF export and the native runtime come from
+[0xShug0/audio.cpp](https://github.com/0xShug0/audio.cpp); the weights keep
+their Apache-2.0 license, and the runtime binary is redistributed
+unmodified.
 
 ## License
 
