@@ -153,6 +153,10 @@ def main() -> int:
     text = normalize_text(args.text)
     no_prompt = not args.ref_audio
 
+    prompt_wav = None
+    prompt_dur = 0
+    prompt_time = 0.0
+    approx_pd = 0.0
     if no_prompt:
         full_text = text
     else:
@@ -162,16 +166,28 @@ def main() -> int:
             return 2
         full_text = f"{prompt_text} {text}"
 
-    inputs = tokenizer([full_text], padding="longest", return_tensors="pt")
+        # LongCat aligns the text condition against the prompt *duration*.
+        # If the clip runs much longer than its transcript implies, the
+        # start of the target text lands in the prompt region that is
+        # sliced away before decoding — the first sentence disappears.
+        # Trim the clip to a duration consistent with the transcript.
+        approx_pd = approx_duration_from_text(prompt_text, max_duration=max_duration)
+        limit = max(2.0, approx_pd * 1.4)
+        audio = load_audio(args.ref_audio, sr)
+        if audio.shape[-1] / sr > limit:
+            audio = audio[..., : int(limit * sr)]
+            emit(
+                "stage",
+                f"参考音频较长，已裁剪到 {limit:.1f} 秒以匹配文字稿",
+            )
+        elif audio.shape[-1] / sr < approx_pd / 1.8:
+            emit("stage", "提示：文字稿明显长于参考音频，开头可能不完整")
+        prompt_wav = audio.unsqueeze(0).to(device)
 
-    prompt_wav = None
-    prompt_dur = 0
-    if not no_prompt:
-        prompt_wav = load_audio(args.ref_audio, sr).unsqueeze(0).to(device)
         # Upstream pads one hop of margin, then drops it, so the VAE sees
         # a full receptive field at the tail.
         off = 3
-        pw = load_audio(args.ref_audio, sr)
+        pw = audio
         if pw.shape[-1] % full_hop != 0:
             pw = F.pad(pw, (0, full_hop - pw.shape[-1] % full_hop))
         pw = F.pad(pw, (0, full_hop * off))
@@ -180,9 +196,11 @@ def main() -> int:
         if off:
             plt = plt[..., :-off]
         prompt_dur = plt.shape[-1]
+        prompt_time = prompt_dur * full_hop / sr
 
-    prompt_time = prompt_dur * full_hop / sr
-    if not no_prompt and prompt_time >= max_duration - 0.5:
+    inputs = tokenizer([full_text], padding="longest", return_tensors="pt")
+
+    if prompt_time >= max_duration - 0.5:
         print(
             f"reference audio is {prompt_time:.1f}s, but LongCat-AudioDiT "
             f"can only generate {max_duration:.0f}s including the prompt; "
@@ -192,7 +210,6 @@ def main() -> int:
         return 2
     dur_sec = approx_duration_from_text(text, max_duration=max_duration - prompt_time)
     if not no_prompt:
-        approx_pd = approx_duration_from_text(prompt_text, max_duration=max_duration)
         ratio = np.clip(prompt_time / max(approx_pd, 1e-3), 1.0, 1.5)
         dur_sec = dur_sec * ratio
     duration = int(dur_sec * sr // full_hop)

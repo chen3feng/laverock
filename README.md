@@ -107,7 +107,12 @@ vs. CFG as per-request parameters (see `parameters` in its manifest). It
 runs fp16 on CUDA and fp32 elsewhere, keeps the weights and UMT5 tokenizer
 inside the model directory, and its 1B variant needs about 6 GB of RAM. A
 single request can produce at most ~30 s of audio including the reference
-clip, so prefer 3–10 s prompts. Install the larger 3.5B variant with
+clip, so prefer 3–10 s prompts. Cloning aligns the transcript against the
+reference duration: if the clip runs much longer than its transcript
+implies, the runner trims it automatically (and says so in the progress
+line), because otherwise the start of the target text is sliced away and
+the first sentence disappears. Keep the transcript accurate. Install the
+larger 3.5B variant with
 `LONGCAT_MODEL=meituan-longcat/LongCat-AudioDiT-3.5B ./scripts/download-longcat.sh`.
 
 Pick or record 3–10 s of reference speech, type its exact transcript
