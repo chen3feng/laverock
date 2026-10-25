@@ -90,7 +90,12 @@ jobs:
         run: ./scripts/download-model.sh
 
       - name: Build server
-        run: cargo build -p laverock-server
+        run: |
+          # A restored rust-cache can hold a partially extracted
+          # sherpa-onnx lib dir; force a re-extract from the cached
+          # archive before building.
+          rm -rf target/sherpa-onnx-prebuilt/*/lib target/sherpa-onnx-prebuilt/*/jniLibs || true
+          cargo build -p laverock-server
 
       - name: Start server
         run: |
