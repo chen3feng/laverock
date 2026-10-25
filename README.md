@@ -21,7 +21,10 @@ The UI has a sidebar with four sections:
 
 - **合成** — pick an engine and a saved voice (or record/upload one), type
   the text, generate and play or download the WAV.
-- **语音素材** — the saved reference voices: play, create, delete.
+- **语音素材** — the saved reference voices: play, create, edit (name,
+  transcript, replace the clip) and delete. Confirmations use an in-app
+  dialog because WebKit in the desktop shell does not implement
+  `confirm()`.
 - **历史** — every generated WAV (text, engine, time, duration): play,
   download, delete one or clear all; capped at 100 entries / 1 GiB under
   the data directory.

@@ -508,6 +508,62 @@ async fn create_profile(
     )?))
 }
 
+async fn update_profile(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    mut multipart: Multipart,
+) -> Result<Json<profiles::ProfileMeta>, ApiError> {
+    let mut name = None;
+    let mut prompt_text = None;
+    let mut wav: Option<Vec<u8>> = None;
+
+    while let Some(field) = multipart
+        .next_field()
+        .await
+        .map_err(|e| ApiError::bad_request(format!("malformed multipart: {e}")))?
+    {
+        match field.name() {
+            Some("name") => {
+                name = Some(
+                    field
+                        .text()
+                        .await
+                        .map_err(|e| ApiError::bad_request(format!("bad name: {e}")))?,
+                )
+            }
+            Some("prompt_text") => {
+                prompt_text = Some(
+                    field
+                        .text()
+                        .await
+                        .map_err(|e| ApiError::bad_request(format!("bad prompt_text: {e}")))?,
+                )
+            }
+            Some("prompt") => {
+                let bytes = field
+                    .bytes()
+                    .await
+                    .map_err(|e| ApiError::bad_request(format!("bad prompt upload: {e}")))?;
+                if !bytes.is_empty() {
+                    wav = Some(bytes.to_vec());
+                }
+            }
+            _ => {}
+        }
+    }
+
+    // Current values fill in whatever the form did not send.
+    let (current, _) = state.profiles.get(&id)?;
+    let name = name.unwrap_or(current.name);
+    let prompt_text = prompt_text.unwrap_or(current.prompt_text);
+    Ok(Json(state.profiles.update(
+        &id,
+        &name,
+        &prompt_text,
+        wav.as_deref(),
+    )?))
+}
+
 async fn delete_profile(
     State(state): State<AppState>,
     Path(id): Path<String>,
@@ -946,7 +1002,10 @@ async fn main() {
         .route("/api/engines", get(engines))
         .route("/api/engines/{id}/synthesize", post(synthesize))
         .route("/api/profiles", get(list_profiles).post(create_profile))
-        .route("/api/profiles/{id}", delete(delete_profile))
+        .route(
+            "/api/profiles/{id}",
+            delete(delete_profile).post(update_profile),
+        )
         .route("/api/profiles/{id}/audio", get(profile_audio))
         .route("/api/history", get(list_history).delete(clear_history))
         .route("/api/history/{id}", delete(delete_history))

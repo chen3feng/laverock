@@ -156,6 +156,45 @@ impl ProfileStore {
         Ok(meta)
     }
 
+    /// Rename a voice, change its transcript, and/or replace the
+    /// reference clip. The transcript may be cleared (ZipVoice will then
+    /// ask for one at synthesis time).
+    pub fn update(
+        &self,
+        id: &str,
+        name: &str,
+        prompt_text: &str,
+        wav: Option<&[u8]>,
+    ) -> Result<ProfileMeta> {
+        let dir = self.dir(id)?;
+        let raw = fs::read_to_string(dir.join("profile.json"))?;
+        let mut meta: ProfileMeta = serde_json::from_str(&raw)?;
+
+        let name = name.trim();
+        if name.is_empty() {
+            return Err(CoreError::BadRequest("声音名称不能为空".into()));
+        }
+        if name.chars().count() > 80 {
+            return Err(CoreError::BadRequest("声音名称过长（最多 80 字）".into()));
+        }
+
+        if let Some(wav) = wav {
+            if wav.len() > MAX_REFERENCE_BYTES {
+                return Err(CoreError::BadRequest("参考音频超过 20 MB".into()));
+            }
+            decode_wav(wav)?;
+            fs::write(dir.join("reference.wav"), wav)?;
+        }
+
+        meta.name = name.to_string();
+        meta.prompt_text = prompt_text.trim().to_string();
+        write_atomic(
+            &dir.join("profile.json"),
+            &serde_json::to_vec_pretty(&meta)?,
+        )?;
+        Ok(meta)
+    }
+
     pub fn delete(&self, id: &str) -> Result<()> {
         let dir = self.dir(id)?;
         fs::remove_dir_all(dir)?;

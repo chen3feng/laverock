@@ -475,6 +475,18 @@
   </div>
 </div>
 
+<div class="overlay" id="dialogOverlay">
+  <div class="card">
+    <h1 id="dialogTitle" style="font-size:18px;margin:0 0 8px"></h1>
+    <p class="hint" id="dialogMessage" style="margin:0 0 12px"></p>
+    <div id="dialogFields"></div>
+    <div class="actions" style="margin-top:16px;justify-content:flex-end">
+      <button class="ghost" id="dialogCancel" type="button">取消</button>
+      <button id="dialogOk" type="button">确定</button>
+    </div>
+  </div>
+</div>
+
 <div class="toast" id="toast" hidden></div>
 
 <template id="captureTpl">
@@ -522,6 +534,96 @@ function toast(message, isError) {
   el.hidden = false;
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => { el.hidden = true; }, 3200);
+}
+
+// In-app modal. WebKit's `confirm()` is not implemented inside the Tauri
+// WKWebView (it returns false without showing anything), so every
+// confirmation and form goes through this dialog instead.
+let dialogResolve = null;
+
+function showDialog({ title, message = '', fields = [], okText = '确定', danger = false }) {
+  return new Promise((resolve) => {
+    dialogResolve = resolve;
+    $('dialogTitle').textContent = title;
+    const msg = $('dialogMessage');
+    msg.textContent = message;
+    msg.hidden = !message;
+
+    const host = $('dialogFields');
+    host.innerHTML = '';
+    for (const f of fields) {
+      const wrap = document.createElement('div');
+      wrap.style.marginTop = '12px';
+      const label = document.createElement('label');
+      label.textContent = f.label;
+      label.htmlFor = 'dialog-f-' + f.name;
+      wrap.appendChild(label);
+      let input;
+      if (f.type === 'textarea') {
+        input = document.createElement('textarea');
+        input.rows = 3;
+        input.value = f.value || '';
+      } else if (f.type === 'file') {
+        input = document.createElement('input');
+        input.type = 'file';
+        input.accept = f.accept || 'audio/wav,.wav';
+        input.style.color = 'var(--muted)';
+      } else {
+        input = document.createElement('input');
+        input.type = 'text';
+        input.value = f.value || '';
+        if (f.placeholder) input.placeholder = f.placeholder;
+      }
+      input.id = 'dialog-f-' + f.name;
+      input.dataset.field = f.name;
+      input.dataset.fieldType = f.type || 'text';
+      wrap.appendChild(input);
+      if (f.hint) {
+        const h = document.createElement('div');
+        h.className = 'hint';
+        h.textContent = f.hint;
+        wrap.appendChild(h);
+      }
+      host.appendChild(wrap);
+    }
+
+    const ok = $('dialogOk');
+    ok.textContent = okText;
+    ok.className = danger ? 'ghost danger' : '';
+    $('dialogOverlay').classList.add('show');
+    (host.querySelector('input[type="text"], textarea') || ok).focus();
+  });
+}
+
+function closeDialog(result) {
+  $('dialogOverlay').classList.remove('show');
+  const resolve = dialogResolve;
+  dialogResolve = null;
+  if (resolve) resolve(result);
+}
+
+$('dialogOk').onclick = () => {
+  const values = {};
+  for (const el of document.querySelectorAll('#dialogFields [data-field]')) {
+    if (el.dataset.fieldType === 'file') {
+      values[el.dataset.field] = el.files[0] || null;
+    } else {
+      values[el.dataset.field] = el.value.trim();
+    }
+  }
+  closeDialog({ ok: true, values });
+};
+$('dialogCancel').onclick = () => closeDialog({ ok: false });
+$('dialogOverlay').onclick = (e) => {
+  if (e.target === $('dialogOverlay')) closeDialog({ ok: false });
+};
+document.addEventListener('keydown', (e) => {
+  if (dialogResolve && e.key === 'Escape') closeDialog({ ok: false });
+});
+
+async function confirmAction(message, { title = '请确认', okText = '确定', danger = true } = {}) {
+  const res = await showDialog({ title, message, okText, danger });
+  return !!(res && res.ok);
 }
 
 async function api(path, opts) {
@@ -729,9 +831,11 @@ function renderVoices() {
       <div class="voice-text">${esc(p.prompt_text)}</div>
       <div class="voice-actions">
         <button class="ghost small play" type="button">${previewId === p.id ? '停止' : '试听'}</button>
+        <button class="ghost small edit" type="button">编辑</button>
         <button class="ghost small danger del" type="button">删除</button>
       </div>`;
     el.querySelector('.play').onclick = () => togglePreview(p.id);
+    el.querySelector('.edit').onclick = () => editProfile(p);
     el.querySelector('.del').onclick = () => deleteProfile(p);
     grid.appendChild(el);
   }
@@ -758,8 +862,52 @@ $('previewer').addEventListener('ended', () => {
   syncProfileUI();
 });
 
+async function editProfile(p) {
+  const res = await showDialog({
+    title: '编辑声音',
+    okText: '保存',
+    fields: [
+      { name: 'name', label: '名称', type: 'text', value: p.name },
+      {
+        name: 'prompt_text',
+        label: '参考音频对应文字',
+        type: 'textarea',
+        value: p.prompt_text,
+        hint: 'ZipVoice 合成时必填；VoxCPM2 与 Qwen3-TTS 可以留空。',
+      },
+      {
+        name: 'prompt',
+        label: '替换参考音频（可选，3–10 秒干净人声）',
+        type: 'file',
+        hint: '不选则保留原音频。',
+      },
+    ],
+  });
+  if (!res || !res.ok) return;
+  const { name, prompt_text, prompt } = res.values;
+  if (!name) {
+    toast('名称不能为空', true);
+    return;
+  }
+  const fd = new FormData();
+  fd.append('name', name);
+  fd.append('prompt_text', prompt_text || '');
+  if (prompt) fd.append('prompt', prompt, prompt.name || 'reference.wav');
+  try {
+    await api(`/api/profiles/${encodeURIComponent(p.id)}`, { method: 'POST', body: fd });
+    toast(`已更新「${name}」`);
+    await loadProfiles();
+  } catch (e) {
+    toast('保存失败：' + e.message, true);
+  }
+}
+
 async function deleteProfile(p) {
-  if (!confirm(`删除声音「${p.name}」？此操作不可撤销。`)) return;
+  const yes = await confirmAction(`删除声音「${p.name}」？此操作不可撤销。`, {
+    title: '删除声音',
+    okText: '删除',
+  });
+  if (!yes) return;
   try {
     await api(`/api/profiles/${encodeURIComponent(p.id)}`, { method: 'DELETE' });
   } catch (e) {
@@ -1381,7 +1529,11 @@ function renderHistory() {
     del.type = 'button';
     del.textContent = '删除';
     del.onclick = async () => {
-      if (!confirm('删除这条生成记录？音频文件会一并删除。')) return;
+      const yes = await confirmAction('删除这条生成记录？音频文件会一并删除。', {
+        title: '删除记录',
+        okText: '删除',
+      });
+      if (!yes) return;
       del.disabled = true;
       try {
         await api(`/api/history/${encodeURIComponent(h.id)}`, { method: 'DELETE' });
@@ -1402,7 +1554,11 @@ function renderHistory() {
 }
 
 $('clearHistory').onclick = async () => {
-  if (!confirm('清空全部生成记录？此操作不可恢复。')) return;
+  const yes = await confirmAction('清空全部生成记录？此操作不可恢复。', {
+    title: '清空历史',
+    okText: '清空',
+  });
+  if (!yes) return;
   try {
     await api('/api/history', { method: 'DELETE' });
     historyItems = [];
@@ -1677,7 +1833,11 @@ async function loadDevices() {
     btn.type = 'button';
     btn.textContent = '撤销';
     btn.onclick = async () => {
-      if (!confirm(`撤销设备「${d.name}」的访问权限？`)) return;
+      const yes = await confirmAction(`撤销设备「${d.name}」的访问权限？`, {
+        title: '撤销设备',
+        okText: '撤销',
+      });
+      if (!yes) return;
       try {
         await api(`/api/devices/${encodeURIComponent(d.id)}`, { method: 'DELETE' });
         loadDevices();
