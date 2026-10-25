@@ -16,6 +16,8 @@ pub enum EngineKind {
     VoxCpm2,
     #[serde(rename = "qwen3tts")]
     Qwen3Tts,
+    #[serde(rename = "longcat")]
+    LongCat,
 }
 
 impl EngineKind {
@@ -24,6 +26,7 @@ impl EngineKind {
             EngineKind::ZipVoice => "zipvoice",
             EngineKind::VoxCpm2 => "voxcpm2",
             EngineKind::Qwen3Tts => "qwen3tts",
+            EngineKind::LongCat => "longcat",
         }
     }
 }
@@ -44,6 +47,8 @@ pub struct Manifest {
     pub voxcpm2: Option<VoxCpm2Manifest>,
     #[serde(default)]
     pub qwen3tts: Option<Qwen3TtsManifest>,
+    #[serde(default)]
+    pub longcat: Option<LongCatManifest>,
     #[serde(default)]
     pub defaults: SynthDefaults,
     /// User-tunable synthesis parameters shown by the UI. When absent,
@@ -113,6 +118,58 @@ impl Manifest {
             ],
             // Non-diffusion autoregressive models expose no step control.
             EngineKind::Qwen3Tts => Vec::new(),
+            // Flow-matching ODE: NFE steps, guidance strength/method, seed.
+            EngineKind::LongCat => vec![
+                ParamSpec::int_slider(
+                    "num_steps",
+                    "采样步数 (NFE)",
+                    16,
+                    1,
+                    32,
+                    1,
+                    "扩散 ODE 步数；16 已足够，越多越慢",
+                ),
+                ParamSpec::slider(
+                    "cfg",
+                    "引导强度",
+                    4.0,
+                    0.0,
+                    10.0,
+                    0.1,
+                    "越高越贴近参考音色，过高可能失真",
+                ),
+                ParamSpec {
+                    name: "guidance_method".into(),
+                    label: "引导方式".into(),
+                    kind: ParamKind::Choice,
+                    min: None,
+                    max: None,
+                    step: None,
+                    options: vec![
+                        ParamOption {
+                            label: "APG（自适应投影，推荐）".into(),
+                            value: "apg".into(),
+                        },
+                        ParamOption {
+                            label: "CFG（传统无分类器引导）".into(),
+                            value: "cfg".into(),
+                        },
+                    ],
+                    default: serde_json::json!("apg"),
+                    hint: "APG 通常更自然、伪影更少".into(),
+                },
+                ParamSpec {
+                    name: "seed".into(),
+                    label: "随机种子".into(),
+                    kind: ParamKind::Int,
+                    min: Some(serde_json::json!(0)),
+                    max: Some(serde_json::json!(2_147_483_647)),
+                    step: None,
+                    options: Vec::new(),
+                    default: serde_json::json!(1024),
+                    hint: "相同种子 + 文本得到可复现的声音".into(),
+                },
+            ],
         }
     }
 }
@@ -349,6 +406,47 @@ pub struct Qwen3TtsManifest {
     pub env: std::collections::BTreeMap<String, String>,
 }
 
+/// LongCat-AudioDiT (Meituan): a waveform-latent diffusion TTS model with
+/// zero-shot cloning. Like Qwen3-TTS it runs through a small Python
+/// runner in its own venv; the `audiodit` package is unpacked next to the
+/// runner inside the model directory.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LongCatManifest {
+    #[serde(default = "default_python")]
+    pub python: String,
+    pub script: String,
+    /// Local weights directory or a Hugging Face repo id.
+    pub model: String,
+    /// Local tokenizer directory (google/umt5-base files).
+    #[serde(default)]
+    pub tokenizer: Option<String>,
+    #[serde(default = "default_device")]
+    pub device: String,
+    /// `auto` picks fp16 on CUDA and fp32 elsewhere (MPS fp16 is unsafe
+    /// for the WAV-VAE decode).
+    #[serde(default = "default_dtype")]
+    pub dtype: String,
+    /// Default guidance: `apg` or `cfg`.
+    #[serde(default = "default_longcat_guidance")]
+    pub guidance: String,
+    #[serde(default = "default_longcat_cfg")]
+    pub cfg_strength: f32,
+    #[serde(default = "default_longcat_seed")]
+    pub seed: i64,
+    #[serde(default)]
+    pub env: std::collections::BTreeMap<String, String>,
+}
+
+fn default_longcat_guidance() -> String {
+    "apg".to_string()
+}
+fn default_longcat_cfg() -> f32 {
+    4.0
+}
+fn default_longcat_seed() -> i64 {
+    1024
+}
+
 fn default_python() -> String {
     "python3".to_string()
 }
@@ -363,4 +461,36 @@ fn default_dtype() -> String {
 }
 fn default_attn() -> String {
     "sdpa".to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn longcat_manifest_parses_with_defaults() {
+        let raw = r#"{
+            "id": "longcat",
+            "kind": "longcat",
+            "name": "LongCat AudioDiT",
+            "longcat": {
+                "script": "longcat_runner.py",
+                "model": "/tmp/weights",
+                "tokenizer": "/tmp/tokenizer"
+            }
+        }"#;
+        let manifest: Manifest = serde_json::from_str(raw).expect("valid manifest");
+        let lc = manifest.longcat.as_ref().expect("longcat section");
+        assert_eq!(lc.device, "auto");
+        assert_eq!(lc.dtype, "auto");
+        assert_eq!(lc.guidance, "apg");
+        assert_eq!(lc.cfg_strength, 4.0);
+        assert_eq!(lc.seed, 1024);
+
+        let params = manifest.parameters_or_defaults();
+        let names: Vec<&str> = params.iter().map(|p| p.name.as_str()).collect();
+        assert_eq!(names, ["num_steps", "cfg", "guidance_method", "seed"]);
+        assert_eq!(params[0].default, serde_json::json!(16));
+        assert_eq!(params[2].kind, ParamKind::Choice);
+    }
 }

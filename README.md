@@ -3,11 +3,12 @@
 Local-first voice cloning studio. Models run on your own computer; a phone
 on the same network will later be able to connect as a remote control.
 
-Status: **MVP**. Three engines — ZipVoice (Chinese/English, ONNX, ~160 MB),
-VoxCPM2 (30 languages, GGUF/llama.cpp, ~3.3 GB) and Qwen3-TTS (10 languages,
-official Python package in an isolated venv) — behind one local HTTP server
-with an embedded web UI, a saved-voice library, and phone remote control
-over LAN.
+Status: **MVP**. Four engines — ZipVoice (Chinese/English, ONNX, ~160 MB),
+VoxCPM2 (30 languages, GGUF/llama.cpp, ~3.3 GB), Qwen3-TTS (10 languages,
+official Python package in an isolated venv) and LongCat-AudioDiT
+(waveform-latent diffusion, zh/en, ~7 GB with its venv) — behind one local
+HTTP server with an embedded web UI, a saved-voice library, and phone
+remote control over LAN.
 
 ## Architecture
 
@@ -77,6 +78,7 @@ a one-time Gatekeeper/SmartScreen prompt.
 ./scripts/download-model.sh        # ZipVoice, ~160 MB, zh/en, ONNX
 ./scripts/download-voxcpm2.sh      # VoxCPM2, ~3.3 GB, 30 langs, GGUF
 ./scripts/download-qwen3tts.sh     # Qwen3-TTS, isolated venv + ~1.5 GB model
+./scripts/download-longcat.sh      # LongCat-AudioDiT 1B, isolated venv + 5.7 GB weights
 
 # 2. Run
 cargo run -p laverock-server
@@ -86,17 +88,27 @@ cargo run -p laverock-server
 The same downloads are available from **模型** in the UI; the scripts are
 convenient for headless installs and CI.
 
-Engines are discovered from `models/*/engine.json`. ZipVoice needs the
-reference transcript; VoxCPM2 and Qwen3-TTS clone from the audio alone.
-Qwen3-TTS also supports preset speakers and voice design through
-`QWEN3TTS_VARIANT=custom|design`. Adding another model of a supported kind
-is just another directory with a manifest; engines that need Python run in
-their own venv under `.tools/`, never in the core process.
+Engines are discovered from `models/*/engine.json`. ZipVoice and
+LongCat-AudioDiT need the reference transcript; VoxCPM2 and Qwen3-TTS
+clone from the audio alone. Qwen3-TTS also supports preset speakers and
+voice design through `QWEN3TTS_VARIANT=custom|design`. Adding another
+model of a supported kind is just another directory with a manifest;
+engines that need Python run in their own venv under `.tools/`, never in
+the core process.
 
 Qwen3-TTS picks its device automatically: CUDA in bfloat16, Apple MPS in
 float32 (float16 produces NaN in the codec), otherwise CPU. A 0.6B clone
 takes roughly 25 s on Apple Silicon and 90 s on CPU per short sentence,
 including model load.
+
+LongCat-AudioDiT is a flow-matching diffusion model that works directly in
+a waveform latent space; it exposes NFE steps, guidance strength and APG
+vs. CFG as per-request parameters (see `parameters` in its manifest). It
+runs fp16 on CUDA and fp32 elsewhere, keeps the weights and UMT5 tokenizer
+inside the model directory, and its 1B variant needs about 6 GB of RAM. A
+single request can produce at most ~30 s of audio including the reference
+clip, so prefer 3–10 s prompts. Install the larger 3.5B variant with
+`LONGCAT_MODEL=meituan-longcat/LongCat-AudioDiT-3.5B ./scripts/download-longcat.sh`.
 
 Pick or record 3–10 s of reference speech, type its exact transcript
 (required by ZipVoice for timbre/prosody alignment), type the text to
@@ -227,6 +239,10 @@ Windows; the download scripts are otherwise the same on every platform.
 ZipVoice model weights are Apache-2.0, released by
 [k2-fsa/ZipVoice](https://github.com/k2-fsa/ZipVoice) and packaged by
 [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx).
+
+LongCat-AudioDiT code and weights are MIT, released by
+[meituan-longcat/LongCat-AudioDiT](https://github.com/meituan-longcat/LongCat-AudioDiT);
+its UMT5 tokenizer comes from `google/umt5-base`.
 
 ## License
 

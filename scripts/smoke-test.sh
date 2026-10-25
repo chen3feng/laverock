@@ -151,6 +151,19 @@ else
   echo "  skip qwen3tts (not installed)"
 fi
 
+if case "$engines_json" in *'"id":"longcat"'*) true ;; *) false ;; esac; then
+  echo "longcat"
+  code=$(curl -s -o "$OUT/longcat.wav" -w '%{http_code}' --max-time 600 -X POST \
+    "$BASE/api/engines/longcat/synthesize" \
+    -F 'text=你好，我是 LongCat AudioDiT，通过 laverock 调用。' \
+    -F "prompt=@$DIR/test_wavs/leijun-1.wav" \
+    -F 'prompt_text=那还是36年前, 1987年. 我呢考上了武汉大学的计算机系.')
+  [ "$code" = "200" ] && head -c 4 "$OUT/longcat.wav" | grep -q RIFF \
+    && ok "longcat clone" || bad "longcat (HTTP $code)"
+else
+  echo "  skip longcat (not installed)"
+fi
+
 echo "remote access"
 PORT=$(echo "$BASE" | sed -n 's|.*:\([0-9][0-9]*\).*|\1|p')
 PORT=${PORT:-8787}

@@ -40,6 +40,28 @@ lv_content_length() {
     END { printf "%d", v + 0 }'
 }
 
+# lv_track <dir> <total_bytes> <command...>
+#
+# Run a command that fills <dir> (e.g. `hf download --local-dir`) and
+# report growth against the expected total. Tools like huggingface-cli
+# only draw progress bars on a TTY, so the UI would otherwise sit on a
+# stage label for the whole multi-GB download.
+lv_track() {
+  local dir="$1" total="$2"
+  shift 2
+  "$@" &
+  local pid=$!
+  while kill -0 "$pid" 2>/dev/null; do
+    sleep 2
+    local have_kb
+    have_kb=$(du -sk "$dir" 2>/dev/null | awk '{print $1}')
+    if [ "${total:-0}" -gt 0 ]; then
+      lv_progress "$(awk -v s="${have_kb:-0}" -v t="$((total / 1024))" 'BEGIN { if (t > 0) printf "%.1f", s * 100 / t }')"
+    fi
+  done
+  wait "$pid"
+}
+
 # lv_download <url> <dest> [resume]
 #
 # curl with the progress meter silenced; a background watcher reports the

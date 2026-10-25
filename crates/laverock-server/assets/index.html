@@ -284,9 +284,9 @@
         <div id="synthCapture"></div>
         <div class="hint">录音会在浏览器内转成 24kHz 单声道 WAV；也可以直接上传 WAV。</div>
         <div style="margin-top:14px">
-          <label for="prompt_text">参考音频对应文字（ZipVoice 必填）</label>
+          <label for="prompt_text">参考音频对应文字（ZipVoice / LongCat 必填）</label>
           <textarea id="prompt_text" rows="2" placeholder="例如：那还是三十六年前，一九八七年。"></textarea>
-          <div class="hint">录音说了什么就填什么，可多行。VoxCPM2 与 Qwen3-TTS 仅凭声音即可克隆，可留空。</div>
+          <div class="hint">录音说了什么就填什么，可多行。ZipVoice 与 LongCat-AudioDiT 必填；VoxCPM2、Qwen3-TTS 可留空。</div>
         </div>
         <div style="margin-top:14px">
           <label for="profilename">保存到声音库（可选，便于下次直接复用）</label>
@@ -1193,6 +1193,7 @@ $('go').onclick = async () => {
   const kind = engine ? engine.kind : '';
   const loadNote = kind === 'qwen3tts'
     ? 'Qwen3-TTS 首次加载约 20–90 秒'
+    : kind === 'longcat' ? 'LongCat-AudioDiT 首次加载约 30–90 秒'
     : kind === 'voxcpm2' ? 'VoxCPM2 首次加载需数秒' : '首次加载模型需几秒';
   const labelEl = $('synthProgressLabel');
   const pbar = $('synthProgress');

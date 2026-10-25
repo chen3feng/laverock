@@ -5,6 +5,7 @@
 //! engine variants that share an already supported kind.
 
 mod audio;
+mod longcat;
 mod manager;
 mod manifest;
 mod qwen3tts;
@@ -16,8 +17,8 @@ pub use manager::{
     EngineInfo, EngineManager, ProgressEvent, ProgressSink, SpeechEngine, SynthRequest,
 };
 pub use manifest::{
-    EngineKind, Manifest, ParamKind, ParamOption, ParamSpec, Qwen3TtsManifest, SynthDefaults,
-    VoxCpm2Manifest, ZipVoiceManifest,
+    EngineKind, LongCatManifest, Manifest, ParamKind, ParamOption, ParamSpec, Qwen3TtsManifest,
+    SynthDefaults, VoxCpm2Manifest, ZipVoiceManifest,
 };
 
 /// Re-exported for engines that need the underlying runtime.
