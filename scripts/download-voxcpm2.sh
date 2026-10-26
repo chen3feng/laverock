@@ -1,12 +1,16 @@
 #!/usr/bin/env bash
-# Download and build the VoxCPM2 engine.
+# Download the VoxCPM2 engine (runner + weights).
 #
 # VoxCPM2 runs from GGUF weights via llama.cpp's `voxcpm2-cli`, which is
-# not shipped as a standalone binary upstream, so we build it once from
-# tc-mb/llama.cpp-omni. The result is cached under .tools/.
+# not shipped as a standalone binary upstream. laverock publishes a
+# prebuilt runner on its "voxcpm2-runner" GitHub release (built by
+# .github/workflows/voxcpm2-runner.yml); we download that, like the
+# audio.cpp runtime, and only compile from tc-mb/llama.cpp-omni as a
+# fallback when no prebuilt asset exists or the download fails.
 #
-# Requires: git, cmake, a C++ toolchain (Xcode CLT on macOS / build-essential).
-# Total download ~3.3 GB (BaseLM Q8_0 1.6 GB + Acoustic F16 1.7 GB).
+# Total download ~3.3 GB weights (BaseLM Q8_0 1.6 GB + Acoustic F16 1.7 GB),
+# plus a ~tens-of-MB runner. The fallback build additionally needs git,
+# cmake and a C++ toolchain (Xcode CLT on macOS / build-essential).
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -20,50 +24,64 @@ SRC="$TOOLS/llama.cpp-omni"
 DEST="$MODELS_DIR/voxcpm2"
 HF="${HF_ENDPOINT:-https://huggingface.co}/DennisHuang648/VoxCPM2-GGUF/resolve/main"
 
-for tool in git cmake cc c++; do
-  command -v "$tool" >/dev/null 2>&1 || { echo "missing: $tool" >&2; exit 1; }
-done
+mkdir -p "$MODELS_DIR" "$TOOLS" "$DEST"
 
-# A newer macOS often ships an Xcode whose linker cannot parse the
-# CommandLineTools SDK (or vice versa). When CommandLineTools is present,
-# use its self-consistent toolchain instead of mixing the two.
-if [ "$(uname -s)" = "Darwin" ] && [ -d /Library/Developer/CommandLineTools ]; then
-  export DEVELOPER_DIR="/Library/Developer/CommandLineTools"
+# 1. Runner: prebuilt from the rolling "voxcpm2-runner" release first,
+#    then a source build as fallback (unreleased platform / bad network).
+if [ ! -x "$DEST/voxcpm2-cli" ] && [ ! -x "$DEST/voxcpm2-cli.exe" ]; then
+  if lv_voxcpm2_runner "$DEST" "$TOOLS"; then
+    echo "Using prebuilt voxcpm2-cli"
+  else
+    echo "Prebuilt voxcpm2-cli unavailable, building from source..." >&2
+    for tool in git cmake cc c++; do
+      command -v "$tool" >/dev/null 2>&1 || { echo "missing: $tool" >&2; exit 1; }
+    done
+
+    # A newer macOS often ships an Xcode whose linker cannot parse the
+    # CommandLineTools SDK (or vice versa). When CommandLineTools is present,
+    # use its self-consistent toolchain instead of mixing the two.
+    if [ "$(uname -s)" = "Darwin" ] && [ -d /Library/Developer/CommandLineTools ]; then
+      export DEVELOPER_DIR="/Library/Developer/CommandLineTools"
+    fi
+
+    # 1b. Sources (shallow; cached).
+    if [ ! -d "$SRC/.git" ]; then
+      lv_stage "拉取 llama.cpp-omni 源码"
+      git clone --depth 1 --progress https://github.com/tc-mb/llama.cpp-omni.git "$SRC"
+    fi
+    cd "$SRC"
+    if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+      git -C "$SRC" pull --ff-only >/dev/null 2>&1 || true
+    fi
+
+    # 1c. Build the CLI target once.
+    if [ ! -x "$SRC/build/bin/voxcpm2-cli" ]; then
+      lv_stage "编译 voxcpm2-cli（首次约数分钟）"
+      case "$(uname -s)" in
+        Darwin) BACKEND="-DGGML_METAL=ON";;
+        *) BACKEND="-DGGML_BACKEND_DL=ON";;
+      esac
+      cmake -B build -S . \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DGGML_NATIVE=OFF \
+        -DBUILD_SHARED_LIBS=OFF \
+        $BACKEND
+      NPROC=$(sysctl -n hw.ncpu 2>/dev/null || nproc 2>/dev/null || echo 4)
+      cmake --build build -j"$NPROC" --target voxcpm2-cli
+    fi
+
+    # Place the runner next to the weights (MSVC puts it in Release/).
+    if [ -f "$SRC/build/bin/voxcpm2-cli.exe" ]; then
+      cp "$SRC/build/bin/voxcpm2-cli.exe" "$DEST/voxcpm2-cli.exe"
+    elif [ -f "$SRC/build/bin/Release/voxcpm2-cli.exe" ]; then
+      cp "$SRC/build/bin/Release/voxcpm2-cli.exe" "$DEST/voxcpm2-cli.exe"
+    else
+      cp "$SRC/build/bin/voxcpm2-cli" "$DEST/voxcpm2-cli"
+    fi
+  fi
 fi
 
-mkdir -p "$MODELS_DIR" "$TOOLS"
-
-# 1. Sources (shallow; cached).
-if [ ! -d "$SRC/.git" ]; then
-  lv_stage "拉取 llama.cpp-omni 源码"
-  git clone --depth 1 --progress https://github.com/tc-mb/llama.cpp-omni.git "$SRC"
-fi
-cd "$SRC"
-if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-  git -C "$SRC" pull --ff-only >/dev/null 2>&1 || true
-fi
-
-# 2. Build the CLI target once.
-if [ ! -x "$SRC/build/bin/voxcpm2-cli" ]; then
-  lv_stage "编译 voxcpm2-cli（首次约数分钟）"
-  case "$(uname -s)" in
-    Darwin) BACKEND="-DGGML_METAL=ON";;
-    *) BACKEND="-DGGML_BACKEND_DL=ON";;
-  esac
-  cmake -B build -S . \
-    -DCMAKE_BUILD_TYPE=Release \
-    -DGGML_NATIVE=OFF \
-    -DBUILD_SHARED_LIBS=OFF \
-    $BACKEND
-  NPROC=$(sysctl -n hw.ncpu 2>/dev/null || nproc 2>/dev/null || echo 4)
-  cmake --build build -j"$NPROC" --target voxcpm2-cli
-fi
-
-# 3. Place the runner next to the weights.
-mkdir -p "$DEST"
-cp "$SRC/build/bin/voxcpm2-cli" "$DEST/voxcpm2-cli"
-
-# 4. Weights. Resume partial downloads and verify the exact byte count —
+# 2. Weights. Resume partial downloads and verify the exact byte count —
 #    a truncated GGUF otherwise fails much later with an opaque error.
 fetch_model() { # url dest expected_bytes
   local url="$1" dest="$2" want="$3"
@@ -88,7 +106,7 @@ fetch_model "$HF/VoxCPM2-Acoustic-F16.gguf" \
   "$DEST/VoxCPM2-Acoustic-F16.gguf" 1825096352
 lv_stage "写入引擎清单"
 
-# 5. Manifest.
+# 3. Manifest.
 cat > "$DEST/engine.json" <<'EOF'
 {
   "id": "voxcpm2",

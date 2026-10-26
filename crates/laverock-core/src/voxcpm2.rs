@@ -44,11 +44,25 @@ impl VoxCpm2Engine {
 
         let binary = match &v.binary {
             Some(rel) => resolve(rel),
-            None => dir.join("voxcpm2-cli"),
+            // The download script places the prebuilt/source-built runner
+            // next to the GGUFs; on Windows it keeps the .exe suffix.
+            None => {
+                let candidate = dir.join(if cfg!(windows) {
+                    "voxcpm2-cli.exe"
+                } else {
+                    "voxcpm2-cli"
+                });
+                if candidate.is_file() {
+                    candidate
+                } else {
+                    // Older installs named it without the suffix.
+                    dir.join("voxcpm2-cli")
+                }
+            }
         };
         if !binary.is_file() {
             return Err(CoreError::Load(format!(
-                "{}: runner binary not found at {} (build it with scripts/download-voxcpm2.sh)",
+                "{}: runner binary not found at {} (install it with scripts/download-voxcpm2.sh)",
                 manifest.id,
                 binary.display()
             )));

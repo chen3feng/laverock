@@ -114,7 +114,7 @@ jobs:
 
             ```bash
             ./scripts/download-model.sh     # ZipVoice，~160 MB，中英
-            ./scripts/download-voxcpm2.sh   # VoxCPM2，~3.3 GB，30 语言（需要 git/cmake/C++）
+            ./scripts/download-voxcpm2.sh   # VoxCPM2，~3.3 GB，30 语言；runner 默认走预编译下载
             ```
 
             macOS 默认读取 `~/Library/Application Support/sh.laverock.desktop/models`；

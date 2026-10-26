@@ -64,7 +64,7 @@
     ],
     "script": "download-voxcpm2.sh",
     "env": {},
-    "note": "首次安装需联网编译 llama.cpp-omni（git、cmake 与 C++ 工具链）。"
+    "note": "runner 二进制（约几十 MB）优先从本项目 GitHub Release 的 voxcpm2-runner 下载预编译版本；下载失败且本机有 git/cmake/C++ 工具链时才回退到源码编译。另需下载约 3.3 GB 权重。"
   },
   {
     "id": "longcat",

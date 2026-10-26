@@ -1,0 +1,187 @@
+name: VoxCPM2 runner
+
+# Build voxcpm2-cli from tc-mb/llama.cpp-omni once per platform and publish
+# the binaries on a rolling "voxcpm2-runner" GitHub release. scripts/download-
+# voxcpm2.sh fetches these instead of compiling on the user's machine; the
+# local cmake build remains as a fallback for unreleased platforms.
+#
+# No code in this repo links against llama.cpp — only the CLI binary is
+# redistributed (MIT, LICENSE travels inside every archive).
+
+on:
+  workflow_dispatch:
+    inputs:
+      upstream_ref:
+        description: "tc-mb/llama.cpp-omni ref (branch/tag/full SHA) to build"
+        required: true
+        default: "master"
+      reason:
+        description: "Why this rebuild (recorded in the release notes)"
+        required: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: voxcpm2-runner
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: build (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macos-arm64
+            os: macos-latest
+            exe: ""
+            archive: tar.gz
+            # Embed the Metal kernel library so the archive stays one file.
+            args: >-
+              -DGGML_METAL=ON
+              -DGGML_METAL_EMBED_LIBRARY=ON
+              -DGGML_NATIVE=OFF
+              -DBUILD_SHARED_LIBS=OFF
+              -DCMAKE_OSX_DEPLOYMENT_TARGET=13.3
+          - name: macos-x64
+            os: macos-15-intel
+            exe: ""
+            archive: tar.gz
+            # Matches the upstream fork's own release matrix: Metal is off on
+            # Intel CI runners (intermittent failures without a GPU there).
+            args: >-
+              -DGGML_METAL=OFF
+              -DGGML_NATIVE=OFF
+              -DBUILD_SHARED_LIBS=OFF
+              -DCMAKE_OSX_DEPLOYMENT_TARGET=13.3
+          - name: linux-x64
+            os: ubuntu-22.04
+            exe: ""
+            archive: tar.gz
+            # Build on 22.04 for the older glibc; CPU_ALL_VARIANTS gives one
+            # binary with runtime dispatch instead of -march=native code.
+            args: >-
+              -DGGML_NATIVE=OFF
+              -DGGML_CPU_ALL_VARIANTS=ON
+              -DBUILD_SHARED_LIBS=OFF
+          - name: windows-x64
+            os: windows-latest
+            exe: ".exe"
+            archive: zip
+            # GGML_STATIC links the MSVC runtime so no VC redist is needed.
+            args: >-
+              -DGGML_NATIVE=OFF
+              -DGGML_CPU_ALL_VARIANTS=ON
+              -DGGML_STATIC=ON
+              -DBUILD_SHARED_LIBS=OFF
+
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Install build tools (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake git
+
+      - name: Checkout tc-mb/llama.cpp-omni
+        shell: bash
+        run: |
+          set -euo pipefail
+          ref="${{ inputs.upstream_ref }}"
+          git clone --depth 1 https://github.com/tc-mb/llama.cpp-omni.git upstream
+          if [ "$ref" != "master" ]; then
+            git -C upstream fetch --depth 1 origin "$ref"
+            git -C upstream checkout FETCH_HEAD
+          fi
+          git -C upstream rev-parse HEAD > upstream-commit.txt
+          echo "building $(cat upstream-commit.txt) ($ref)"
+
+      - name: Configure
+        shell: bash
+        run: cmake -S upstream -B build ${{ matrix.args }}
+
+      - name: Build voxcpm2-cli
+        shell: bash
+        run: |
+          set -euo pipefail
+          nproc=4
+          command -v nproc >/dev/null && nproc=$(nproc)
+          [ -n "${NUMBER_OF_PROCESSORS:-}" ] && nproc="$NUMBER_OF_PROCESSORS"
+          cmake --build build --config Release --target voxcpm2-cli -j "$nproc"
+
+      - name: Pack
+        shell: bash
+        run: |
+          set -euo pipefail
+          bin="$(find build -name 'voxcpm2-cli${{ matrix.exe }}' -type f | head -1)"
+          [ -n "$bin" ] || { echo "voxcpm2-cli not found under build/"; exit 1; }
+          mkdir -p stage
+          cp "$bin" "stage/voxcpm2-cli${{ matrix.exe }}"
+          cp upstream/LICENSE stage/LICENSE
+          cp upstream-commit.txt stage/COMMIT
+          if [ "${{ matrix.archive }}" = "tar.gz" ]; then
+            tar -C stage -czf "voxcpm2-cli-${{ matrix.name }}.tar.gz" .
+          else
+            powershell -NoProfile -Command \
+              "Compress-Archive -Path (Resolve-Path stage/*) -DestinationPath voxcpm2-cli-${{ matrix.name }}.zip -Force"
+          fi
+          ls -la voxcpm2-cli-${{ matrix.name }}.*
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: voxcpm2-cli-${{ matrix.name }}
+          path: voxcpm2-cli-${{ matrix.name }}.${{ matrix.archive }}
+          if-no-files-found: error
+
+  publish:
+    name: publish rolling release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          path: assets
+          merge-multiple: true
+
+      - name: Write checksum manifest
+        run: |
+          set -euo pipefail
+          # One fixed-width line per file so the shell script can parse the
+          # manifest with sed (no jq/python on a bare user machine).
+          commit="$(tar -xzOf assets/voxcpm2-cli-linux-x64.tar.gz ./COMMIT | tr -d '[:space:]')"
+          {
+            echo '{'
+            echo "  \"upstream\": \"$commit\","
+            echo '  "files": {'
+            for f in $(ls assets/voxcpm2-cli-* | sort); do
+              name="$(basename "$f")"
+              sha="$(sha256sum "$f" | cut -d' ' -f1)"
+              size="$(stat -c%s "$f")"
+              echo "    \"$name\": {\"sha256\": \"$sha\", \"size\": $size},"
+            done
+            echo '  }'
+            echo '}'
+          } > assets/voxcpm2-runner.json
+          cat assets/voxcpm2-runner.json
+
+      - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
+        with:
+          tag_name: voxcpm2-runner
+          name: VoxCPM2 runner (prebuilt voxcpm2-cli)
+          prerelease: true
+          make_latest: 'false'
+          files: assets/*
+          body: |
+            Prebuilt [`voxcpm2-cli`](https://github.com/tc-mb/llama.cpp-omni)
+            binaries used by `scripts/download-voxcpm2.sh`. Not an end-user
+            download — install VoxCPM2 from the in-app model catalog instead.
+
+            - Source: `tc-mb/llama.cpp-omni` @ `${{ inputs.upstream_ref }}`
+            - Upstream commit recorded in each archive's `COMMIT` and in
+              `voxcpm2-runner.json`
+            - Reason: ${{ inputs.reason }}

@@ -114,6 +114,96 @@ lv_audiocpp_bin() {
   if [ -x "$bin" ]; then echo "$bin"; else echo "$exe"; fi
 }
 
+# lv_sha256 <path>: hex digest, via whichever tool ships on the platform.
+lv_sha256() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$1" | awk '{print $1}'
+  else
+    shasum -a 256 "$1" | awk '{print $1}'
+  fi
+}
+
+# lv_voxcpm2_runner <dest_dir> <tools_dir>
+#
+# Install the prebuilt voxcpm2-cli published on this repo's rolling
+# "voxcpm2-runner" GitHub release into <dest_dir>/voxcpm2-cli[.exe] (next
+# to the GGUF weights, where the engine manifest looks for it). The
+# extracted binary is cached under <tools_dir>/voxcpm2-runner so removing
+# and reinstalling the model costs nothing.
+#
+# LAVEROCK_GITHUB_RELEASES overrides the download base (mirror). Returns
+# non-zero when the platform has no prebuilt asset or the download or
+# checksum check fails; the caller then falls back to a source build.
+lv_voxcpm2_runner() {
+  local dest="$1" tools="$2"
+  local cache="$tools/voxcpm2-runner"
+  local platform asset ext inner
+  platform="$(uname -s)"
+  case "$platform" in
+    Darwin)
+      case "$(uname -m)" in
+        arm64) asset="voxcpm2-cli-macos-arm64.tar.gz" ;;
+        x86_64) asset="voxcpm2-cli-macos-x64.tar.gz" ;;
+        *) return 1 ;;
+      esac
+      ext=".tar.gz"; inner="voxcpm2-cli" ;;
+    Linux)
+      [ "$(uname -m)" = "x86_64" ] || return 1
+      asset="voxcpm2-cli-linux-x64.tar.gz"; ext=".tar.gz"; inner="voxcpm2-cli" ;;
+    MINGW*|MSYS*|CYGWIN*)
+      asset="voxcpm2-cli-windows-x64.zip"; ext=".zip"; inner="voxcpm2-cli.exe" ;;
+    *)
+      return 1 ;;
+  esac
+
+  mkdir -p "$cache" "$dest"
+  if [ ! -x "$cache/$inner" ]; then
+    local base manifest want got extract
+    base="${LAVEROCK_GITHUB_RELEASES:-https://github.com/chen3feng/laverock/releases/download}"
+
+    # Manifest first: its sha256 line catches a truncated archive. The
+    # layout is one line per file by design (see voxcpm2-runner.yml).
+    lv_stage "校验 voxcpm2-cli 预编译版本"
+    manifest="$cache/manifest.json"
+    curl -fsSL --retry 2 "$base/voxcpm2-runner/voxcpm2-runner.json" -o "$manifest" || return 1
+    want="$(sed -n "s/.*\"$asset\".*\"sha256\": *\"\([0-9a-fA-F]\{64\}\)\".*/\1/p" "$manifest" | head -1 | tr 'A-F' 'a-f')"
+    [ -n "$want" ] || { echo "no prebuilt $asset in runner manifest" >&2; return 1; }
+
+    lv_download "$base/voxcpm2-runner/$asset" "$cache/$asset" 0 || return 1
+    got="$(lv_sha256 "$cache/$asset" | tr 'A-F' 'a-f')"
+    if [ "$got" != "$want" ]; then
+      echo "checksum mismatch for $asset" >&2
+      rm -f "$cache/$asset"
+      return 1
+    fi
+
+    extract="$cache/extract"
+    rm -rf "$extract"
+    mkdir -p "$extract"
+    if [ "$ext" = ".zip" ]; then
+      if command -v unzip >/dev/null 2>&1; then
+        unzip -q "$cache/$asset" -d "$extract"
+      else
+        powershell -NoProfile -Command \
+          "Expand-Archive -LiteralPath '$(cygpath -w "$cache/$asset")' -DestinationPath '$(cygpath -w "$extract")' -Force"
+      fi
+    else
+      tar -xzf "$cache/$asset" -C "$extract"
+    fi
+    [ -f "$extract/$inner" ] || { echo "$inner missing from $asset" >&2; return 1; }
+    cp "$extract/$inner" "$cache/"
+    if [ -f "$extract/LICENSE" ]; then
+      cp "$extract/LICENSE" "$cache/voxcpm2-cli-LICENSE.txt"
+    fi
+    chmod +x "$cache/$inner" 2>/dev/null || true
+    rm -rf "$extract" "$cache/$asset" "$manifest"
+  fi
+
+  cp "$cache/$inner" "$dest/$inner"
+  chmod +x "$dest/$inner" 2>/dev/null || true
+  lv_stage "voxcpm2-cli 预编译版本就绪"
+}
+
 # lv_fetch_parallel <url> <dest> <total_bytes> [workers]
 #
 # Split a large file into ranged requests and resume per slice (Hugging
