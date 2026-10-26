@@ -55,9 +55,7 @@ impl CatalogEntry {
         if lang == "en" {
             (
                 self.description_en.as_deref().unwrap_or(&self.description),
-                self.note_en
-                    .as_deref()
-                    .or(self.note.as_deref()),
+                self.note_en.as_deref().or(self.note.as_deref()),
             )
         } else {
             (&self.description, self.note.as_deref())
