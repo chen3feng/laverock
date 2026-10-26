@@ -14,7 +14,9 @@ on:
       upstream_ref:
         description: "tc-mb/llama.cpp-omni ref (branch/tag/full SHA) to build"
         required: true
-        default: "master"
+        # Tested SHA; the portability patch is generated against this commit.
+        # Bump both together when moving the runner forward.
+        default: "a64932ec615e1463158129feaf2f0752d0c07a2e"
       reason:
         description: "Why this rebuild (recorded in the release notes)"
         required: false
@@ -43,6 +45,8 @@ jobs:
               -DGGML_METAL=ON
               -DGGML_METAL_EMBED_LIBRARY=ON
               -DGGML_NATIVE=OFF
+              -DLLAMA_CURL=OFF
+              -DLLAMA_OPENSSL=OFF
               -DBUILD_SHARED_LIBS=OFF
               -DCMAKE_OSX_DEPLOYMENT_TARGET=13.3
           - name: macos-x64
@@ -54,33 +58,36 @@ jobs:
             args: >-
               -DGGML_METAL=OFF
               -DGGML_NATIVE=OFF
+              -DLLAMA_CURL=OFF
+              -DLLAMA_OPENSSL=OFF
               -DBUILD_SHARED_LIBS=OFF
               -DCMAKE_OSX_DEPLOYMENT_TARGET=13.3
           - name: linux-x64
             os: ubuntu-22.04
             exe: ""
             archive: tar.gz
-            # Build on 22.04 for the older glibc; BACKEND_DL + CPU_ALL_VARIANTS
-            # ship the AVX/AVX2/AVX512 paths as dlopen()ed backend libs (the
-            # ggml loader finds them next to the exe via $ORIGIN).
+            # Build on 22.04 for the older glibc. Static, NATIVE off: one
+            # x86-64 baseline (SSE2) binary that runs on every CPU. OpenMP
+            # off so the binary needs no libgomp.so.1 — same choice the
+            # audio.cpp cpu-portable runtime makes.
             args: >-
               -DGGML_NATIVE=OFF
-              -DGGML_BACKEND_DL=ON
-              -DGGML_CPU_ALL_VARIANTS=ON
+              -DLLAMA_CURL=OFF
+              -DLLAMA_OPENSSL=OFF
+              -DGGML_OPENMP=OFF
               -DBUILD_SHARED_LIBS=OFF
-              '-DCMAKE_INSTALL_RPATH=$ORIGIN'
-              -DCMAKE_BUILD_WITH_INSTALL_RPATH=ON
           - name: windows-x64
             os: windows-latest
             exe: ".exe"
             archive: zip
-            # GGML_STATIC links the MSVC runtime so no VC redist is needed;
-            # the AVX variant backends are still DLLs (BACKEND_DL).
+            # Static baseline x86-64; GGML_STATIC links the MSVC runtime in
+            # so no VC redist is needed on the user's machine.
             args: >-
               -DGGML_NATIVE=OFF
-              -DGGML_BACKEND_DL=ON
-              -DGGML_CPU_ALL_VARIANTS=ON
+              -DLLAMA_CURL=OFF
+              -DLLAMA_OPENSSL=OFF
               -DGGML_STATIC=ON
+              -DGGML_OPENMP=OFF
               -DBUILD_SHARED_LIBS=OFF
 
     steps:
@@ -105,6 +112,18 @@ jobs:
           git -C upstream rev-parse HEAD > upstream-commit.txt
           echo "building $(cat upstream-commit.txt) ($ref)"
 
+      - name: Apply portability patches
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The fork's MoE slot code is Apple-only upstream: F_NOCACHE does
+          # not exist on Linux, and on Windows struct iovec is only
+          # forward-declared. The patch keeps macOS behaviour identical.
+          # Fail loudly if it stops applying — upstream moved; regenerate it.
+          # Absolute path: -C only changes the repository directory, not how
+          # the patch pathname argument is resolved.
+          git -C upstream apply "${GITHUB_WORKSPACE}/scripts/patches/0001-moe-slot-portability.patch"
+
       - name: Configure
         shell: bash
         run: cmake -S upstream -B build ${{ matrix.args }}
@@ -116,9 +135,10 @@ jobs:
           nproc=4
           command -v nproc >/dev/null && nproc=$(nproc)
           [ -n "${NUMBER_OF_PROCESSORS:-}" ] && nproc="$NUMBER_OF_PROCESSORS"
-          # Build everything: with GGML_BACKEND_DL the per-ISA CPU backends
-          # are separate shared-library targets, not dependencies of the CLI.
-          cmake --build build --config Release -j "$nproc"
+          # Only the runner: the fork's omni server/cli targets do not build
+          # on Linux/Windows (Apple-only MoE slot code) and are not needed.
+          # Static build = a single binary, no companion libraries.
+          cmake --build build --config Release --target voxcpm2-cli -j "$nproc"
 
       - name: Pack
         shell: bash
@@ -130,17 +150,57 @@ jobs:
           cp "$bin" "stage/voxcpm2-cli${{ matrix.exe }}"
           cp upstream/LICENSE stage/LICENSE
           cp upstream-commit.txt stage/COMMIT
-          # The dlopen()ed CPU variant backends (GGML_BACKEND_DL) must sit
-          # next to the exe; ggml loads them from the executable directory.
-          # macOS archives are single binaries (Metal embedded / plain CPU).
-          if [ "${{ matrix.archive }}" = "zip" ]; then
-            find build -type f \( -name 'ggml-cpu*.dll' -o -name 'ggml-base.dll' \) \
-              -exec cp -f {} stage/ \;
-          else
-            find -L build -type f \( -name 'libggml-cpu-*.so' -o -name 'libggml-cpu-*.so.*' \) \
-              -exec cp -fL {} stage/ \;
-          fi
+          # Static builds: one self-contained binary per platform, no
+          # companion shared libraries.
           echo "stage contents:"; ls -la stage
+
+      - name: Linkage audit
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The artifact must not depend on anything beyond what ships with
+          # the OS (a previous build silently linked Homebrew OpenSSL and
+          # still passed the smoke test on the runner).
+          case "${{ matrix.name }}" in
+            macos*)
+              otool -L stage/voxcpm2-cli
+              if otool -L stage/voxcpm2-cli | grep -Eq '/opt/homebrew|/usr/local|@rpath'; then
+                echo "::error::non-system shared-library dependency"; exit 1
+              fi ;;
+            linux-x64)
+              ldd stage/voxcpm2-cli
+              if ldd stage/voxcpm2-cli | grep -q 'not found'; then
+                echo "::error::unresolved shared-library dependency"; exit 1
+              fi
+              ldd stage/voxcpm2-cli
+              ldd stage/voxcpm2-cli | awk '{print $1}' \
+                | grep -Ev '^((/lib64/|/lib/)?ld-linux[^ ]*|linux-vdso[^ ]*|lib(c|m|dl|rt|pthread)\.so[^ ]*|libstdc\+\+\.so[^ ]*|libgcc_s\.so[^ ]*)$' \
+                | grep . && { echo "::error::unexpected shared-library dependency"; exit 1; } || true ;;
+            windows-x64)
+              # vcomp140.dll would mean OpenMP crept back in; the UCRT set is
+              # expected with GGML_STATIC linking the MSVC runtime.
+              (dumpbin //dependents stage/voxcpm2-cli.exe 2>/dev/null || true) | tee deps.txt
+              ! grep -qi 'vcomp.*\.dll' deps.txt ;;
+          esac
+
+      - name: Smoke test
+        shell: bash
+        run: |
+          set -euo pipefail
+          # --help exits non-zero by design upstream; assert on the usage
+          # banner instead, same as the fork's own ctest.
+          if [ "${{ matrix.archive }}" = "zip" ]; then
+            ./stage/voxcpm2-cli.exe --help > help.txt 2>&1 || true
+          else
+            (cd stage && ./voxcpm2-cli --help) > help.txt 2>&1 || true
+          fi
+          cat help.txt
+          grep -qi voxcpm2 help.txt
+
+      - name: Archive
+        shell: bash
+        run: |
+          set -euo pipefail
           if [ "${{ matrix.archive }}" = "tar.gz" ]; then
             tar -C stage -czf "voxcpm2-cli-${{ matrix.name }}.tar.gz" .
           else
@@ -173,20 +233,25 @@ jobs:
           # One fixed-width line per file so the shell script can parse the
           # manifest with sed (no jq/python on a bare user machine).
           commit="$(tar -xzOf assets/voxcpm2-cli-linux-x64.tar.gz ./COMMIT | tr -d '[:space:]')"
+          entries=""
+          for f in $(ls assets/voxcpm2-cli-* | sort); do
+            name="$(basename "$f")"
+            sha="$(sha256sum "$f" | cut -d' ' -f1)"
+            size="$(stat -c%s "$f")"
+            entries+="    \"$name\": {\"sha256\": \"$sha\", \"size\": $size},"$'\n'
+          done
+          # Strip the trailing comma so the manifest is valid JSON while
+          # keeping one fixed-width line per file for the script's sed.
+          entries="${entries%$'\n'}"; entries="${entries%,}"
           {
             echo '{'
             echo "  \"upstream\": \"$commit\","
             echo '  "files": {'
-            for f in $(ls assets/voxcpm2-cli-* | sort); do
-              name="$(basename "$f")"
-              sha="$(sha256sum "$f" | cut -d' ' -f1)"
-              size="$(stat -c%s "$f")"
-              echo "    \"$name\": {\"sha256\": \"$sha\", \"size\": $size},"
-            done
+            printf '%s\n' "$entries"
             echo '  }'
             echo '}'
           } > assets/voxcpm2-runner.json
-          cat assets/voxcpm2-runner.json
+          python3 -m json.tool assets/voxcpm2-runner.json
 
       - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:

@@ -1,5 +1,7 @@
 # laverock
 
+English | [中文](README.zh-CN.md)
+
 Local-first voice cloning studio. Models run on your own computer; a phone
 on the same network will later be able to connect as a remote control.
 
@@ -84,6 +86,7 @@ a one-time Gatekeeper/SmartScreen prompt.
 ```sh
 # 1. Download a model (idempotent)
 ./scripts/download-model.sh        # ZipVoice, ~160 MB, zh/en, ONNX
+./scripts/download-kokoro.sh       # Kokoro-82M, ~135 MB, 8 langs, preset voices
 ./scripts/download-voxcpm2.sh      # VoxCPM2, ~3.3 GB, 30 langs, GGUF
 ./scripts/download-qwen3tts.sh     # Qwen3-TTS, isolated venv + ~1.5 GB model
 ./scripts/download-longcat.sh      # LongCat-AudioDiT 1B, isolated venv + 5.7 GB weights
@@ -158,6 +161,16 @@ long text is chunked by the runtime.
 Pick or record 3–10 s of reference speech, type its exact transcript
 (required by ZipVoice for timbre/prosody alignment), type the text to
 synthesize, and press generate.
+
+### Interface language
+
+The language selector at the bottom of the sidebar switches the whole UI
+between English and Chinese: **Follow system** (browser language), 中文,
+or English. The choice is saved in this browser; an explicit desktop
+choice is also stored as the machine default for newly paired devices.
+Manifest parameter labels/options and the model catalog descriptions
+switch too, and common server-side validation messages are translated in
+the English UI.
 
 ### Proxy and mirrors
 
@@ -250,8 +263,8 @@ off and on again.
 | POST | `/api/pair/claim` | exchange a pairing code for a device cookie (public) |
 | GET | `/api/devices` · DELETE `/api/devices/:id` | desktop-only: list/revoke phones |
 | GET/POST | `/api/settings/lan` | desktop-only: toggle the LAN listener |
-| GET/POST | `/api/settings` | desktop-only: download proxy and mirrors |
-| GET | `/api/models` | desktop-only: catalog, install state, job log tail |
+| GET/POST | `/api/settings` | desktop-only: download proxy, mirrors, machine UI language |
+| GET | `/api/models` | desktop-only: catalog, install state, job log tail (`?lang=en` for English) |
 | POST | `/api/models/:id/install` | desktop-only: start a download in the background |
 | POST | `/api/models/reload` | desktop-only: re-scan `models/*/engine.json` |
 
@@ -290,6 +303,10 @@ Windows; the download scripts are otherwise the same on every platform.
 ZipVoice model weights are Apache-2.0, released by
 [k2-fsa/ZipVoice](https://github.com/k2-fsa/ZipVoice) and packaged by
 [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx).
+
+Kokoro-82M weights are Apache-2.0, released by
+[hexgrad/Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M); the ONNX
+export and packaging come from sherpa-onnx.
 
 LongCat-AudioDiT code and weights are MIT, released by
 [meituan-longcat/LongCat-AudioDiT](https://github.com/meituan-longcat/LongCat-AudioDiT);
