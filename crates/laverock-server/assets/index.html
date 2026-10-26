@@ -1143,9 +1143,23 @@ function selectedProfile() {
   return profiles.find((p) => p.id === $('profile').value) || null;
 }
 
+function currentEngine() {
+  return engines.find((x) => x.id === $('engine').value) || null;
+}
+
+// Visibility of the voice/reference cards is driven by engine capability:
+// preset-only engines (Kokoro) never show them. For cloning engines a
+// selected saved voice replaces the ad-hoc reference recorder.
+function syncVisibility() {
+  const isClone = engineUsesClone(currentEngine());
+  const p = selectedProfile();
+  $('voicePickCard').hidden = !isClone;
+  $('adhoc').hidden = !isClone || !!p;
+}
+
 function syncProfileUI() {
   const p = selectedProfile();
-  $('adhoc').hidden = !!p;
+  syncVisibility();
   $('preview').disabled = !p;
   $('preview').textContent = previewId && p && previewId === p.id ? t('stop') : t('preview');
   $('profilehint').textContent = p
@@ -1153,6 +1167,92 @@ function syncProfileUI() {
       ? `Using "${p.name}" · transcript: ${p.prompt_text}`
       : `使用「${p.name}」· 参考文本：${p.prompt_text}`)
     : t('profilehint.default');
+}
+
+// ---------------------------------------------------------------- synth draft
+// The synth form is a long-lived draft: WKWebView can drop textarea
+// contents around the native <select> popover (and a reload wipes the
+// whole page), so text/choices are saved continuously and restored after
+// any engine/voice switch or page load.
+
+const DRAFT_KEY = 'laverock.synthDraft';
+
+function readDraft() {
+  try { return JSON.parse(localStorage.getItem(DRAFT_KEY)) || {}; } catch (_) { return {}; }
+}
+
+function collectDraft() {
+  const params = {};
+  document.querySelectorAll('#engineParams [data-param]').forEach((el) => {
+    params[el.dataset.param] = el.value;
+  });
+  return {
+    engine: $('engine').value,
+    profile: $('profile').value,
+    text: $('text').value,
+    prompt: $('prompt_text').value,
+    params,
+  };
+}
+
+let draftScheduled = false;
+function saveDraft() {
+  // Coalesce bursts of input events.
+  if (draftScheduled) return;
+  draftScheduled = true;
+  setTimeout(() => {
+    draftScheduled = false;
+    localStorage.setItem(DRAFT_KEY, JSON.stringify(collectDraft()));
+  }, 100);
+}
+
+// Re-apply saved text/transcript fields. Called after selects change, so
+// engine/voice switches can never discard text the user already typed.
+function restoreDraftFields() {
+  const d = readDraft();
+  if (typeof d.text === 'string') $('text').value = d.text;
+  if (typeof d.prompt === 'string') $('prompt_text').value = d.prompt;
+}
+
+function wireDraftPersistence() {
+  $('text').addEventListener('input', saveDraft);
+  $('prompt_text').addEventListener('input', saveDraft);
+  document.addEventListener('input', (e) => {
+    if (e.target.closest && e.target.closest('#engineParams')) saveDraft();
+  });
+  document.addEventListener('change', (e) => {
+    if (['engine', 'profile'].includes(e.target.id) ||
+        (e.target.closest && e.target.closest('#engineParams'))) {
+      saveDraft();
+    }
+  });
+}
+
+// Full restore after boot: engine first (rebuilds parameter controls),
+// then the saved voice, parameter values and text.
+async function restoreSynthDraft() {
+  const d = readDraft();
+  if (!d || !Object.keys(d).length) return;
+  if (d.engine && d.engine !== $('engine').value &&
+      engines.some((e) => e.id === d.engine)) {
+    $('engine').value = d.engine;
+    syncEngine();
+  }
+  if (d.profile && profiles.some((p) => p.id === d.profile)) {
+    $('profile').value = d.profile;
+  }
+  syncProfileUI();
+  if (d.params) {
+    for (const [name, value] of Object.entries(d.params)) {
+      const el = document.querySelector(`#engineParams [data-param="${name}"]`);
+      if (!el) continue;
+      // Selects only accept one of their option values; range/text
+      // inputs take the raw value.
+      const acceptable = !el.options || [...el.options].some((o) => o.value === value);
+      if (acceptable) el.value = value;
+    }
+  }
+  restoreDraftFields();
 }
 
 async function loadProfiles() {
@@ -1302,7 +1402,6 @@ async function createProfile(name, promptText, blob, engineId) {
   return res.json();
 }
 
-$('profile').onchange = syncProfileUI;
 $('preview').onclick = () => {
   const p = selectedProfile();
   if (p) togglePreview(p.id);
@@ -1556,13 +1655,13 @@ function syncEngine() {
   }
   const caps = (e.capabilities || []).map(capabilityLabel).join(lang === 'en' ? ', ' : '、');
   $('engineHint').textContent = `${e.kind} · ${(e.languages || []).join(' / ')} · ${caps}`;
-  const isClone = engineUsesClone(e);
-  $('voicePickCard').hidden = !isClone;
-  $('adhoc').hidden = !isClone;
   renderEngineParams(e);
+  syncVisibility();
 }
 
-$('engine').onchange = syncEngine;
+// Engine/voice switches must not discard text the user already typed.
+$('engine').onchange = () => { syncEngine(); restoreDraftFields(); saveDraft(); };
+$('profile').onchange = () => { syncProfileUI(); restoreDraftFields(); saveDraft(); };
 
 // Rough codec-step budget for a text: CJK ~3.8 chars/s of speech,
 // whitespace-split Latin words ~2.6/s; the Qwen codec emits 12.5 steps/s.
@@ -2411,9 +2510,11 @@ async function boot() {
     return;
   }
   await Promise.all([loadEngines(), loadProfiles()]);
+  await restoreSynthDraft();
   showPage(currentPage());
 }
 
+wireDraftPersistence();
 boot();
 </script>
 </body>
