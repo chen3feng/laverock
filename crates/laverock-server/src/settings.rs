@@ -312,12 +312,16 @@ mod tests {
     #[test]
     fn accepts_supported_languages() {
         for lang in ["", "zh", "en"] {
-            let mut s = Settings::default();
-            s.language = lang.into();
+            let s = Settings {
+                language: lang.into(),
+                ..Settings::default()
+            };
             assert!(s.normalize().is_ok(), "{lang} accepted");
         }
-        let mut s = Settings::default();
-        s.language = "fr".into();
+        let s = Settings {
+            language: "fr".into(),
+            ..Settings::default()
+        };
         assert!(s.normalize().is_err());
     }
 
