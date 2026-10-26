@@ -117,7 +117,9 @@ jobs:
           # not exist on Linux, and on Windows struct iovec is only
           # forward-declared. The patch keeps macOS behaviour identical.
           # Fail loudly if it stops applying — upstream moved; regenerate it.
-          git -C upstream apply scripts/patches/0001-moe-slot-portability.patch
+          # Absolute path: -C only changes the repository directory, not how
+          # the patch pathname argument is resolved.
+          git -C upstream apply "${GITHUB_WORKSPACE}/scripts/patches/0001-moe-slot-portability.patch"
 
       - name: Configure
         shell: bash
