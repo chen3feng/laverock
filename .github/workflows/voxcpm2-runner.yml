@@ -60,28 +60,30 @@ jobs:
             os: ubuntu-22.04
             exe: ""
             archive: tar.gz
-            # Build on 22.04 for the older glibc; BACKEND_DL + CPU_ALL_VARIANTS
-            # ship the AVX/AVX2/AVX512 paths as dlopen()ed backend libs (the
-            # ggml loader finds them next to the exe via $ORIGIN).
+            # Build on 22.04 for the older glibc. This fork's ggml makes
+            # BACKEND_DL imply shared core libraries, so the runner needs
+            # libllama/libggml beside it; CPU_ALL_VARIANTS adds dlopen()ed
+            # per-ISA backends. Everything lands in build/bin with $ORIGIN.
             args: >-
               -DGGML_NATIVE=OFF
               -DGGML_BACKEND_DL=ON
               -DGGML_CPU_ALL_VARIANTS=ON
-              -DBUILD_SHARED_LIBS=OFF
+              -DBUILD_SHARED_LIBS=ON
               '-DCMAKE_INSTALL_RPATH=$ORIGIN'
               -DCMAKE_BUILD_WITH_INSTALL_RPATH=ON
           - name: windows-x64
             os: windows-latest
             exe: ".exe"
             archive: zip
-            # GGML_STATIC links the MSVC runtime so no VC redist is needed;
-            # the AVX variant backends are still DLLs (BACKEND_DL).
+            # Shared llama/ggml DLLs + per-ISA backend DLLs (this fork's
+            # BACKEND_DL requires BUILD_SHARED_LIBS); GGML_STATIC still
+            # links the MSVC runtime in, so no VC redist is needed.
             args: >-
               -DGGML_NATIVE=OFF
               -DGGML_BACKEND_DL=ON
               -DGGML_CPU_ALL_VARIANTS=ON
               -DGGML_STATIC=ON
-              -DBUILD_SHARED_LIBS=OFF
+              -DBUILD_SHARED_LIBS=ON
 
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -130,17 +132,41 @@ jobs:
           cp "$bin" "stage/voxcpm2-cli${{ matrix.exe }}"
           cp upstream/LICENSE stage/LICENSE
           cp upstream-commit.txt stage/COMMIT
-          # The dlopen()ed CPU variant backends (GGML_BACKEND_DL) must sit
-          # next to the exe; ggml loads them from the executable directory.
-          # macOS archives are single binaries (Metal embedded / plain CPU).
+          # Linux/Windows build shared: the runner links libllama/libggml
+          # and dlopens the per-ISA libggml-cpu backends, all of which must
+          # sit next to the exe. Dereference the libXXX.so symlink chains.
+          # macOS archives stay a single binary (Metal embedded / plain CPU).
           if [ "${{ matrix.archive }}" = "zip" ]; then
-            find build -type f \( -name 'ggml-cpu*.dll' -o -name 'ggml-base.dll' \) \
-              -exec cp -f {} stage/ \;
+            find build -type f -name '*.dll' -exec cp -f {} stage/ \;
           else
-            find -L build -type f \( -name 'libggml-cpu-*.so' -o -name 'libggml-cpu-*.so.*' \) \
-              -exec cp -fL {} stage/ \;
+            case "${{ matrix.name }}" in
+              macos*) ;; # single static binary, Metal embedded / plain CPU
+              *) find -L build -type f \
+                   \( -name 'libllama.so*' -o -name 'libggml*.so*' \) \
+                   -exec cp -fL {} stage/ \; ;;
+            esac
           fi
           echo "stage contents:"; ls -la stage
+
+      - name: Smoke test
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Run from inside stage so $ORIGIN / DLL search finds the co-located
+          # libraries. --help exits non-zero by design upstream; assert on the
+          # usage banner instead, same as the fork's own ctest.
+          if [ "${{ matrix.archive }}" = "zip" ]; then
+            ./stage/voxcpm2-cli.exe --help > help.txt 2>&1 || true
+          else
+            (cd stage && ./voxcpm2-cli --help) > help.txt 2>&1 || true
+          fi
+          cat help.txt
+          grep -qi voxcpm2 help.txt
+
+      - name: Archive
+        shell: bash
+        run: |
+          set -euo pipefail
           if [ "${{ matrix.archive }}" = "tar.gz" ]; then
             tar -C stage -czf "voxcpm2-cli-${{ matrix.name }}.tar.gz" .
           else
@@ -173,20 +199,25 @@ jobs:
           # One fixed-width line per file so the shell script can parse the
           # manifest with sed (no jq/python on a bare user machine).
           commit="$(tar -xzOf assets/voxcpm2-cli-linux-x64.tar.gz ./COMMIT | tr -d '[:space:]')"
+          entries=""
+          for f in $(ls assets/voxcpm2-cli-* | sort); do
+            name="$(basename "$f")"
+            sha="$(sha256sum "$f" | cut -d' ' -f1)"
+            size="$(stat -c%s "$f")"
+            entries+="    \"$name\": {\"sha256\": \"$sha\", \"size\": $size},"$'\n'
+          done
+          # Strip the trailing comma so the manifest is valid JSON while
+          # keeping one fixed-width line per file for the script's sed.
+          entries="${entries%$'\n'}"; entries="${entries%,}"
           {
             echo '{'
             echo "  \"upstream\": \"$commit\","
             echo '  "files": {'
-            for f in $(ls assets/voxcpm2-cli-* | sort); do
-              name="$(basename "$f")"
-              sha="$(sha256sum "$f" | cut -d' ' -f1)"
-              size="$(stat -c%s "$f")"
-              echo "    \"$name\": {\"sha256\": \"$sha\", \"size\": $size},"
-            done
+            printf '%s\n' "$entries"
             echo '  }'
             echo '}'
           } > assets/voxcpm2-runner.json
-          cat assets/voxcpm2-runner.json
+          python3 -m json.tool assets/voxcpm2-runner.json
 
       - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:

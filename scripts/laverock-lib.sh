@@ -194,10 +194,10 @@ lv_voxcpm2_runner() {
     rm -f "$cache/$asset" "$manifest"
   fi
 
-  # Mirror the runner and every backend library next to the GGUFs (drop
+  # Mirror the runner and every shared library next to the GGUFs (drop
   # files from an older runner version first so removed libs don't linger).
   rm -f "$dest/voxcpm2-cli" "$dest/voxcpm2-cli.exe" \
-        "$dest"/libggml-cpu-*.so "$dest"/libggml-cpu-*.so.* "$dest"/ggml-cpu*.dll 2>/dev/null
+        "$dest"/libllama.so* "$dest"/libggml*.so* "$dest"/*.dll 2>/dev/null
   find "$cache" -maxdepth 1 -type f \
     \( -name "$inner" -o -name '*.so' -o -name '*.so.*' -o -name '*.dll' \) \
     -exec cp -f {} "$dest/" \;
