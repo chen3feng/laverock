@@ -9,7 +9,10 @@
 #   DOTS_MODEL=dots.tts-mf   install the 4-step MeanFlow variant instead
 #   DOTS_VERSION=...         pin a different audio.cpp release
 #
-# Disk: audio.cpp runtime ~50 MB + GGUF 3.0 GB (Q8_0).
+# The runtime is installed once under <tools>/audiocpp and shared with
+# the CosyVoice engine.
+#
+# Disk: GGUF 3.0 GB (Q8_0), plus a one-time ~35 MB runtime.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
