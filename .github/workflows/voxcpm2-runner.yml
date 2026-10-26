@@ -14,7 +14,9 @@ on:
       upstream_ref:
         description: "tc-mb/llama.cpp-omni ref (branch/tag/full SHA) to build"
         required: true
-        default: "master"
+        # Tested SHA; the portability patch is generated against this commit.
+        # Bump both together when moving the runner forward.
+        default: "a64932ec615e1463158129feaf2f0752d0c07a2e"
       reason:
         description: "Why this rebuild (recorded in the release notes)"
         required: false
@@ -106,6 +108,16 @@ jobs:
           fi
           git -C upstream rev-parse HEAD > upstream-commit.txt
           echo "building $(cat upstream-commit.txt) ($ref)"
+
+      - name: Apply portability patches
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The fork's MoE slot code is Apple-only upstream: F_NOCACHE does
+          # not exist on Linux, and on Windows struct iovec is only
+          # forward-declared. The patch keeps macOS behaviour identical.
+          # Fail loudly if it stops applying — upstream moved; regenerate it.
+          git -C upstream apply scripts/patches/0001-moe-slot-portability.patch
 
       - name: Configure
         shell: bash

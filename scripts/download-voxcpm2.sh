@@ -54,6 +54,14 @@ if [ ! -x "$DEST/voxcpm2-cli" ] && [ ! -x "$DEST/voxcpm2-cli.exe" ]; then
       git -C "$SRC" pull --ff-only >/dev/null 2>&1 || true
     fi
 
+    # Upstream master only compiles on macOS as-is: F_NOCACHE is Apple-only
+    # and struct iovec is missing on Windows. Apply our portability patch if
+    # it still fits (silently skip when already applied or upstream fixed it).
+    PATCH="$SCRIPT_DIR/patches/0001-moe-slot-portability.patch"
+    if [ -f "$PATCH" ] && git -C "$SRC" apply --check "$PATCH" >/dev/null 2>&1; then
+      git -C "$SRC" apply "$PATCH"
+    fi
+
     # 1c. Build the CLI target once.
     if [ ! -x "$SRC/build/bin/voxcpm2-cli" ]; then
       lv_stage "编译 voxcpm2-cli（首次约数分钟）"
