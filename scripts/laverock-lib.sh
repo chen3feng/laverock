@@ -177,8 +177,8 @@ lv_voxcpm2_runner() {
       return 1
     fi
 
-    # The archive is a flat directory: the runner plus, on Linux/Windows,
-    # the dlopen()ed libggml-cpu-* variant backends it needs alongside.
+    # The archive is a flat directory holding the static runner plus
+    # LICENSE and COMMIT.
     if [ "$ext" = ".zip" ]; then
       if command -v unzip >/dev/null 2>&1; then
         unzip -q -o "$cache/$asset" -d "$cache"
@@ -190,17 +190,14 @@ lv_voxcpm2_runner() {
       tar -xzf "$cache/$asset" -C "$cache"
     fi
     [ -f "$cache/$inner" ] || { echo "$inner missing from $asset" >&2; return 1; }
+    if [ -f "$cache/LICENSE" ]; then
+      cp "$cache/LICENSE" "$cache/voxcpm2-cli-LICENSE.txt"
+    fi
     chmod +x "$cache/$inner" 2>/dev/null || true
     rm -f "$cache/$asset" "$manifest"
   fi
 
-  # Mirror the runner and every shared library next to the GGUFs (drop
-  # files from an older runner version first so removed libs don't linger).
-  rm -f "$dest/voxcpm2-cli" "$dest/voxcpm2-cli.exe" \
-        "$dest"/libllama.so* "$dest"/libggml*.so* "$dest"/*.dll 2>/dev/null
-  find "$cache" -maxdepth 1 -type f \
-    \( -name "$inner" -o -name '*.so' -o -name '*.so.*' -o -name '*.dll' \) \
-    -exec cp -f {} "$dest/" \;
+  cp "$cache/$inner" "$dest/$inner"
   chmod +x "$dest/$inner" 2>/dev/null || true
   lv_stage "voxcpm2-cli 预编译版本就绪"
 }

@@ -62,12 +62,14 @@ if [ ! -x "$DEST/voxcpm2-cli" ] && [ ! -x "$DEST/voxcpm2-cli.exe" ]; then
       git -C "$SRC" apply "$PATCH"
     fi
 
-    # 1c. Build the CLI target once.
-    if [ ! -x "$SRC/build/bin/voxcpm2-cli" ]; then
+    # 1c. Build the CLI target once. Static, NATIVE off: same flags as the
+    # prebuilt CI runner (x86-64 baseline / embedded Metal), so the binary
+    # drops in next to the GGUFs with no companion libraries.
+    if [ ! -x "$SRC/build/bin/voxcpm2-cli" ] && [ ! -f "$SRC/build/bin/Release/voxcpm2-cli.exe" ]; then
       lv_stage "编译 voxcpm2-cli（首次约数分钟）"
       case "$(uname -s)" in
         Darwin) BACKEND="-DGGML_METAL=ON";;
-        *) BACKEND="-DGGML_BACKEND_DL=ON";;
+        *)      BACKEND="";;
       esac
       cmake -B build -S . \
         -DCMAKE_BUILD_TYPE=Release \

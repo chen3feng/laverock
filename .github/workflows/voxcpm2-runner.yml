@@ -62,30 +62,24 @@ jobs:
             os: ubuntu-22.04
             exe: ""
             archive: tar.gz
-            # Build on 22.04 for the older glibc. This fork's ggml makes
-            # BACKEND_DL imply shared core libraries, so the runner needs
-            # libllama/libggml beside it; CPU_ALL_VARIANTS adds dlopen()ed
-            # per-ISA backends. Everything lands in build/bin with $ORIGIN.
+            # Build on 22.04 for the older glibc. Static, NATIVE off: one
+            # x86-64 baseline (SSE2) binary that runs on every CPU. The
+            # fork's CPU code calls its own symbols directly, so BACKEND_DL
+            # variants do not link for voxcpm2-cli — same choice the
+            # audio.cpp cpu-portable runtime makes.
             args: >-
               -DGGML_NATIVE=OFF
-              -DGGML_BACKEND_DL=ON
-              -DGGML_CPU_ALL_VARIANTS=ON
-              -DBUILD_SHARED_LIBS=ON
-              '-DCMAKE_INSTALL_RPATH=$ORIGIN'
-              -DCMAKE_BUILD_WITH_INSTALL_RPATH=ON
+              -DBUILD_SHARED_LIBS=OFF
           - name: windows-x64
             os: windows-latest
             exe: ".exe"
             archive: zip
-            # Shared llama/ggml DLLs + per-ISA backend DLLs (this fork's
-            # BACKEND_DL requires BUILD_SHARED_LIBS); GGML_STATIC still
-            # links the MSVC runtime in, so no VC redist is needed.
+            # Static baseline x86-64; GGML_STATIC links the MSVC runtime in
+            # so no VC redist is needed on the user's machine.
             args: >-
               -DGGML_NATIVE=OFF
-              -DGGML_BACKEND_DL=ON
-              -DGGML_CPU_ALL_VARIANTS=ON
               -DGGML_STATIC=ON
-              -DBUILD_SHARED_LIBS=ON
+              -DBUILD_SHARED_LIBS=OFF
 
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -132,29 +126,10 @@ jobs:
           nproc=4
           command -v nproc >/dev/null && nproc=$(nproc)
           [ -n "${NUMBER_OF_PROCESSORS:-}" ] && nproc="$NUMBER_OF_PROCESSORS"
-          # Only the runner: the fork's omni server/cli targets link
-          # ggml_backend_cpu_set_n_threads statically and fail under
-          # GGML_BACKEND_DL (undefined reference); voxcpm2-cli does not use
-          # that symbol and links fine.
+          # Only the runner: the fork's omni server/cli targets do not build
+          # on Linux/Windows (Apple-only MoE slot code) and are not needed.
+          # Static build = a single binary, no companion libraries.
           cmake --build build --config Release --target voxcpm2-cli -j "$nproc"
-          case "${{ matrix.name }}" in
-            macos*) ;;
-            *)
-              # The per-ISA CPU backends are dlopen()ed modules, not link
-              # dependencies. Build every variant this compiler exposes; a
-              # real compile error fails the job, a missing target is skipped.
-              for v in x64 sse42 sandybridge ivybridge piledriver haswell \
-                       skylakex cannonlake cascadelake icelake cooperlake \
-                       zen4 alderlake sapphirerapids; do
-                if cmake --build build --target help 2>/dev/null | grep -q "ggml-cpu-$v" \
-                   || find build -name "ggml-cpu-$v.vcxproj" | grep -q .; then
-                  cmake --build build --config Release --target "ggml-cpu-$v" -j "$nproc"
-                else
-                  echo "variant $v not defined for this compiler, skipping"
-                fi
-              done
-              ;;
-          esac
 
       - name: Pack
         shell: bash
@@ -166,29 +141,16 @@ jobs:
           cp "$bin" "stage/voxcpm2-cli${{ matrix.exe }}"
           cp upstream/LICENSE stage/LICENSE
           cp upstream-commit.txt stage/COMMIT
-          # Linux/Windows build shared: the runner links libllama/libggml
-          # and dlopens the per-ISA libggml-cpu backends, all of which must
-          # sit next to the exe. Dereference the libXXX.so symlink chains.
-          # macOS archives stay a single binary (Metal embedded / plain CPU).
-          if [ "${{ matrix.archive }}" = "zip" ]; then
-            find build -type f -name '*.dll' -exec cp -f {} stage/ \;
-          else
-            case "${{ matrix.name }}" in
-              macos*) ;; # single static binary, Metal embedded / plain CPU
-              *) find -L build -type f \
-                   \( -name 'libllama.so*' -o -name 'libggml*.so*' \) \
-                   -exec cp -fL {} stage/ \; ;;
-            esac
-          fi
+          # Static builds: one self-contained binary per platform, no
+          # companion shared libraries.
           echo "stage contents:"; ls -la stage
 
       - name: Smoke test
         shell: bash
         run: |
           set -euo pipefail
-          # Run from inside stage so $ORIGIN / DLL search finds the co-located
-          # libraries. --help exits non-zero by design upstream; assert on the
-          # usage banner instead, same as the fork's own ctest.
+          # --help exits non-zero by design upstream; assert on the usage
+          # banner instead, same as the fork's own ctest.
           if [ "${{ matrix.archive }}" = "zip" ]; then
             ./stage/voxcpm2-cli.exe --help > help.txt 2>&1 || true
           else
