@@ -5,7 +5,7 @@
 //! engine variants that share an already supported kind.
 
 mod audio;
-mod dots;
+mod audiocpp;
 mod longcat;
 mod manager;
 mod manifest;
@@ -18,7 +18,7 @@ pub use manager::{
     EngineInfo, EngineManager, ProgressEvent, ProgressSink, SpeechEngine, SynthRequest,
 };
 pub use manifest::{
-    DotsManifest, EngineKind, LongCatManifest, Manifest, ParamKind, ParamOption, ParamSpec,
+    AudioCppManifest, EngineKind, LongCatManifest, Manifest, ParamKind, ParamOption, ParamSpec,
     Qwen3TtsManifest, SynthDefaults, VoxCpm2Manifest, ZipVoiceManifest,
 };
 

@@ -167,6 +167,19 @@ else
   echo "  skip qwen3tts (not installed)"
 fi
 
+if case "$engines_json" in *'"id":"cosyvoice"'*) true ;; *) false ;; esac; then
+  echo "cosyvoice"
+  code=$(curl -s -o "$OUT/cosy.wav" -w '%{http_code}' --max-time 600 -X POST \
+    "$BASE/api/engines/cosyvoice/synthesize" \
+    -F 'text=你好，我是 CosyVoice3，通过 laverock 调用。' \
+    -F "prompt=@$DIR/test_wavs/leijun-1.wav" \
+    -F 'prompt_text=那还是36年前, 1987年. 我呢考上了武汉大学的计算机系.')
+  [ "$code" = "200" ] && head -c 4 "$OUT/cosy.wav" | grep -q RIFF \
+    && ok "cosyvoice clone" || bad "cosyvoice (HTTP $code)"
+else
+  echo "  skip cosyvoice (not installed)"
+fi
+
 if case "$engines_json" in *'"id":"dots"'*) true ;; *) false ;; esac; then
   echo "dots"
   code=$(curl -s -o "$OUT/dots.wav" -w '%{http_code}' --max-time 600 -X POST \

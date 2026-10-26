@@ -991,6 +991,18 @@ fn parse_param(spec: &laverock_core::ParamSpec, raw: &str) -> Result<serde_json:
             "1" | "true" | "on" | "yes"
         )),
         ParamKind::Choice => serde_json::Value::String(raw.to_string()),
+        ParamKind::Text | ParamKind::TextArea => {
+            // Free-form text: bounded so a stray paste cannot bloat the
+            // request or the engine command line.
+            const MAX_TEXT_PARAM: usize = 2000;
+            let text = raw.trim();
+            if text.chars().count() > MAX_TEXT_PARAM {
+                return Err(ApiError::bad_request(format!(
+                    "{name}: 文本过长（最多 {MAX_TEXT_PARAM} 字）"
+                )));
+            }
+            serde_json::Value::String(text.to_string())
+        }
     };
     Ok(value)
 }

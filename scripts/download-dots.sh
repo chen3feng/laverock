@@ -30,56 +30,13 @@ GGUF="$DEST/$(basename "$PACKAGE")"
 
 mkdir -p "$DEST"
 
-# 1. audio.cpp runtime for this platform.
-PLATFORM="$(uname -s)"
-case "$PLATFORM" in
-  Darwin)
-    case "$(uname -m)" in
-      arm64) ASSET="bin-macos-arm64-metal"; BACKEND="metal" ;;
-      *)     ASSET="bin-macos-x64-metal"; BACKEND="metal" ;;
-    esac
-    ;;
-  Linux)
-    ASSET="bin-ubuntu-x64-cpu-portable"
-    BACKEND="cpu"
-    ;;
-  MINGW*|MSYS*|CYGWIN*)
-    ASSET="bin-windows-x64-cpu-portable"
-    BACKEND="cpu"
-    ;;
-  *)
-    echo "unsupported platform: $(uname -s)" >&2
-    exit 1
-    ;;
+# 1. Shared audio.cpp runtime (also used by the CosyVoice engine).
+TOOLS="${LAVEROCK_TOOLS_DIR:-$ROOT/.tools}"
+BIN="$(lv_audiocpp_bin "$TOOLS" "$AC_VERSION" "$MODELS_DIR")"
+case "$(uname -s)" in
+  Darwin) BACKEND="metal" ;;
+  *)      BACKEND="best" ;;
 esac
-
-if [ ! -x "$DEST/runtime/audiocpp_cli" ] && [ ! -x "$DEST/runtime/audiocpp_cli.exe" ]; then
-  lv_stage "下载 audio.cpp 运行时（${ASSET}）"
-  URL="https://github.com/0xShug0/audio.cpp/releases/download/$AC_VERSION/audio-$AC_VERSION-$ASSET"
-  TMP="$(mktemp -d)"
-  trap 'rm -rf "$TMP"' EXIT
-  case "$PLATFORM" in
-    MINGW*|MSYS*|CYGWIN*) ASSET_EXT=".zip" ;;
-    *)                    ASSET_EXT=".tar.gz" ;;
-  esac
-  lv_download "$URL$ASSET_EXT" "$TMP/runtime$ASSET_EXT" 0
-  mkdir -p "$DEST/runtime"
-  if [ "$ASSET_EXT" = ".zip" ]; then
-    if command -v unzip >/dev/null 2>&1; then
-      unzip -q "$TMP/runtime.zip" -d "$TMP/ex"
-    else
-      powershell -NoProfile -Command \
-        "Expand-Archive -LiteralPath '$(cygpath -w "$TMP/runtime.zip")' -DestinationPath '$(cygpath -w "$TMP/ex")' -Force"
-    fi
-  else
-    mkdir -p "$TMP/ex"
-    tar -xzf "$TMP/runtime.tar.gz" -C "$TMP/ex"
-  fi
-  cp "$TMP/ex/audiocpp_cli" "$DEST/runtime/" 2>/dev/null || \
-    cp "$TMP/ex/audiocpp_cli.exe" "$DEST/runtime/"
-  if [ -f "$TMP/ex/LICENSE" ]; then cp "$TMP/ex/LICENSE" "$DEST/runtime/"; fi
-  chmod +x "$DEST/runtime/audiocpp_cli" 2>/dev/null || true
-fi
 
 # 2. Weights (Q8_0 GGUF) from Hugging Face, in parallel ranged requests.
 if [ ! -f "$GGUF" ]; then
@@ -100,9 +57,6 @@ case "$MODEL_KIND" in
   *mf*) NAME="dots.tts MeanFlow (Q8_0)" ;;
   *)    NAME="dots.tts SOAR (Q8_0)" ;;
 esac
-BIN="runtime/audiocpp_cli"
-[ -x "$DEST/runtime/audiocpp_cli.exe" ] && BIN="runtime/audiocpp_cli.exe"
-
 cat > "$DEST/engine.json" <<EOF
 {
   "id": "dots",

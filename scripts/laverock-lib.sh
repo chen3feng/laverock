@@ -40,6 +40,80 @@ lv_content_length() {
     END { printf "%d", v + 0 }'
 }
 
+# lv_audiocpp_bin <tools_dir> <version> <models_dir>
+#
+# Ensure the audio.cpp native runtime is available and print its path.
+# The runtime is shared by every audio.cpp-backed engine (dots.tts,
+# CosyVoice3, …) and lives under <tools>/audiocpp so it is downloaded
+# once. A runtime bundled inside an older per-model directory is copied
+# over rather than re-downloaded.
+lv_audiocpp_bin() {
+  local tools="$1" version="$2" models="$3"
+  local dir="$tools/audiocpp"
+  local bin="$dir/audiocpp_cli"
+  local exe="$dir/audiocpp_cli.exe"
+
+  if [ -x "$bin" ] || [ -x "$exe" ]; then
+    [ -x "$bin" ] && echo "$bin" || echo "$exe"
+    return 0
+  fi
+
+  # A runtime installed by an earlier per-model engine still works; copy
+  # it into the shared location so removing that model cannot break us.
+  local legacy
+  legacy=$(find "$models" -maxdepth 4 -name audiocpp_cli -type f -perm -u+x 2>/dev/null | head -1)
+  if [ -z "$legacy" ]; then
+    legacy=$(find "$models" -maxdepth 4 -name audiocpp_cli.exe -type f 2>/dev/null | head -1)
+  fi
+  if [ -n "$legacy" ]; then
+    mkdir -p "$dir"
+    cp "$legacy" "$dir/"
+    [ -f "$(dirname "$legacy")/LICENSE" ] && cp "$(dirname "$legacy")/LICENSE" "$dir/"
+    echo "$dir/$(basename "$legacy")"
+    return 0
+  fi
+
+  local platform asset ext url tmp
+  platform="$(uname -s)"
+  case "$platform" in
+    Darwin)
+      case "$(uname -m)" in
+        arm64) asset="bin-macos-arm64-metal" ;;
+        *)     asset="bin-macos-x64-metal" ;;
+      esac
+      ext=".tar.gz" ;;
+    Linux)
+      asset="bin-ubuntu-x64-cpu-portable"; ext=".tar.gz" ;;
+    MINGW*|MSYS*|CYGWIN*)
+      asset="bin-windows-x64-cpu-portable"; ext=".zip" ;;
+    *)
+      echo "unsupported platform for audio.cpp: $platform" >&2
+      return 1 ;;
+  esac
+
+  url="https://github.com/0xShug0/audio.cpp/releases/download/$version/audio-$version-$asset$ext"
+  tmp="$(mktemp -d)"
+  lv_stage "下载 audio.cpp 运行时（${asset}）"
+  lv_download "$url" "$tmp/runtime$ext" 0
+  mkdir -p "$tmp/ex" "$dir"
+  if [ "$ext" = ".zip" ]; then
+    if command -v unzip >/dev/null 2>&1; then
+      unzip -q "$tmp/runtime.zip" -d "$tmp/ex"
+    else
+      powershell -NoProfile -Command \
+        "Expand-Archive -LiteralPath '$(cygpath -w "$tmp/runtime.zip")' -DestinationPath '$(cygpath -w "$tmp/ex")' -Force"
+    fi
+  else
+    tar -xzf "$tmp/runtime.tar.gz" -C "$tmp/ex"
+  fi
+  cp "$tmp/ex/audiocpp_cli" "$dir/" 2>/dev/null || cp "$tmp/ex/audiocpp_cli.exe" "$dir/"
+  if [ -f "$tmp/ex/LICENSE" ]; then cp "$tmp/ex/LICENSE" "$dir/"; fi
+  chmod +x "$dir/audiocpp_cli" 2>/dev/null || true
+  rm -rf "$tmp"
+
+  if [ -x "$bin" ]; then echo "$bin"; else echo "$exe"; fi
+}
+
 # lv_fetch_parallel <url> <dest> <total_bytes> [workers]
 #
 # Split a large file into ranged requests and resume per slice (Hugging
@@ -47,48 +121,65 @@ lv_content_length() {
 # ranges through a mirror). Emits @@LV progress; verifies the final size.
 lv_fetch_parallel() {
   local url="$1" dest="$2" total="$3" workers="${4:-8}"
-  local i s e want have got alive pid
+  local i s e want have got alive pid attempt
   local chunk=$(( (total + workers - 1) / workers ))
   local pids=()
 
-  for i in $(seq 0 $((workers - 1))); do
-    s=$((i * chunk)); e=$((s + chunk - 1))
-    [ "$e" -ge "$total" ] && e=$((total - 1))
-    want=$((e - s + 1))
-    have=$(lv_filesize "$dest.part$i")
-    if [ "$have" -gt "$want" ]; then
-      have=0
-      : >"$dest.part$i"
-    fi
-    if [ "$have" -lt "$want" ]; then
-      curl -sSL --fail --retry 3 --retry-delay 2 \
+  lv_slice_size() { # index -> expected byte count
+    local n="$1" start end
+    start=$((n * chunk)); end=$((start + chunk - 1))
+    [ "$end" -ge "$total" ] && end=$((total - 1))
+    echo $((end - start + 1))
+  }
+
+  # Up to three passes: a transient reset (HTTP/2 stream cancel, flaky
+  # proxy) only costs the unfinished bytes of one slice.
+  for attempt in 1 2 3; do
+    pids=()
+    for i in $(seq 0 $((workers - 1))); do
+      s=$((i * chunk)); e=$((s + chunk - 1))
+      [ "$e" -ge "$total" ] && e=$((total - 1))
+      want=$(lv_slice_size "$i")
+      have=$(lv_filesize "$dest.part$i")
+      if [ "$have" -gt "$want" ]; then
+        have=0
+        : >"$dest.part$i"
+      fi
+      [ "$have" -eq "$want" ] && continue
+      curl -sSL --fail --retry 5 --retry-delay 2 --retry-all-errors \
         -r "$((s + have))-$e" "$url" >>"$dest.part$i" &
       pids+=($!)
-    fi
-  done
-
-  while :; do
-    alive=0
-    for pid in "${pids[@]}"; do
-      kill -0 "$pid" 2>/dev/null && alive=1
     done
-    [ "$alive" -eq 0 ] && break
-    sleep 2
+
+    while :; do
+      alive=0
+      for pid in ${pids[@]+"${pids[@]}"}; do
+        kill -0 "$pid" 2>/dev/null && alive=1
+      done
+      [ "$alive" -eq 0 ] && break
+      sleep 2
+      got=0
+      for i in $(seq 0 $((workers - 1))); do
+        got=$((got + $(lv_filesize "$dest.part$i")))
+      done
+      lv_progress "$(awk -v s="$got" -v t="$total" 'BEGIN { if (t > 0) printf "%.1f", s * 100 / t }')"
+    done
+    # bash 3.2 (macOS) errors on an empty array under `set -u`.
+    for pid in ${pids[@]+"${pids[@]}"}; do
+      wait "$pid" 2>/dev/null || true
+    done
+
     got=0
     for i in $(seq 0 $((workers - 1))); do
       got=$((got + $(lv_filesize "$dest.part$i")))
     done
-    lv_progress "$(awk -v s="$got" -v t="$total" 'BEGIN { if (t > 0) printf "%.1f", s * 100 / t }')"
-  done
-  for pid in "${pids[@]}"; do
-    wait "$pid" || return 1
+    [ "$got" -ge "$total" ] && break
+    [ "$attempt" -lt 3 ] && lv_stage "下载不完整，正在续传（第 $((attempt + 1)) 次）"
   done
 
   : >"$dest"
   for i in $(seq 0 $((workers - 1))); do
-    s=$((i * chunk)); e=$((s + chunk - 1))
-    [ "$e" -ge "$total" ] && e=$((total - 1))
-    want=$((e - s + 1))
+    want=$(lv_slice_size "$i")
     have=$(lv_filesize "$dest.part$i")
     if [ "$have" -ne "$want" ]; then
       echo "part $i is $have bytes, expected $want" >&2

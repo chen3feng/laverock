@@ -5,8 +5,12 @@
 //! the embedding application should call it from a blocking thread.
 
 use crate::{
-    dots::DotsEngine, longcat::LongCatEngine, qwen3tts::Qwen3TtsEngine, voxcpm2::VoxCpm2Engine,
-    zipvoice::ZipVoiceEngine, Audio, CoreError, EngineKind, Manifest, ParamSpec, Result,
+    audiocpp::{AudioCppEngine, Family},
+    longcat::LongCatEngine,
+    qwen3tts::Qwen3TtsEngine,
+    voxcpm2::VoxCpm2Engine,
+    zipvoice::ZipVoiceEngine,
+    Audio, CoreError, EngineKind, Manifest, ParamSpec, Result,
 };
 use serde::Serialize;
 use std::{
@@ -175,7 +179,10 @@ impl EngineManager {
             EngineKind::VoxCpm2 => Arc::new(VoxCpm2Engine::build(&dir, &manifest)?),
             EngineKind::Qwen3Tts => Arc::new(Qwen3TtsEngine::build(&dir, &manifest)?),
             EngineKind::LongCat => Arc::new(LongCatEngine::build(&dir, &manifest)?),
-            EngineKind::Dots => Arc::new(DotsEngine::build(&dir, &manifest)?),
+            EngineKind::Dots => Arc::new(AudioCppEngine::build(&dir, &manifest, Family::Dots)?),
+            EngineKind::CosyVoice => {
+                Arc::new(AudioCppEngine::build(&dir, &manifest, Family::CosyVoice)?)
+            }
         };
 
         let mut loaded = self.loaded.lock().expect("engine lock poisoned");

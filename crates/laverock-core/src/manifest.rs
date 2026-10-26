@@ -20,6 +20,8 @@ pub enum EngineKind {
     LongCat,
     #[serde(rename = "dots")]
     Dots,
+    #[serde(rename = "cosyvoice")]
+    CosyVoice,
 }
 
 impl EngineKind {
@@ -30,6 +32,7 @@ impl EngineKind {
             EngineKind::Qwen3Tts => "qwen3tts",
             EngineKind::LongCat => "longcat",
             EngineKind::Dots => "dots",
+            EngineKind::CosyVoice => "cosyvoice",
         }
     }
 }
@@ -53,7 +56,9 @@ pub struct Manifest {
     #[serde(default)]
     pub longcat: Option<LongCatManifest>,
     #[serde(default)]
-    pub dots: Option<DotsManifest>,
+    pub dots: Option<AudioCppManifest>,
+    #[serde(default)]
+    pub cosyvoice: Option<AudioCppManifest>,
     #[serde(default)]
     pub defaults: SynthDefaults,
     /// User-tunable synthesis parameters shown by the UI. When absent,
@@ -271,6 +276,75 @@ impl Manifest {
                     hint: "相同种子 + 文本得到可复现的声音".into(),
                 },
             ],
+            // CosyVoice3: streaming LLM TTS with three request templates.
+            EngineKind::CosyVoice => vec![
+                ParamSpec {
+                    name: "template".into(),
+                    label: "合成模板".into(),
+                    kind: ParamKind::Choice,
+                    min: None,
+                    max: None,
+                    step: None,
+                    options: vec![
+                        ParamOption {
+                            label: "零样本克隆（需文字稿，相似度最高）".into(),
+                            value: "zero_shot".into(),
+                        },
+                        ParamOption {
+                            label: "跨语种克隆（只凭声音）".into(),
+                            value: "cross_lingual".into(),
+                        },
+                        ParamOption {
+                            label: "指令（用文字描述语气）".into(),
+                            value: "instruct".into(),
+                        },
+                    ],
+                    default: serde_json::json!("zero_shot"),
+                    hint: "零样本最像；文字稿不准时选跨语种".into(),
+                },
+                ParamSpec {
+                    name: "instruct".into(),
+                    label: "指令（仅「指令」模板使用）".into(),
+                    kind: ParamKind::TextArea,
+                    min: None,
+                    max: None,
+                    step: None,
+                    options: Vec::new(),
+                    default: serde_json::json!(""),
+                    hint: "例如：用温和亲切的语气，语速稍慢".into(),
+                },
+                ParamSpec::int_slider(
+                    "num_steps",
+                    "流式解码步数",
+                    10,
+                    1,
+                    32,
+                    1,
+                    "声学流匹配的 Euler 步数；越多越稳越慢",
+                ),
+                ParamSpec {
+                    name: "top_k".into(),
+                    label: "Top-K 采样".into(),
+                    kind: ParamKind::Int,
+                    min: Some(serde_json::json!(1)),
+                    max: Some(serde_json::json!(100)),
+                    step: None,
+                    options: Vec::new(),
+                    default: serde_json::json!(25),
+                    hint: "越小越稳定，越大越有变化".into(),
+                },
+                ParamSpec {
+                    name: "seed".into(),
+                    label: "随机种子".into(),
+                    kind: ParamKind::Int,
+                    min: Some(serde_json::json!(0)),
+                    max: Some(serde_json::json!(2_147_483_647)),
+                    step: None,
+                    options: Vec::new(),
+                    default: serde_json::json!(1986),
+                    hint: "相同种子 + 文本得到可复现的声音".into(),
+                },
+            ],
         }
     }
 }
@@ -308,6 +382,10 @@ pub enum ParamKind {
     Int,
     Bool,
     Choice,
+    /// Free-form single-line text.
+    Text,
+    /// Free-form multi-line text.
+    TextArea,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -548,12 +626,14 @@ fn default_longcat_seed() -> i64 {
     1024
 }
 
-/// dots.tts (Studio Dots): a 2B continuous-AR model with a flow-matching
-/// acoustic head over a 48 kHz AudioVAE. Laverock runs the GGUF export
-/// through audio.cpp's native runtime (Metal on macOS, CUDA/Vulkan/CPU
-/// elsewhere), which keeps a large model out of Python.
+/// A model executed by audio.cpp's native runtime.
+///
+/// Used by `dots` (dots.tts: 2B continuous AR, 48 kHz) and `cosyvoice`
+/// (CosyVoice3: 0.5B streaming LLM TTS). Both ship a GGUF export that the
+/// shared runtime runs on Metal/CUDA/Vulkan/CPU, so neither needs a
+/// Python environment inside the app.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DotsManifest {
+pub struct AudioCppManifest {
     /// `audiocpp_cli` path, absolute or relative to the model directory.
     pub binary: String,
     /// GGUF weights, absolute or relative to the model directory.
@@ -564,8 +644,9 @@ pub struct DotsManifest {
     /// Default language tag for the model (empty = none/auto).
     #[serde(default)]
     pub language: Option<String>,
-    #[serde(default = "default_dots_guidance")]
-    pub guidance: f32,
+    /// Classifier-free guidance; `None` leaves the family default alone.
+    #[serde(default)]
+    pub guidance: Option<f32>,
     #[serde(default = "default_dots_seed")]
     pub seed: i64,
     /// Optional prompt trim in seconds (audio.cpp's own trimmer).
@@ -577,9 +658,6 @@ pub struct DotsManifest {
 
 fn default_dots_backend() -> String {
     "best".to_string()
-}
-fn default_dots_guidance() -> f32 {
-    1.2
 }
 fn default_dots_seed() -> i64 {
     42
@@ -630,5 +708,35 @@ mod tests {
         assert_eq!(names, ["num_steps", "cfg", "guidance_method", "seed"]);
         assert_eq!(params[0].default, serde_json::json!(16));
         assert_eq!(params[2].kind, ParamKind::Choice);
+    }
+
+    #[test]
+    fn audiocpp_families_parse() {
+        let dots: Manifest = serde_json::from_str(
+            r#"{"id":"dots","kind":"dots","name":"d",
+                "dots":{"binary":"/b","model":"/m"}}"#,
+        )
+        .expect("dots manifest");
+        let cfg = dots.dots.as_ref().expect("dots section");
+        assert_eq!(cfg.backend, "best");
+        assert_eq!(cfg.guidance, None);
+        assert_eq!(cfg.seed, 42);
+
+        let cosy: Manifest = serde_json::from_str(
+            r#"{"id":"cosyvoice","kind":"cosyvoice","name":"c",
+                "cosyvoice":{"binary":"/b","model":"/m","guidance":1.2}}"#,
+        )
+        .expect("cosyvoice manifest");
+        let cfg = cosy.cosyvoice.as_ref().expect("cosyvoice section");
+        assert_eq!(cfg.guidance, Some(1.2));
+
+        let params = cosy.parameters_or_defaults();
+        let names: Vec<&str> = params.iter().map(|p| p.name.as_str()).collect();
+        assert_eq!(
+            names,
+            ["template", "instruct", "num_steps", "top_k", "seed"]
+        );
+        assert_eq!(params[1].kind, ParamKind::TextArea);
+        assert_eq!(params[4].default, serde_json::json!(1986));
     }
 }

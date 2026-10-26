@@ -3,13 +3,14 @@
 Local-first voice cloning studio. Models run on your own computer; a phone
 on the same network will later be able to connect as a remote control.
 
-Status: **MVP**. Five engines — ZipVoice (Chinese/English, ONNX, ~160 MB),
+Status: **MVP**. Six engines — ZipVoice (Chinese/English, ONNX, ~160 MB),
 VoxCPM2 (30 languages, GGUF/llama.cpp, ~3.3 GB), Qwen3-TTS (10 languages,
 official Python package in an isolated venv), LongCat-AudioDiT
-(waveform-latent diffusion, zh/en, ~7 GB with its venv) and dots.tts
-(2B continuous AR, 48 kHz, 24 languages, ~3 GB GGUF through the native
-audio.cpp runtime) — behind one local HTTP server with an embedded web
-UI, a saved-voice library, and phone remote control over LAN.
+(waveform-latent diffusion, zh/en, ~7 GB with its venv), dots.tts
+(2B continuous AR, 48 kHz, 24 languages, ~3 GB GGUF) and CosyVoice3
+(0.5B streaming LLM TTS, 9 languages + Cantonese, ~2.3 GB GGUF) — behind
+one local HTTP server with an embedded web UI, a saved-voice library,
+and phone remote control over LAN.
 
 ## Architecture
 
@@ -81,6 +82,7 @@ a one-time Gatekeeper/SmartScreen prompt.
 ./scripts/download-qwen3tts.sh     # Qwen3-TTS, isolated venv + ~1.5 GB model
 ./scripts/download-longcat.sh      # LongCat-AudioDiT 1B, isolated venv + 5.7 GB weights
 ./scripts/download-dots.sh         # dots.tts SOAR, 48 kHz, audio.cpp runtime + 3 GB GGUF
+./scripts/download-cosyvoice.sh    # CosyVoice3 0.5B, 2.3 GB GGUF (shares the runtime)
 
 # 2. Run
 cargo run -p laverock-server
@@ -91,8 +93,9 @@ The same downloads are available from **模型** in the UI; the scripts are
 convenient for headless installs and CI.
 
 Engines are discovered from `models/*/engine.json`. ZipVoice and
-LongCat-AudioDiT need the reference transcript; VoxCPM2 and Qwen3-TTS
-clone from the audio alone. Qwen3-TTS also supports preset speakers and
+LongCat-AudioDiT need the reference transcript; VoxCPM2, Qwen3-TTS and
+dots.tts clone from the audio alone; CosyVoice3 needs it only for its
+zero-shot template (its cross-lingual template does not). Qwen3-TTS also supports preset speakers and
 voice design through `QWEN3TTS_VARIANT=custom|design`. Adding another
 model of a supported kind is just another directory with a manifest;
 engines that need Python run in their own venv under `.tools/`, never in
@@ -133,6 +136,15 @@ M4 Pro with the Q8_0 checkpoint: RTF 1.3–1.9, 48 kHz output, about 6 GB
 peak memory. The runtime is pinned in `scripts/download-dots.sh`
 (`DOTS_VERSION`), and `DOTS_MODEL=dots.tts-mf` selects the 4-step
 MeanFlow export.
+
+CosyVoice3 (FunAudioLLM) is a 0.5B streaming LLM TTS that shares the
+audio.cpp runtime with dots.tts, so installing both costs one runtime
+download. It exposes three templates: zero-shot cloning (reference audio
+plus an accurate transcript, highest similarity), cross-lingual cloning
+(reference audio only, for when the transcript is unreliable) and
+instruction control (describe the delivery in words, e.g. "用温和的语气，
+语速稍慢"). Top-K and flow-decoder steps are tunable per request, and
+long text is chunked by the runtime.
 
 Pick or record 3–10 s of reference speech, type its exact transcript
 (required by ZipVoice for timbre/prosody alignment), type the text to
@@ -273,6 +285,10 @@ ZipVoice model weights are Apache-2.0, released by
 LongCat-AudioDiT code and weights are MIT, released by
 [meituan-longcat/LongCat-AudioDiT](https://github.com/meituan-longcat/LongCat-AudioDiT);
 its UMT5 tokenizer comes from `google/umt5-base`.
+
+CosyVoice3 code and checkpoints are Apache-2.0, released by
+[FunAudioLLM/CosyVoice](https://github.com/QwenAudio/CosyVoice); the GGUF
+export also comes from audio.cpp.
 
 dots.tts code and checkpoints are Apache-2.0, released by
 [studio-dots-ai/dots.tts](https://github.com/studio-dots-ai/dots.tts).
