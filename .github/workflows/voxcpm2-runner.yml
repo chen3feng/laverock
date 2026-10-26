@@ -45,6 +45,7 @@ jobs:
               -DGGML_METAL=ON
               -DGGML_METAL_EMBED_LIBRARY=ON
               -DGGML_NATIVE=OFF
+              -DLLAMA_CURL=OFF
               -DBUILD_SHARED_LIBS=OFF
               -DCMAKE_OSX_DEPLOYMENT_TARGET=13.3
           - name: macos-x64
@@ -56,6 +57,7 @@ jobs:
             args: >-
               -DGGML_METAL=OFF
               -DGGML_NATIVE=OFF
+              -DLLAMA_CURL=OFF
               -DBUILD_SHARED_LIBS=OFF
               -DCMAKE_OSX_DEPLOYMENT_TARGET=13.3
           - name: linux-x64
@@ -63,12 +65,13 @@ jobs:
             exe: ""
             archive: tar.gz
             # Build on 22.04 for the older glibc. Static, NATIVE off: one
-            # x86-64 baseline (SSE2) binary that runs on every CPU. The
-            # fork's CPU code calls its own symbols directly, so BACKEND_DL
-            # variants do not link for voxcpm2-cli — same choice the
+            # x86-64 baseline (SSE2) binary that runs on every CPU. OpenMP
+            # off so the binary needs no libgomp.so.1 — same choice the
             # audio.cpp cpu-portable runtime makes.
             args: >-
               -DGGML_NATIVE=OFF
+              -DLLAMA_CURL=OFF
+              -DGGML_OPENMP=OFF
               -DBUILD_SHARED_LIBS=OFF
           - name: windows-x64
             os: windows-latest
@@ -78,7 +81,9 @@ jobs:
             # so no VC redist is needed on the user's machine.
             args: >-
               -DGGML_NATIVE=OFF
+              -DLLAMA_CURL=OFF
               -DGGML_STATIC=ON
+              -DGGML_OPENMP=OFF
               -DBUILD_SHARED_LIBS=OFF
 
     steps:
@@ -144,6 +149,35 @@ jobs:
           # Static builds: one self-contained binary per platform, no
           # companion shared libraries.
           echo "stage contents:"; ls -la stage
+
+      - name: Linkage audit
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The artifact must not depend on anything beyond what ships with
+          # the OS (a previous build silently linked Homebrew OpenSSL and
+          # still passed the smoke test on the runner).
+          case "${{ matrix.name }}" in
+            macos*)
+              otool -L stage/voxcpm2-cli
+              if otool -L stage/voxcpm2-cli | grep -Eq '/opt/homebrew|/usr/local|@rpath'; then
+                echo "::error::non-system shared-library dependency"; exit 1
+              fi ;;
+            linux-x64)
+              ldd stage/voxcpm2-cli
+              if ldd stage/voxcpm2-cli | grep -q 'not found'; then
+                echo "::error::unresolved shared-library dependency"; exit 1
+              fi
+              ldd stage/voxcpm2-cli
+              ldd stage/voxcpm2-cli | awk '{print $1}' \
+                | grep -Ev '^(linux-vdso[^ ]*|ld-linux[^ ]*|lib(c|m|dl|rt|pthread)\.so[^ ]*|libstdc\+\+\.so[^ ]*|libgcc_s\.so[^ ]*)$' \
+                | grep . && { echo "::error::unexpected shared-library dependency"; exit 1; } || true ;;
+            windows-x64)
+              # vcomp140.dll would mean OpenMP crept back in; the UCRT set is
+              # expected with GGML_STATIC linking the MSVC runtime.
+              (dumpbin //dependents stage/voxcpm2-cli.exe 2>/dev/null || true) | tee deps.txt
+              ! grep -qi 'vcomp.*\.dll' deps.txt ;;
+          esac
 
       - name: Smoke test
         shell: bash
