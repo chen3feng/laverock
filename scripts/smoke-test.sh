@@ -205,6 +205,18 @@ else
   echo "  skip longcat (not installed)"
 fi
 
+if case "$engines_json" in *'"kind":"kokoro"'*) true ;; *) false ;; esac; then
+  echo "kokoro"
+  code=$(curl -s -o "$OUT/kokoro.wav" -w '%{http_code}' --max-time 120 -X POST \
+    "$BASE/api/engines/kokoro-int8-multi-lang-v1_0/synthesize" \
+    -F 'text=你好，我是 Kokoro，通过 laverock 调用。' \
+    -F 'voice=47')
+  [ "$code" = "200" ] && head -c 4 "$OUT/kokoro.wav" | grep -q RIFF \
+    && ok "kokoro preset voice (no reference audio)" || bad "kokoro (HTTP $code)"
+else
+  echo "  skip kokoro (not installed)"
+fi
+
 echo "remote access"
 PORT=$(echo "$BASE" | sed -n 's|.*:\([0-9][0-9]*\).*|\1|p')
 PORT=${PORT:-8787}

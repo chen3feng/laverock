@@ -22,6 +22,8 @@ pub enum EngineKind {
     Dots,
     #[serde(rename = "cosyvoice")]
     CosyVoice,
+    #[serde(rename = "kokoro")]
+    Kokoro,
 }
 
 impl EngineKind {
@@ -33,6 +35,7 @@ impl EngineKind {
             EngineKind::LongCat => "longcat",
             EngineKind::Dots => "dots",
             EngineKind::CosyVoice => "cosyvoice",
+            EngineKind::Kokoro => "kokoro",
         }
     }
 }
@@ -59,6 +62,8 @@ pub struct Manifest {
     pub dots: Option<AudioCppManifest>,
     #[serde(default)]
     pub cosyvoice: Option<AudioCppManifest>,
+    #[serde(default)]
+    pub kokoro: Option<KokoroManifest>,
     #[serde(default)]
     pub defaults: SynthDefaults,
     /// User-tunable synthesis parameters shown by the UI. When absent,
@@ -345,6 +350,18 @@ impl Manifest {
                     hint: "相同种子 + 文本得到可复现的声音".into(),
                 },
             ],
+            // Preset-voices model: speed is the only built-in control;
+            // the speaker (`voice`) choice is model-specific, so manifests
+            // declare their own parameter list with every sid they ship.
+            EngineKind::Kokoro => vec![ParamSpec::slider(
+                "speed",
+                "语速",
+                1.0,
+                0.5,
+                2.0,
+                0.1,
+                "越大语速越快，不改变音色",
+            )],
         }
     }
 }
@@ -663,6 +680,50 @@ fn default_dots_seed() -> i64 {
     42
 }
 
+/// Kokoro (hexgrad Kokoro-82M, sherpa-onnx ONNX export).
+///
+/// A preset-voices model: `voices.bin` holds one style vector per speaker
+/// and a request selects one by integer speaker id (`sid`). There is no
+/// reference-audio cloning, so engines built from this manifest never
+/// inspect the synthesis request's prompt fields.
+///
+/// All file paths are relative to the model directory. The multi-language
+/// export needs `dict_dir` (jieba segmentation) and both lexicon files;
+/// English-only exports can leave them unset.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct KokoroManifest {
+    pub model: String,
+    pub voices: String,
+    pub tokens: String,
+    /// espeak-ng data directory.
+    pub data_dir: String,
+    #[serde(default)]
+    pub dict_dir: Option<String>,
+    /// Comma-separated lexicon files, same syntax as sherpa-onnx.
+    #[serde(default)]
+    pub lexicon: Option<String>,
+    /// Comma-separated text-normalization FSTs (date/number/phone-zh…).
+    #[serde(default)]
+    pub rule_fsts: Option<String>,
+    /// Fixed language tag; unset lets the multi-language frontend decide.
+    #[serde(default)]
+    pub lang: Option<String>,
+    #[serde(default = "default_kokoro_length_scale")]
+    pub length_scale: f32,
+    #[serde(default = "default_kokoro_threads")]
+    pub num_threads: i32,
+    /// Speaker id used when the request carries no `voice` parameter.
+    #[serde(default)]
+    pub default_sid: i32,
+}
+
+fn default_kokoro_length_scale() -> f32 {
+    1.0
+}
+fn default_kokoro_threads() -> i32 {
+    2
+}
+
 fn default_python() -> String {
     "python3".to_string()
 }
@@ -738,5 +799,35 @@ mod tests {
         );
         assert_eq!(params[1].kind, ParamKind::TextArea);
         assert_eq!(params[4].default, serde_json::json!(1986));
+    }
+
+    #[test]
+    fn kokoro_manifest_parses_with_defaults() {
+        let raw = r#"{
+            "id": "kokoro",
+            "kind": "kokoro",
+            "name": "Kokoro 82M",
+            "kokoro": {
+                "model": "model.int8.onnx",
+                "voices": "voices.bin",
+                "tokens": "tokens.txt",
+                "data_dir": "espeak-ng-data",
+                "dict_dir": "dict",
+                "lexicon": "lexicon-us-en.txt,lexicon-zh.txt",
+                "default_sid": 3
+            }
+        }"#;
+        let manifest: Manifest = serde_json::from_str(raw).expect("valid manifest");
+        let k = manifest.kokoro.as_ref().expect("kokoro section");
+        assert_eq!(k.length_scale, 1.0);
+        assert_eq!(k.num_threads, 2);
+        assert_eq!(k.default_sid, 3);
+        assert_eq!(k.lang, None);
+
+        // Without a declared parameter list the kind exposes speed only;
+        // the voice choice is expected from the model's own manifest.
+        let params = manifest.parameters_or_defaults();
+        let names: Vec<&str> = params.iter().map(|p| p.name.as_str()).collect();
+        assert_eq!(names, ["speed"]);
     }
 }

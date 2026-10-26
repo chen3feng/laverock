@@ -18,6 +18,30 @@
     "note": "克隆时必须提供参考音频对应的文字。"
   },
   {
+    "id": "kokoro",
+    "dir": "kokoro-int8-multi-lang-v1_0",
+    "name": "Kokoro 82M 多语言 (INT8)",
+    "description": "仅 82M 参数的轻量 TTS，CPU 上即可实时合成；54 个官方预置音色，覆盖中英日法西意葡印地 8 种语言。不支持声音克隆，只能选择内置音色。",
+    "size": "~135 MB",
+    "languages": [
+      "zh",
+      "en",
+      "ja",
+      "fr",
+      "es",
+      "it",
+      "pt",
+      "hi"
+    ],
+    "capabilities": [
+      "tts",
+      "preset-voices"
+    ],
+    "script": "download-kokoro.sh",
+    "env": {},
+    "note": "纯 ONNX 运行时，无需 Python 或编译工具链。该模型只有预置音色：选中后合成页不会出现声音库/录音/参考文字，改为在引擎参数里选择音色。"
+  },
+  {
     "id": "voxcpm2",
     "dir": "voxcpm2",
     "name": "VoxCPM2",

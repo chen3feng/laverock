@@ -6,6 +6,7 @@
 
 mod audio;
 mod audiocpp;
+mod kokoro;
 mod longcat;
 mod manager;
 mod manifest;
@@ -18,8 +19,8 @@ pub use manager::{
     EngineInfo, EngineManager, ProgressEvent, ProgressSink, SpeechEngine, SynthRequest,
 };
 pub use manifest::{
-    AudioCppManifest, EngineKind, LongCatManifest, Manifest, ParamKind, ParamOption, ParamSpec,
-    Qwen3TtsManifest, SynthDefaults, VoxCpm2Manifest, ZipVoiceManifest,
+    AudioCppManifest, EngineKind, KokoroManifest, LongCatManifest, Manifest, ParamKind,
+    ParamOption, ParamSpec, Qwen3TtsManifest, SynthDefaults, VoxCpm2Manifest, ZipVoiceManifest,
 };
 
 /// Re-exported for engines that need the underlying runtime.

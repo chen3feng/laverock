@@ -3,7 +3,8 @@
 Local-first voice cloning studio. Models run on your own computer; a phone
 on the same network will later be able to connect as a remote control.
 
-Status: **MVP**. Six engines — ZipVoice (Chinese/English, ONNX, ~160 MB),
+Status: **MVP**. Seven engines — ZipVoice (Chinese/English, ONNX, ~160 MB),
+Kokoro-82M (54 preset voices, 8 languages, ONNX, ~135 MB, no cloning),
 VoxCPM2 (30 languages, GGUF/llama.cpp, ~3.3 GB), Qwen3-TTS (10 languages,
 official Python package in an isolated venv), LongCat-AudioDiT
 (waveform-latent diffusion, zh/en, ~7 GB with its venv), dots.tts
@@ -11,6 +12,11 @@ official Python package in an isolated venv), LongCat-AudioDiT
 (0.5B streaming LLM TTS, 9 languages + Cantonese, ~2.3 GB GGUF) — behind
 one local HTTP server with an embedded web UI, a saved-voice library,
 and phone remote control over LAN.
+
+Preset-voices engines (Kokoro) take no reference audio: when selected,
+the synthesis page hides the saved-voice/recorder section and offers a
+built-in voice picker instead. The UI switches on the engine's
+`capabilities` (`clone` vs `preset-voices`).
 
 ## Architecture
 
@@ -95,8 +101,11 @@ convenient for headless installs and CI.
 Engines are discovered from `models/*/engine.json`. ZipVoice and
 LongCat-AudioDiT need the reference transcript; VoxCPM2, Qwen3-TTS and
 dots.tts clone from the audio alone; CosyVoice3 needs it only for its
-zero-shot template (its cross-lingual template does not). Qwen3-TTS also supports preset speakers and
-voice design through `QWEN3TTS_VARIANT=custom|design`. Adding another
+zero-shot template (its cross-lingual template does not). Kokoro takes no
+reference audio at all — it has 54 built-in speakers chosen from a
+manifest-declared `voice` parameter, and the UI hides the cloning section
+for it. Qwen3-TTS also supports preset speakers and voice design through
+`QWEN3TTS_VARIANT=custom|design`. Adding another
 model of a supported kind is just another directory with a manifest;
 engines that need Python run in their own venv under `.tools/`, never in
 the core process.

@@ -6,6 +6,7 @@
 
 use crate::{
     audiocpp::{AudioCppEngine, Family},
+    kokoro::KokoroEngine,
     longcat::LongCatEngine,
     qwen3tts::Qwen3TtsEngine,
     voxcpm2::VoxCpm2Engine,
@@ -183,6 +184,7 @@ impl EngineManager {
             EngineKind::CosyVoice => {
                 Arc::new(AudioCppEngine::build(&dir, &manifest, Family::CosyVoice)?)
             }
+            EngineKind::Kokoro => Arc::new(KokoroEngine::build(&dir, &manifest)?),
         };
 
         let mut loaded = self.loaded.lock().expect("engine lock poisoned");

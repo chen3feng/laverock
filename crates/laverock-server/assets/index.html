@@ -270,7 +270,7 @@
         <div class="hint" id="engineHint"></div>
       </div>
 
-      <div class="card">
+      <div class="card" id="voicePickCard">
         <label for="profile">声音</label>
         <div class="prompt-box">
           <select id="profile" style="flex:1"></select>
@@ -1148,6 +1148,20 @@ function collectEngineParams() {
   return out;
 }
 
+const CAPABILITY_LABELS = {
+  tts: '语音合成',
+  clone: '声音克隆',
+  'voice-design': '声音设计',
+  instruct: '指令控制',
+  'preset-voices': '预置音色',
+};
+
+function engineUsesClone(e) {
+  // Preset-only engines (Kokoro) have no reference-audio cloning, so the
+  // saved-voice picker and ad-hoc recorder are hidden for them.
+  return !!e && (e.capabilities || []).includes('clone');
+}
+
 function syncEngine() {
   const e = engines.find((x) => x.id === $('engine').value);
   if (!e) {
@@ -1155,8 +1169,11 @@ function syncEngine() {
     renderEngineParams(null);
     return;
   }
-  $('engineHint').textContent =
-    `${e.kind} · ${(e.languages || []).join(' / ')} · ${(e.capabilities || []).join(', ')}`;
+  const caps = (e.capabilities || []).map((c) => CAPABILITY_LABELS[c] || c).join('、');
+  $('engineHint').textContent = `${e.kind} · ${(e.languages || []).join(' / ')} · ${caps}`;
+  const isClone = engineUsesClone(e);
+  $('voicePickCard').hidden = !isClone;
+  $('adhoc').hidden = !isClone;
   renderEngineParams(e);
 }
 
@@ -1182,14 +1199,19 @@ $('go').onclick = async () => {
     return;
   }
 
+  const engine = engines.find((x) => x.id === $('engine').value);
+  const isClone = engineUsesClone(engine);
+
   const fd = new FormData();
   fd.append('text', text);
-  if (saved) {
-    fd.append('profile_id', saved.id);
-  } else {
-    if (synthCapture.blob) fd.append('prompt', synthCapture.blob, synthCapture.filename || 'reference.wav');
-    const pt = $('prompt_text').value.trim();
-    if (pt) fd.append('prompt_text', pt);
+  if (isClone) {
+    if (saved) {
+      fd.append('profile_id', saved.id);
+    } else {
+      if (synthCapture.blob) fd.append('prompt', synthCapture.blob, synthCapture.filename || 'reference.wav');
+      const pt = $('prompt_text').value.trim();
+      if (pt) fd.append('prompt_text', pt);
+    }
   }
   for (const [name, value] of Object.entries(collectEngineParams())) {
     fd.append(name, value);
@@ -1202,7 +1224,6 @@ $('go').onclick = async () => {
   // Progress: the request is one blocking WAV response, so show stages
   // (model load vs. synthesis) with an elapsed timer rather than a fake
   // percentage. Engine load dominates the first request for each engine.
-  const engine = engines.find((x) => x.id === $('engine').value);
   const kind = engine ? engine.kind : '';
   const loadNote = kind === 'qwen3tts'
     ? 'Qwen3-TTS 首次加载约 20–90 秒'
@@ -1352,7 +1373,7 @@ function renderInstalledOnly() {
     el.innerHTML = `
       <div class="model-head"><b>${esc(e.name)}</b><span class="pill ok">已安装</span></div>
       <div class="chips">${(e.languages || []).map((l) => `<span class="chip">${esc(l)}</span>`).join('')}</div>
-      <div class="hint">${esc(e.kind)} · ${esc((e.capabilities || []).join(', '))}</div>`;
+      <div class="hint">${esc(e.kind)} · ${esc((e.capabilities || []).map((c) => CAPABILITY_LABELS[c] || c).join('、'))}</div>`;
     box.appendChild(el);
   }
   $('installedEmpty').hidden = engines.length > 0;
