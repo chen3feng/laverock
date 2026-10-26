@@ -1811,6 +1811,9 @@ $('go').onclick = async () => {
     const dl = $('download');
     dl.href = audioUrl;
     dl.hidden = false;
+    // Remember the WAV so the MP3 link can convert it on demand.
+    lastSynthBlob = blob;
+    $('downloadMp3').hidden = !mp3Supported;
     if (engine) engine.loaded = true;
     status.className = 'ok';
     status.textContent = `${lang === 'en' ? 'Done' : '完成'} · ${(blob.size / 1024).toFixed(0)} KB · ${((performance.now() - t0) / 1000).toFixed(1)}s`;
@@ -2463,6 +2466,10 @@ window.addEventListener('hashchange', () => showPage(currentPage()));
 $('downloadMp3').onclick = async (event) => {
   event.preventDefault();
   if (!lastSynthBlob) return;
+  const link = $('downloadMp3');
+  const label = link.textContent;
+  link.style.pointerEvents = 'none';
+  link.textContent = lang === 'en' ? 'Converting…' : '转换中…';
   try {
     const res = await fetch('/api/audio/mp3', { method: 'POST', body: lastSynthBlob });
     if (!res.ok) {
@@ -2480,6 +2487,9 @@ $('downloadMp3').onclick = async (event) => {
     setTimeout(() => URL.revokeObjectURL(url), 10000);
   } catch (e) {
     toast((lang === 'en' ? 'MP3 export failed: ' : '导出 MP3 失败：') + localizeError(e.message), true);
+  } finally {
+    link.style.pointerEvents = '';
+    link.textContent = label;
   }
 };
 
