@@ -53,8 +53,10 @@
   }
   .sidebar-foot {
     margin-top: auto; padding: 10px 12px 2px; display: flex;
-    align-items: center; justify-content: space-between; font-size: 11.5px; color: var(--muted);
+    align-items: center; justify-content: space-between; gap: 6px;
+    font-size: 11.5px; color: var(--muted);
   }
+  #langSelect { max-width: 118px; }
   .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 8px var(--ok); }
   .dot.off { background: var(--danger); box-shadow: 0 0 8px var(--danger); }
 
@@ -230,31 +232,38 @@
         <path d="M3 12h2M7 7v10M11 4v16M15 7v10M19 11v2" />
       </svg>
     </div>
-    <div><b>Laverock</b><span>本地语音工作室</span></div>
+    <div><b>Laverock</b><span data-i18n="brand.sub">本地语音工作室</span></div>
   </div>
   <nav>
     <a href="#/synthesize" data-page="synthesize">
       <svg viewBox="0 0 24 24"><path d="M11 5 6 9H2v6h4l5 4V5Z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M18.5 5.5a9 9 0 0 1 0 13"/></svg>
-      <span>合成</span>
+      <span data-i18n="nav.synthesize">合成</span>
     </a>
     <a href="#/voices" data-page="voices">
       <svg viewBox="0 0 24 24"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><path d="M12 19v3"/></svg>
-      <span>语音素材</span>
+      <span data-i18n="nav.voices">语音素材</span>
     </a>
     <a href="#/models" data-page="models">
       <svg viewBox="0 0 24 24"><path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/></svg>
-      <span>模型</span>
+      <span data-i18n="nav.models">模型</span>
     </a>
     <a href="#/history" data-page="history">
       <svg viewBox="0 0 24 24"><path d="M3 3v5h5"/><path d="M3.05 13A9 9 0 1 0 6 5.3L3 8"/><path d="M12 7v5l4 2"/></svg>
-      <span>历史</span>
+      <span data-i18n="nav.history">历史</span>
     </a>
     <a href="#/settings" data-page="settings">
       <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9c.14.63.63 1.13 1.26 1.27H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z"/></svg>
-      <span>设置</span>
+      <span data-i18n="nav.settings">设置</span>
     </a>
   </nav>
-  <div class="sidebar-foot"><span id="version"></span><span class="dot" id="connState" title="服务状态"></span></div>
+  <div class="sidebar-foot">
+    <select id="langSelect" title="Language" style="background:transparent;color:inherit;border:1px solid var(--line);border-radius:8px;padding:2px 4px;font-size:11px">
+      <option value="system" data-i18n="lang.system">跟随系统</option>
+      <option value="zh" data-i18n="lang.zh">中文</option>
+      <option value="en" data-i18n="lang.en">English</option>
+    </select>
+    <span id="version"></span><span class="dot" id="connState" data-i18n-title="state.title" title="服务状态"></span>
+  </div>
 </aside>
 
 <main class="content">
@@ -262,45 +271,45 @@
 
     <!-- ================= 合成 ================= -->
     <section id="page-synthesize" class="page">
-      <div class="page-head"><h1>合成</h1><p class="sub">选择引擎与声音，输入文字，在这台电脑上生成语音。</p></div>
+      <div class="page-head"><h1 data-i18n="synth.title">合成</h1><p class="sub" data-i18n="synth.sub">选择引擎与声音，输入文字，在这台电脑上生成语音。</p></div>
 
       <div class="card">
-        <label for="engine">引擎</label>
+        <label for="engine" data-i18n="engine">引擎</label>
         <select id="engine"></select>
         <div class="hint" id="engineHint"></div>
       </div>
 
       <div class="card" id="voicePickCard">
-        <label for="profile">声音</label>
+        <label for="profile" data-i18n="voice">声音</label>
         <div class="prompt-box">
           <select id="profile" style="flex:1"></select>
-          <button class="ghost" id="preview" type="button" disabled>试听</button>
+          <button class="ghost" id="preview" type="button" data-i18n="preview" disabled>试听</button>
         </div>
-        <div class="hint" id="profilehint">选择一个已保存的声音，或使用下方的临时录音。</div>
+        <div class="hint" id="profilehint" data-i18n="profilehint.default">选择一个已保存的声音，或使用下方的临时录音。</div>
       </div>
 
       <div class="card" id="adhoc">
-        <label>临时参考声音（3–10 秒干净人声）</label>
+        <label data-i18n="adhoc.title">临时参考声音（3–10 秒干净人声）</label>
         <div id="synthCapture"></div>
-        <div class="hint">录音会在浏览器内转成 24kHz 单声道 WAV；也可以直接上传 WAV。</div>
+        <div class="hint" data-i18n="adhoc.hint">录音会在浏览器内转成 24kHz 单声道 WAV；也可以直接上传 WAV。</div>
         <div style="margin-top:14px">
-          <label for="prompt_text">参考音频对应文字（ZipVoice / LongCat / CosyVoice 零样本必填）</label>
-          <textarea id="prompt_text" rows="2" placeholder="例如：那还是三十六年前，一九八七年。"></textarea>
-          <div class="hint">录音说了什么就填什么，可多行。ZipVoice、LongCat-AudioDiT 以及 CosyVoice 的零样本模板必填；VoxCPM2、Qwen3-TTS、dots.tts 可留空。</div>
+          <label for="prompt_text" data-i18n="prompttext.label">参考音频对应文字（ZipVoice / LongCat / CosyVoice 零样本必填）</label>
+          <textarea id="prompt_text" rows="2" data-i18n-ph="prompttext.ph" placeholder="例如：那还是三十六年前，一九八七年。"></textarea>
+          <div class="hint" data-i18n="prompttext.hint">录音说了什么就填什么，可多行。ZipVoice、LongCat-AudioDiT 以及 CosyVoice 的零样本模板必填；VoxCPM2、Qwen3-TTS、dots.tts 可留空。</div>
         </div>
         <div style="margin-top:14px">
-          <label for="profilename">保存到声音库（可选，便于下次直接复用）</label>
+          <label for="profilename" data-i18n="savevoice.label">保存到声音库（可选，便于下次直接复用）</label>
           <div class="prompt-box">
-            <input type="text" id="profilename" placeholder="给这个声音起个名字，例如：新闻女声" style="flex:1" />
-            <button class="ghost" id="saveprofile" type="button">保存声音</button>
+            <input type="text" id="profilename" data-i18n-ph="profilename.ph" placeholder="给这个声音起个名字，例如：新闻女声" style="flex:1" />
+            <button class="ghost" id="saveprofile" type="button" data-i18n="saveprofile">保存声音</button>
           </div>
           <div class="hint" id="savehint"></div>
         </div>
       </div>
 
       <div class="card">
-        <label for="text">要合成的文字</label>
-        <textarea id="text" placeholder="输入中文或 English 文本……"></textarea>
+        <label for="text" data-i18n="text.label">要合成的文字</label>
+        <textarea id="text" data-i18n-ph="text.ph" placeholder="输入中文或 English 文本……"></textarea>
       </div>
 
       <!-- Controls are generated from the engine's manifest parameters.
@@ -308,10 +317,10 @@
       <div class="card" id="engineParams" hidden></div>
 
       <div class="actions">
-        <button id="go" type="button">生成语音</button>
+        <button id="go" type="button" data-i18n="go">生成语音</button>
         <span id="status"></span>
-        <a id="download" class="hint" download="laverock.wav" hidden>下载 WAV</a>
-        <a id="downloadMp3" class="hint" href="#" hidden>下载 MP3</a>
+        <a id="download" class="hint" download="laverock.wav" data-i18n="download.wav" hidden>下载 WAV</a>
+        <a id="downloadMp3" class="hint" href="#" data-i18n="download.mp3" hidden>下载 MP3</a>
       </div>
       <div id="synthProgress" class="pbar" hidden><div class="pbar-fill indeterminate"></div></div>
       <div id="synthProgressLabel" class="pbar-label" hidden><span></span><b></b></div>
@@ -322,56 +331,56 @@
     <!-- ================= 语音素材 ================= -->
     <section id="page-voices" class="page">
       <div class="page-head" style="display:flex;align-items:flex-end;justify-content:space-between;gap:12px;flex-wrap:wrap">
-        <div><h1>语音素材</h1><p class="sub">保存的参考声音可以复用到任何克隆引擎。</p></div>
-        <button id="newVoiceBtn" type="button">＋ 新建声音</button>
+        <div><h1 data-i18n="voices.title">语音素材</h1><p class="sub" data-i18n="voices.sub">保存的参考声音可以复用到任何克隆引擎。</p></div>
+        <button id="newVoiceBtn" type="button" data-i18n="voice.new">＋ 新建声音</button>
       </div>
 
       <div class="card" id="newVoiceCard" hidden>
-        <label for="newName">声音名称</label>
-        <input type="text" id="newName" placeholder="例如：新闻女声" />
-        <label style="margin-top:14px">参考声音（3–10 秒干净人声）</label>
+        <label for="newName" data-i18n="voice.name">声音名称</label>
+        <input type="text" id="newName" data-i18n-ph="voice.name.ph" placeholder="例如：新闻女声" />
+        <label style="margin-top:14px" data-i18n="voice.ref">参考声音（3–10 秒干净人声）</label>
         <div id="voiceCapture"></div>
-        <div class="hint">录音会在浏览器内转成 24kHz 单声道 WAV。</div>
+        <div class="hint" data-i18n="voice.rec.hint">录音会在浏览器内转成 24kHz 单声道 WAV。</div>
         <div style="margin-top:14px">
-          <label for="newPromptText">参考音频对应文字（ZipVoice 必填）</label>
-          <input type="text" id="newPromptText" placeholder="录音里说了什么就填什么" />
+          <label for="newPromptText" data-i18n="voice.prompt">参考音频对应文字（ZipVoice 必填）</label>
+          <input type="text" id="newPromptText" data-i18n-ph="voice.prompt.ph" placeholder="录音里说了什么就填什么" />
         </div>
         <div class="actions" style="margin-top:16px">
-          <button id="newSave" type="button">保存到声音库</button>
-          <button class="ghost" id="newCancel" type="button">取消</button>
+          <button id="newSave" type="button" data-i18n="voice.save">保存到声音库</button>
+          <button class="ghost" id="newCancel" type="button" data-i18n="cancel">取消</button>
           <span class="hint" id="newSaveHint"></span>
         </div>
       </div>
 
       <div class="grid" id="voicesGrid"></div>
-      <div class="empty" id="voicesEmpty" hidden>
+      <div class="empty" id="voicesEmpty" data-i18n="voices.empty" hidden>
         还没有保存的声音。点击「新建声音」录音或上传一段 3–10 秒的参考音频。
       </div>
     </section>
 
     <!-- ================= 模型 ================= -->
     <section id="page-models" class="page">
-      <div class="page-head"><h1>模型</h1><p class="sub">每个模型都是 <code>models/&lt;id&gt;/engine.json</code> 描述的一个插件。</p></div>
+      <div class="page-head"><h1 data-i18n="models.title">模型</h1><p class="sub" data-i18n="models.sub">每个模型都是 <code>models/&lt;id&gt;/engine.json</code> 描述的一个插件。</p></div>
 
       <div class="card" id="modelPaths" hidden>
-        <label>模型目录</label>
+        <label data-i18n="models.dir">模型目录</label>
         <div class="pathline"><code id="modelsDirPath">…</code></div>
-        <label style="margin-top:12px">下载脚本</label>
+        <label style="margin-top:12px" data-i18n="models.scripts">下载脚本</label>
         <div class="pathline"><code id="scriptsDirPath">…</code></div>
-        <div class="hint">下载使用「设置 → 下载网络」中的代理与镜像；安装完成后引擎会自动刷新。</div>
+        <div class="hint" data-i18n="models.paths.hint">下载使用「设置 → 下载网络」中的代理与镜像；安装完成后引擎会自动刷新。</div>
       </div>
 
       <div class="card" id="modelsNotice" hidden>
-        <label>模型管理仅在电脑端可用</label>
-        <div class="hint">手机上可以查看已安装的引擎并直接合成。安装新模型请在电脑上打开同一界面。</div>
+        <label data-i18n="models.desktop.only">模型管理仅在电脑端可用</label>
+        <div class="hint" data-i18n="models.desktop.hint">手机上可以查看已安装的引擎并直接合成。安装新模型请在电脑上打开同一界面。</div>
       </div>
 
-      <h2 class="section-title">已安装</h2>
+      <h2 class="section-title" data-i18n="models.installed">已安装</h2>
       <div class="grid" id="installedModels"></div>
-      <div class="empty" id="installedEmpty" hidden>还没有安装任何模型。从下方选择一个开始下载。</div>
+      <div class="empty" id="installedEmpty" data-i18n="models.installed.empty" hidden>还没有安装任何模型。从下方选择一个开始下载。</div>
 
       <div id="catalogSection">
-        <h2 class="section-title">可安装</h2>
+        <h2 class="section-title" data-i18n="models.available">可安装</h2>
         <div class="grid" id="catalogModels"></div>
       </div>
     </section>
@@ -379,82 +388,82 @@
     <!-- ================= 历史 ================= -->
     <section id="page-history" class="page">
       <div class="page-head" style="display:flex;align-items:flex-end;justify-content:space-between;gap:12px;flex-wrap:wrap">
-        <div><h1>历史</h1><p class="sub">本机生成的语音，最多保留 100 条或 1 GB。</p></div>
-        <button class="ghost danger" id="clearHistory" type="button" hidden>清空全部</button>
+        <div><h1 data-i18n="history.title">历史</h1><p class="sub" data-i18n="history.sub">本机生成的语音，最多保留 100 条或 1 GB。</p></div>
+        <button class="ghost danger" id="clearHistory" type="button" data-i18n="history.clear" hidden>清空全部</button>
       </div>
       <div id="historyList"></div>
-      <div class="empty" id="historyEmpty" hidden>还没有生成记录。去「合成」生成第一条吧。</div>
+      <div class="empty" id="historyEmpty" data-i18n="history.empty" hidden>还没有生成记录。去「合成」生成第一条吧。</div>
     </section>
 
     <!-- ================= 设置 ================= -->
     <section id="page-settings" class="page">
-      <div class="page-head"><h1>设置</h1><p class="sub">下载网络、手机遥控与关于信息。</p></div>
+      <div class="page-head"><h1 data-i18n="settings.title">设置</h1><p class="sub" data-i18n="settings.sub">下载网络、手机遥控与关于信息。</p></div>
 
       <div class="card" id="downloadSettings" hidden>
-        <label>下载网络</label>
-        <div class="hint" style="margin:0 0 14px">代理与镜像只影响模型下载脚本，不会改变本机推理。</div>
-        <label for="proxyMode">代理</label>
+        <label data-i18n="settings.downloads">下载网络</label>
+        <div class="hint" style="margin:0 0 14px" data-i18n="settings.downloads.hint">代理与镜像只影响模型下载脚本，不会改变本机推理。</div>
+        <label for="proxyMode" data-i18n="proxy">代理</label>
         <select id="proxyMode">
-          <option value="system">跟随系统代理（默认）</option>
-          <option value="manual">手动指定</option>
-          <option value="direct">不使用代理（直连）</option>
+          <option value="system" data-i18n="proxy.system">跟随系统代理（默认）</option>
+          <option value="manual" data-i18n="proxy.manual">手动指定</option>
+          <option value="direct" data-i18n="proxy.direct">不使用代理（直连）</option>
         </select>
         <input type="text" id="proxy" placeholder="http://127.0.0.1:10808" hidden style="margin-top:8px" />
         <div class="hint" id="proxyHint"></div>
         <div class="row" style="margin-top:14px">
           <div>
-            <label for="hfPreset">Hugging Face 镜像</label>
+            <label for="hfPreset" data-i18n="hf.mirror">Hugging Face 镜像</label>
             <select id="hfPreset"></select>
             <input type="text" id="hfCustom" placeholder="https://…" hidden style="margin-top:8px" />
           </div>
           <div>
-            <label for="pipPreset">PyPI 镜像（Qwen3-TTS 安装）</label>
+            <label for="pipPreset" data-i18n="pip.mirror">PyPI 镜像（Qwen3-TTS 安装）</label>
             <select id="pipPreset"></select>
             <input type="text" id="pipCustom" placeholder="https://…/simple" hidden style="margin-top:8px" />
           </div>
         </div>
-        <div class="hint">当前模型目录：<code id="pathModels">…</code> · 脚本目录：<code id="pathScripts">…</code></div>
+        <div class="hint"><span data-i18n="settings.modelsdir">当前模型目录：</span><code id="pathModels">…</code> · <span data-i18n="settings.scriptsdir">脚本目录：</span><code id="pathScripts">…</code></div>
         <div class="actions" style="margin-top:14px">
-          <button id="saveSettings" type="button">保存设置</button>
+          <button id="saveSettings" type="button" data-i18n="settings.save">保存设置</button>
           <span class="hint" id="settingsHint"></span>
         </div>
       </div>
 
       <div class="card" id="remoteCard" hidden>
-        <label>手机遥控</label>
+        <label data-i18n="settings.remote">手机遥控</label>
         <div class="prompt-box" style="justify-content:space-between">
-          <span class="hint" id="lanHint">开启后，同一 Wi-Fi 下的手机经配对即可访问同一套界面</span>
+          <span class="hint" id="lanHint" data-i18n="lan.hint.default">开启后，同一 Wi-Fi 下的手机经配对即可访问同一套界面</span>
           <label class="switch">
             <input type="checkbox" id="lanToggle" />
-            <span id="lanToggleLabel">局域网访问</span>
+            <span id="lanToggleLabel" data-i18n="lan.access">局域网访问</span>
           </label>
         </div>
         <div id="lanPanel" hidden style="margin-top:14px">
           <div class="prompt-box">
-            <button class="ghost" id="pairBtn" type="button">生成配对二维码</button>
+            <button class="ghost" id="pairBtn" type="button" data-i18n="pair.qr">生成配对二维码</button>
             <span class="fileinfo" id="pairInfo"></span>
           </div>
           <div class="qr" id="qr" hidden></div>
           <div class="hint" id="pairHint"></div>
           <div style="margin-top:16px">
-            <label>已配对设备</label>
-            <div id="deviceList" class="hint">暂无</div>
+            <label data-i18n="pair.devices">已配对设备</label>
+            <div id="deviceList" class="hint" data-i18n="devices.none">暂无</div>
           </div>
         </div>
       </div>
 
       <div class="card" id="phoneSettings" hidden>
-        <label>本机连接</label>
-        <div class="hint" id="phoneInfo">已连接到电脑。</div>
-        <div class="hint">网络、模型与下载设置只能在电脑上修改。</div>
+        <label data-i18n="phone.thisdevice">本机连接</label>
+        <div class="hint" id="phoneInfo" data-i18n="phone.connected">已连接到电脑。</div>
+        <div class="hint" data-i18n="phone.hint">网络、模型与下载设置只能在电脑上修改。</div>
         <div class="actions" style="margin-top:12px">
-          <button class="ghost" id="unpair" type="button">取消配对</button>
+          <button class="ghost" id="unpair" type="button" data-i18n="phone.unpair">取消配对</button>
         </div>
       </div>
 
       <div class="card">
-        <label>关于</label>
-        <div class="hint">Laverock <span id="aboutVersion">…</span> · MIT · 所有推理都在本机完成。</div>
+        <label data-i18n="about">关于</label>
+        <div class="hint">Laverock <span id="aboutVersion">…</span> · MIT · <span data-i18n="about.suffix">所有推理都在本机完成。</span></div>
       </div>
     </section>
 
@@ -463,14 +472,14 @@
 
 <div class="overlay" id="pairOverlay">
   <div class="card">
-    <h1 style="font-size:18px;margin:0 0 8px">连接到 Laverock</h1>
-    <p class="hint" id="pairMsg">在这台电脑上打开「设置 → 手机遥控 → 生成配对二维码」，然后用手机扫码。</p>
+    <h1 style="font-size:18px;margin:0 0 8px" data-i18n="pair.title">连接到 Laverock</h1>
+    <p class="hint" id="pairMsg" data-i18n="pair.msg">在这台电脑上打开「设置 → 手机遥控 → 生成配对二维码」，然后用手机扫码。</p>
     <div style="margin-top:14px">
-      <label for="pairCode">配对码</label>
-      <input type="text" id="pairCode" inputmode="numeric" autocomplete="one-time-code" placeholder="6 位数字" />
+      <label for="pairCode" data-i18n="pair.code">配对码</label>
+      <input type="text" id="pairCode" inputmode="numeric" autocomplete="one-time-code" data-i18n-ph="pair.code.ph" placeholder="6 位数字" />
     </div>
     <div class="actions" style="margin-top:14px">
-      <button id="pairSubmit" type="button">连接</button>
+      <button id="pairSubmit" type="button" data-i18n="pair.connect">连接</button>
       <span id="pairStatus" class="hint"></span>
     </div>
   </div>
@@ -482,8 +491,8 @@
     <p class="hint" id="dialogMessage" style="margin:0 0 12px"></p>
     <div id="dialogFields"></div>
     <div class="actions" style="margin-top:16px;justify-content:flex-end">
-      <button class="ghost" id="dialogCancel" type="button">取消</button>
-      <button id="dialogOk" type="button">确定</button>
+      <button class="ghost" id="dialogCancel" type="button" data-i18n="dialog.cancel">取消</button>
+      <button id="dialogOk" type="button" data-i18n="dialog.ok">确定</button>
     </div>
   </div>
 </div>
@@ -493,25 +502,352 @@
 <template id="captureTpl">
   <div class="prompt-box">
     <input type="file" class="cap-file" accept="audio/wav,.wav" hidden />
-    <button class="ghost cap-pick" type="button">选择文件</button>
-    <button class="rec cap-rec" type="button">● 录音</button>
-    <span class="fileinfo cap-info">未选择</span>
+    <button class="ghost cap-pick" type="button" data-i18n="cap.file">选择文件</button>
+    <button class="rec cap-rec" type="button" data-i18n="cap.record">● 录音</button>
+    <span class="fileinfo cap-info" data-i18n="cap.none">未选择</span>
   </div>
 </template>
 
 <script>
 const $ = (id) => document.getElementById(id);
 const PAGES = ['synthesize', 'voices', 'history', 'models', 'settings'];
-const PAGE_TITLES = { synthesize: '合成', voices: '语音素材', history: '历史', models: '模型', settings: '设置' };
 const HF_PRESETS = [
-  { value: '', label: '官方（huggingface.co）' },
-  { value: 'https://hf-mirror.com', label: 'hf-mirror.com（国内加速）' },
+  { value: '', labelKey: 'preset.official.hf' },
+  { value: 'https://hf-mirror.com', labelKey: 'preset.cn' },
 ];
 const PIP_PRESETS = [
-  { value: '', label: '官方（pypi.org）' },
+  { value: '', labelKey: 'preset.official.pip' },
   { value: 'https://pypi.tuna.tsinghua.edu.cn/simple', label: '清华 TUNA' },
   { value: 'https://mirrors.aliyun.com/pypi/simple/', label: '阿里云' },
 ];
+
+// ---------------------------------------------------------------- i18n
+
+const I18N = {
+  zh: {
+    'brand.sub': '本地语音工作室',
+    'nav.synthesize': '合成', 'nav.voices': '语音素材', 'nav.models': '模型',
+    'nav.history': '历史', 'nav.settings': '设置', 'state.title': '服务状态',
+
+    'synth.title': '合成',
+    'synth.sub': '选择引擎与声音，输入文字，在这台电脑上生成语音。',
+    'engine': '引擎', 'voice': '声音', 'preview': '试听', 'stop': '停止',
+    'profilehint.default': '选择一个已保存的声音，或使用下方的临时录音。',
+    'adhoc.title': '临时参考声音（3–10 秒干净人声）',
+    'adhoc.hint': '录音会在浏览器内转成 24kHz 单声道 WAV；也可以直接上传 WAV。',
+    'prompttext.label': '参考音频对应文字（ZipVoice / LongCat / CosyVoice 零样本必填）',
+    'prompttext.ph': '例如：那还是三十六年前，一九八七年。',
+    'prompttext.hint': '录音说了什么就填什么，可多行。ZipVoice、LongCat-AudioDiT 以及 CosyVoice 的零样本模板必填；VoxCPM2、Qwen3-TTS、dots.tts 可留空。',
+    'savevoice.label': '保存到声音库（可选，便于下次直接复用）',
+    'profilename.ph': '给这个声音起个名字，例如：新闻女声',
+    'saveprofile': '保存声音',
+    'text.label': '要合成的文字', 'text.ph': '输入中文或 English 文本……',
+    'go': '生成语音', 'download.wav': '下载 WAV', 'download.mp3': '下载 MP3',
+
+    'voices.title': '语音素材',
+    'voices.sub': '保存的参考声音可以复用到任何克隆引擎。',
+    'voice.new': '＋ 新建声音',
+    'voice.name': '声音名称', 'voice.name.ph': '例如：新闻女声',
+    'voice.ref': '参考声音（3–10 秒干净人声）',
+    'voice.rec.hint': '录音会在浏览器内转成 24kHz 单声道 WAV。',
+    'voice.prompt': '参考音频对应文字（ZipVoice 必填）',
+    'voice.prompt.ph': '录音里说了什么就填什么',
+    'voice.save': '保存到声音库', 'cancel': '取消',
+    'voices.empty': '还没有保存的声音。点击「新建声音」录音或上传一段 3–10 秒的参考音频。',
+
+    'models.title': '模型',
+    'models.sub': '每个模型都是 <code>models/&lt;id&gt;/engine.json</code> 描述的一个插件。',
+    'models.dir': '模型目录', 'models.scripts': '下载脚本',
+    'models.paths.hint': '下载使用「设置 → 下载网络」中的代理与镜像；安装完成后引擎会自动刷新。',
+    'models.desktop.only': '模型管理仅在电脑端可用',
+    'models.desktop.hint': '手机上可以查看已安装的引擎并直接合成。安装新模型请在电脑上打开同一界面。',
+    'models.installed': '已安装', 'models.installed.empty': '还没有安装任何模型。从下方选择一个开始下载。',
+    'models.available': '可安装',
+
+    'history.title': '历史',
+    'history.sub': '本机生成的语音，最多保留 100 条或 1 GB。',
+    'history.clear': '清空全部',
+    'history.empty': '还没有生成记录。去「合成」生成第一条吧。',
+
+    'settings.title': '设置',
+    'settings.sub': '下载网络、手机遥控与关于信息。',
+    'settings.downloads': '下载网络',
+    'settings.downloads.hint': '代理与镜像只影响模型下载脚本，不会改变本机推理。',
+    'proxy': '代理', 'proxy.system': '跟随系统代理（默认）', 'proxy.manual': '手动指定',
+    'proxy.direct': '不使用代理（直连）',
+    'hf.mirror': 'Hugging Face 镜像', 'pip.mirror': 'PyPI 镜像（Qwen3-TTS 安装）',
+    'settings.modelsdir': '当前模型目录：', 'settings.scriptsdir': '脚本目录：',
+    'settings.save': '保存设置',
+    'settings.remote': '手机遥控',
+    'lan.hint.default': '开启后，同一 Wi-Fi 下的手机经配对即可访问同一套界面',
+    'lan.access': '局域网访问', 'pair.qr': '生成配对二维码',
+    'pair.devices': '已配对设备', 'devices.none': '暂无',
+    'phone.thisdevice': '本机连接', 'phone.connected': '已连接到电脑。',
+    'phone.hint': '网络、模型与下载设置只能在电脑上修改。', 'phone.unpair': '取消配对',
+    'about': '关于', 'about.suffix': '所有推理都在本机完成。',
+    'language': '界面语言', 'lang.system': '跟随系统', 'lang.zh': '中文', 'lang.en': 'English',
+
+    'pair.title': '连接到 Laverock',
+    'pair.msg': '在这台电脑上打开「设置 → 手机遥控 → 生成配对二维码」，然后用手机扫码。',
+    'pair.code': '配对码', 'pair.code.ph': '6 位数字', 'pair.connect': '连接',
+    'dialog.ok': '确定', 'dialog.cancel': '取消',
+
+    'cap.tts': '语音合成', 'cap.clone': '声音克隆', 'cap.voice-design': '声音设计',
+    'cap.instruct': '指令控制', 'cap.preset-voices': '预置音色',
+
+    'cap.file': '选择文件', 'cap.record': '● 录音', 'cap.stop': '■ 停止', 'cap.none': '未选择',
+    'preset.official.hf': '官方（huggingface.co）', 'preset.cn': 'hf-mirror.com（国内加速）',
+    'preset.official.pip': '官方（pypi.org）', 'preset.custom': '自定义…',
+  },
+  en: {
+    'brand.sub': 'Local voice studio',
+    'nav.synthesize': 'Synthesize', 'nav.voices': 'Voice clips', 'nav.models': 'Models',
+    'nav.history': 'History', 'nav.settings': 'Settings', 'state.title': 'Service status',
+
+    'synth.title': 'Synthesize',
+    'synth.sub': 'Pick an engine and a voice, type text, and generate speech on this computer.',
+    'engine': 'Engine', 'voice': 'Voice', 'preview': 'Preview', 'stop': 'Stop',
+    'profilehint.default': 'Pick a saved voice, or record a temporary one below.',
+    'adhoc.title': 'Temporary reference voice (3–10 s of clean speech)',
+    'adhoc.hint': 'Recordings are converted in the browser to 24 kHz mono WAV; you can also upload a WAV.',
+    'prompttext.label': 'Reference transcript (required for ZipVoice / LongCat / zero-shot CosyVoice)',
+    'prompttext.ph': 'e.g. It was thirty-six years ago, back in 1987.',
+    'prompttext.hint': 'Write exactly what the recording says; multiple lines are fine. Required for ZipVoice, LongCat-AudioDiT and CosyVoice zero-shot; optional for VoxCPM2, Qwen3-TTS and dots.tts.',
+    'savevoice.label': 'Save to voice library (optional, for reuse later)',
+    'profilename.ph': 'Name this voice, e.g. News anchor',
+    'saveprofile': 'Save voice',
+    'text.label': 'Text to synthesize', 'text.ph': 'Type Chinese or English text…',
+    'go': 'Generate', 'download.wav': 'Download WAV', 'download.mp3': 'Download MP3',
+
+    'voices.title': 'Voice clips',
+    'voices.sub': 'Saved reference voices work with any cloning engine.',
+    'voice.new': '＋ New voice',
+    'voice.name': 'Voice name', 'voice.name.ph': 'e.g. News anchor',
+    'voice.ref': 'Reference clip (3–10 s of clean speech)',
+    'voice.rec.hint': 'Recordings are converted in the browser to 24 kHz mono WAV.',
+    'voice.prompt': 'Reference transcript (required for ZipVoice)',
+    'voice.prompt.ph': 'Write exactly what the recording says',
+    'voice.save': 'Save to library', 'cancel': 'Cancel',
+    'voices.empty': 'No saved voices yet. Click "New voice" to record or upload a 3–10 s reference clip.',
+
+    'models.title': 'Models',
+    'models.sub': 'Each model is a plugin described by <code>models/&lt;id&gt;/engine.json</code>.',
+    'models.dir': 'Models directory', 'models.scripts': 'Download scripts',
+    'models.paths.hint': 'Downloads use the proxy and mirrors under Settings → Downloads; the engine list refreshes when an install finishes.',
+    'models.desktop.only': 'Model management is available on desktop only',
+    'models.desktop.hint': 'On a phone you can view installed engines and synthesize. Install new models from the same screen on the computer.',
+    'models.installed': 'Installed', 'models.installed.empty': 'No models installed yet. Pick one below to download.',
+    'models.available': 'Available',
+
+    'history.title': 'History',
+    'history.sub': 'Speech generated on this computer, capped at 100 entries or 1 GB.',
+    'history.clear': 'Clear all',
+    'history.empty': 'No generations yet. Head to Synthesize to make the first one.',
+
+    'settings.title': 'Settings',
+    'settings.sub': 'Downloads, phone remote control and about.',
+    'settings.downloads': 'Downloads',
+    'settings.downloads.hint': 'Proxy and mirrors only affect model download scripts, never local inference.',
+    'proxy': 'Proxy', 'proxy.system': 'Follow system proxy (default)', 'proxy.manual': 'Manual',
+    'proxy.direct': 'No proxy (direct connection)',
+    'hf.mirror': 'Hugging Face mirror', 'pip.mirror': 'PyPI mirror (Qwen3-TTS install)',
+    'settings.modelsdir': 'Models directory: ', 'settings.scriptsdir': 'Scripts directory: ',
+    'settings.save': 'Save settings',
+    'settings.remote': 'Phone remote',
+    'lan.hint.default': 'When enabled, a phone on the same Wi-Fi can pair and use the same interface',
+    'lan.access': 'LAN access', 'pair.qr': 'Show pairing QR code',
+    'pair.devices': 'Paired devices', 'devices.none': 'None',
+    'phone.thisdevice': 'This device', 'phone.connected': 'Connected to the computer.',
+    'phone.hint': 'Network, model and download settings can only be changed on the computer.',
+    'phone.unpair': 'Unpair',
+    'about': 'About', 'about.suffix': 'all inference runs on this machine.',
+    'language': 'Interface language', 'lang.system': 'Follow system', 'lang.zh': '中文', 'lang.en': 'English',
+
+    'pair.title': 'Connect to Laverock',
+    'pair.msg': 'On this computer open Settings → Phone remote → Show pairing QR code, then scan it with your phone.',
+    'pair.code': 'Pairing code', 'pair.code.ph': '6-digit code', 'pair.connect': 'Connect',
+    'dialog.ok': 'OK', 'dialog.cancel': 'Cancel',
+
+    'cap.tts': 'Speech synthesis', 'cap.clone': 'Voice cloning', 'cap.voice-design': 'Voice design',
+    'cap.instruct': 'Voice instructions', 'cap.preset-voices': 'Preset voices',
+
+    'cap.file': 'Choose file', 'cap.record': '● Record', 'cap.stop': '■ Stop', 'cap.none': 'None',
+    'preset.official.hf': 'Official (huggingface.co)', 'preset.cn': 'hf-mirror.com (faster in China)',
+    'preset.official.pip': 'Official (pypi.org)', 'preset.custom': 'Custom…',
+  },
+};
+
+let lang = 'zh';
+const t = (key, params) => {
+  let s = (I18N[lang] && I18N[lang][key]) ?? I18N.zh[key] ?? key;
+  if (params) for (const [k, v] of Object.entries(params)) s = s.replaceAll(`{${k}}`, v);
+  return s;
+};
+const dateLocale = () => (lang === 'en' ? 'en-US' : 'zh-CN');
+
+function detectLang(ignoreSaved = false) {
+  const saved = ignoreSaved ? null : localStorage.getItem('laverock.lang');
+  if (saved === 'zh' || saved === 'en') return saved;
+  return (navigator.language || 'zh').toLowerCase().startsWith('zh') ? 'zh' : 'en';
+}
+
+// Static markup carries translations in data-i18n / -ph / -title attributes.
+function applyI18n(root = document) {
+  root.querySelectorAll('[data-i18n]').forEach((el) => { el.innerHTML = t(el.dataset.i18n); });
+  root.querySelectorAll('[data-i18n-ph]').forEach((el) => { el.placeholder = t(el.dataset.i18nPh); });
+  root.querySelectorAll('[data-i18n-title]').forEach((el) => { el.title = t(el.dataset.i18nTitle); });
+  document.documentElement.lang = lang === 'zh' ? 'zh-CN' : 'en';
+}
+
+async function setLanguage(next, { persist = true } = {}) {
+  if (next !== 'zh' && next !== 'en') return;
+  lang = next;
+  if (persist === 'explicit') localStorage.setItem('laverock.lang', lang);
+  else if (persist === 'system') localStorage.removeItem('laverock.lang');
+  $('langSelect').value = persist === 'explicit' ? lang : 'system';
+  applyI18n();
+  document.title = `${t('nav.' + currentPage())} · Laverock`;
+  // Rebuild every dynamic, localized view.
+  fillPreset($('hfPreset'), HF_PRESETS);
+  fillPreset($('pipPreset'), PIP_PRESETS);
+  syncProxyMode();
+  await Promise.all([loadEngines(), loadProfiles(), loadSettingsPage()]);
+  renderHistory();
+  await loadModels();
+  if (session && session.lan_enabled) loadDevices();
+}
+
+$('langSelect').onchange = async () => {
+  const v = $('langSelect').value;
+  if (v === 'system') {
+    await setLanguage(detectLang(true), { persist: 'system' });
+  } else {
+    await setLanguage(v, { persist: 'explicit' });
+    // Best effort: also store it as the machine default so fresh paired
+    // devices inherit the language. Phones cannot reach this endpoint.
+    if (session.loopback && serverSettings) {
+      try {
+        await api('/api/settings', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ...serverSettings, language: v }),
+        });
+      } catch (_) { /* per-device setting already saved locally */ }
+    }
+  }
+};
+
+// Localized labels/hints/options for manifest-declared engine parameters.
+// Keyed `${kind}:${name}`, falling back to the name alone.
+const PARAM_I18N = {
+  speed: { label: { zh: '语速', en: 'Speed' }, hint: { zh: '越大语速越快，不改变音色', en: 'Higher is faster; the voice itself is unchanged.' } },
+  num_steps: { label: { zh: '扩散步数', en: 'Sampling steps' }, hint: { zh: '越多越稳但越慢', en: 'More steps are steadier but slower.' } },
+  cfg: { label: { zh: '提示词强度 (CFG)', en: 'Prompt strength (CFG)' }, hint: { zh: '过高会失真', en: 'Too high causes distortion.' } },
+  temperature: { label: { zh: '随机性', en: 'Randomness' }, hint: { zh: '越高变化越大，越低越确定', en: 'Higher adds variation; lower is more deterministic.' } },
+  seed: { label: { zh: '随机种子', en: 'Random seed' }, hint: { zh: '相同种子 + 文本得到可复现的声音；-1 每次随机', en: 'Same seed + text gives reproducible speech; -1 randomizes each run.' } },
+  'longcat:num_steps': { label: { zh: '采样步数 (NFE)', en: 'Sampling steps (NFE)' }, hint: { zh: '扩散 ODE 步数；16 已足够，越多越慢', en: 'Diffusion ODE steps; 16 is enough, more is slower.' } },
+  'longcat:cfg': { label: { zh: '引导强度', en: 'Guidance strength' }, hint: { zh: '越高越贴近参考音色，过高可能失真', en: 'Higher follows the reference voice more closely; too high may distort.' } },
+  guidance_method: {
+    label: { zh: '引导方式', en: 'Guidance method' },
+    hint: { zh: 'APG 通常更自然、伪影更少', en: 'APG is usually more natural with fewer artifacts.' },
+    options: { apg: { zh: 'APG（自适应投影，推荐）', en: 'APG (adaptive projection, recommended)' }, cfg: { zh: 'CFG（传统无分类器引导）', en: 'CFG (classic classifier-free guidance)' } },
+  },
+  'dots:num_steps': { label: { zh: '采样步数', en: 'Sampling steps' }, hint: { zh: 'SOAR 推荐 10 步；变多会更慢', en: 'SOAR recommends 10 steps; more is slower.' } },
+  guidance: { label: { zh: '引导强度', en: 'Guidance strength' }, hint: { zh: '越高越贴近参考音色，过高可能失真', en: 'Higher follows the reference voice more closely; too high may distort.' } },
+  clone_mode: {
+    label: { zh: '克隆方式', en: 'Clone mode' },
+    hint: { zh: '文字稿不准确时选「仅声纹」更稳', en: 'Use voice-only when the transcript may be inaccurate.' },
+    options: {
+      xvector: { zh: '仅声纹（只凭声音，推荐）', en: 'Voice only (sound alone, recommended)' },
+      continuation: { zh: '声纹 + 文字（文字稿准确时更相似）', en: 'Voice + transcript (more alike with an accurate transcript)' },
+    },
+  },
+  language: {
+    label: { zh: '语言标签', en: 'Language tag' },
+    hint: { zh: '多语言或混合语言时固定标签有帮助', en: 'A fixed tag helps with mixed-language text.' },
+    options: {
+      '': { zh: '自动', en: 'Auto' }, zh: { zh: '中文', en: 'Chinese' }, en: { zh: 'English', en: 'English' },
+      ja: { zh: '日本語', en: 'Japanese' }, ko: { zh: '한국어', en: 'Korean' }, fr: { zh: 'Français', en: 'French' },
+      de: { zh: 'Deutsch', en: 'German' }, es: { zh: 'Español', en: 'Spanish' },
+    },
+  },
+  template: {
+    label: { zh: '合成模板', en: 'Synthesis template' },
+    hint: { zh: '零样本最像；文字稿不准时选跨语种', en: 'Zero-shot is the closest; use cross-lingual with no transcript.' },
+    options: {
+      zero_shot: { zh: '零样本克隆（需文字稿，相似度最高）', en: 'Zero-shot clone (needs transcript, closest match)' },
+      cross_lingual: { zh: '跨语种克隆（只凭声音）', en: 'Cross-lingual clone (voice only)' },
+      instruct: { zh: '指令（用文字描述语气）', en: 'Instruct (describe the tone in words)' },
+    },
+  },
+  instruct: { label: { zh: '指令（仅「指令」模板使用）', en: 'Instruction (used only by the Instruct template)' }, hint: { zh: '例如：用温和亲切的语气，语速稍慢', en: 'e.g. Read in a gentle, warm tone at a slightly slower pace.' } },
+  'cosyvoice:num_steps': { label: { zh: '流式解码步数', en: 'Streaming decode steps' }, hint: { zh: '声学流匹配的 Euler 步数；越多越稳越慢', en: 'Euler steps for the acoustic flow matching; more is steadier and slower.' } },
+  top_k: { label: { zh: 'Top-K 采样', en: 'Top-K sampling' }, hint: { zh: '越小越稳定，越大越有变化', en: 'Lower is steadier; higher adds variation.' } },
+  'kokoro:voice': {
+    label: { zh: '音色', en: 'Voice' },
+    hint: { zh: 'Kokoro 只提供预置音色，不支持用自己的音频克隆。', en: 'Kokoro offers preset voices only; it cannot clone your own audio.' },
+  },
+};
+
+function paramI18n(kind, name) {
+  return PARAM_I18N[`${kind}:${name}`] || PARAM_I18N[name] || null;
+}
+
+// English rendering of a Kokoro voice label: "Heart · 美式英语女声 (af_heart)"
+// -> "Heart · American English (female) (af_heart)", derived from the id.
+function kokoroVoiceEn(label) {
+  // Labels look like "Heart · 美式英语女声 (af_heart)": name, a localized
+  // descriptor and the voice id. The id's first letter gives the language
+  // and the second the gender, so no Chinese parsing is needed.
+  const m = label.match(/^(.*?)\s*·\s*.*\(([abefhijpz])([fm])_([a-z0-9]+)\)\s*$/);
+  if (!m) return label;
+  const [, name, l, g, tail] = m;
+  const langMap = {
+    a: 'American English', b: 'British English', e: 'Spanish', f: 'French',
+    h: 'Hindi', i: 'Italian', j: 'Japanese', p: 'Portuguese', z: 'Mandarin Chinese',
+  };
+  return `${name.trim()} · ${langMap[l] || l} (${g === 'f' ? 'female' : 'male'}) (${l}${g}_${tail})`;
+}
+
+// Server-side validation errors are Chinese strings; map the known ones
+// so the English UI stays consistent. Unknown messages pass through.
+const ERROR_MAP_EN = [
+  ['参考音频超过 20 MB', 'The reference audio exceeds 20 MB'],
+  ['声音名称不能为空', 'Voice name cannot be empty'],
+  ['声音名称过长（最多 80 字）', 'Voice name is too long (80 characters max)'],
+  ['该模型正在下载中', 'This model is already downloading'],
+  ['未知的模型', 'Unknown model'],
+  ['已经安装', 'is already installed'],
+  ['配对码不正确', 'Incorrect pairing code'],
+  ['配对码已过期，请在电脑上重新生成', 'The pairing code has expired; generate a new one on the computer'],
+  ['尝试次数过多，请重新生成配对码', 'Too many attempts; generate a new pairing code'],
+  ['未配对的设备，请先在电脑上扫码配对', 'Unpaired device; scan the QR code on the computer first'],
+  ['无法获取本机局域网地址', 'Could not determine a LAN address for this computer'],
+  ['缺少参考音频', 'A reference voice is required'],
+  ['需要参考音频', 'A reference voice is required'],
+  ['需要一段参考音频', 'A reference clip is required'],
+  ['需要参考音频对应的文字', 'The reference transcript is required'],
+  ['需要参考音频对应', 'The reference transcript is required'],
+  ['需要填写指令内容', 'The instruction text is required'],
+  ['未找到 ffmpeg 或 lame，无法导出 MP3；安装其中之一后重试', 'Neither ffmpeg nor lame was found; install one of them to export MP3'],
+  ['missing required field: text', 'Missing required field: text'],
+  ['unknown parameter', 'Unknown parameter'],
+  ['invalid option', 'Invalid option'],
+  ['out of range', 'Out of range'],
+];
+
+function localizeError(msg) {
+  if (!msg || lang !== 'en') return msg || '';
+  for (const [zh, en] of ERROR_MAP_EN) {
+    if (msg.includes(zh)) {
+      // Keep trailing dynamic detail (exit codes, sizes) when present.
+      const idx = msg.indexOf(zh);
+      const tail = msg.slice(idx + zh.length).replace(/^[：:]\s*/, ': ');
+      return en + (tail ? ` (${tail})` : '');
+    }
+  }
+  return msg;
+}
 
 let engines = [];
 let profiles = [];
@@ -522,13 +858,14 @@ let previewId = null;
 let toastTimer = null;
 let mp3Supported = false;
 let lastSynthBlob = null;
+let serverSettings = null;
 
 const esc = (value) => String(value ?? '').replace(/[&<>"']/g, (c) => (
   { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
 ));
 const fmtBytes = (b) => (!b ? '—' : b >= 1048576 ? (b / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(b / 1024)) + ' KB');
 const fmtDur = (s) => (s ? s.toFixed(1) + 's' : '—');
-const fmtDate = (t) => (t ? new Date(t * 1000).toLocaleDateString('zh-CN') : '—');
+const fmtDate = (t) => (t ? new Date(t * 1000).toLocaleDateString(dateLocale()) : '—');
 
 function toast(message, isError) {
   const el = $('toast');
@@ -544,7 +881,8 @@ function toast(message, isError) {
 // confirmation and form goes through this dialog instead.
 let dialogResolve = null;
 
-function showDialog({ title, message = '', fields = [], okText = '确定', danger = false }) {
+function showDialog({ title, message = '', fields = [], okText, danger = false }) {
+  okText = okText ?? t('dialog.ok');
   return new Promise((resolve) => {
     dialogResolve = resolve;
     $('dialogTitle').textContent = title;
@@ -624,7 +962,9 @@ document.addEventListener('keydown', (e) => {
   if (dialogResolve && e.key === 'Escape') closeDialog({ ok: false });
 });
 
-async function confirmAction(message, { title = '请确认', okText = '确定', danger = true } = {}) {
+async function confirmAction(message, { title, okText, danger = true } = {}) {
+  title = title ?? (lang === 'en' ? 'Please confirm' : '请确认');
+  okText = okText ?? t('dialog.ok');
   const res = await showDialog({ title, message, okText, danger });
   return !!(res && res.ok);
 }
@@ -645,6 +985,7 @@ class Capture {
   constructor(host) {
     host.innerHTML = '';
     host.appendChild($('captureTpl').content.cloneNode(true));
+    applyI18n(host);
     this.host = host;
     this.file = host.querySelector('.cap-file');
     this.pick = host.querySelector('.cap-pick');
@@ -672,17 +1013,21 @@ class Capture {
     this.blob = null;
     this.filename = null;
     this.file.value = '';
-    this.info.textContent = '未选择';
+    this.setInfo(t('cap.none'));
     this.onChange();
   }
+
+  setInfo(text) { this.info.textContent = text; }
 
   async toggle() {
     if (this.recording) return this.stop();
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-      this.info.textContent = '当前环境不支持麦克风录音，请改用「选择文件」上传 WAV';
+      this.setInfo(lang === 'en'
+        ? 'Microphone recording is unavailable here; use "Choose file" to upload a WAV.'
+        : '当前环境不支持麦克风录音，请改用「选择文件」上传 WAV');
       return;
     }
-    this.info.textContent = '正在请求麦克风权限……';
+    this.setInfo(lang === 'en' ? 'Requesting microphone permission…' : '正在请求麦克风权限……');
     let stream;
     try {
       stream = await navigator.mediaDevices.getUserMedia({
@@ -690,12 +1035,18 @@ class Capture {
       });
     } catch (e) {
       const name = (e && e.name) || 'Error';
-      const hint = name === 'NotAllowedError'
-        ? '权限被拒绝。请在「系统设置 → 隐私与安全性 → 麦克风」中允许 Laverock（或浏览器），然后重试。'
-        : name === 'NotFoundError'
-          ? '没有找到可用的麦克风设备。'
-          : '请检查系统麦克风设置后重试。';
-      this.info.textContent = `无法录音（${name}）：${hint}`;
+      const hint = lang === 'en'
+        ? (name === 'NotAllowedError'
+            ? 'Permission denied. Allow Laverock (or your browser) to use the microphone in System Settings → Privacy & Security, then retry.'
+            : name === 'NotFoundError'
+              ? 'No microphone device found.'
+              : 'Check the system microphone settings and retry.')
+        : (name === 'NotAllowedError'
+            ? '权限被拒绝。请在「系统设置 → 隐私与安全性 → 麦克风」中允许 Laverock（或浏览器），然后重试。'
+            : name === 'NotFoundError'
+              ? '没有找到可用的麦克风设备。'
+              : '请检查系统麦克风设置后重试。');
+      this.setInfo(`${lang === 'en' ? 'Cannot record' : '无法录音'}（${name}）：${hint}`);
       return;
     }
 
@@ -717,8 +1068,8 @@ class Capture {
     this.ratio = ctx.sampleRate / TARGET;
     this.recording = true;
     this.rec.classList.add('on');
-    this.rec.textContent = '■ 停止';
-    this.info.textContent = '录音中……再次点击结束';
+    this.rec.textContent = t('cap.stop');
+    this.setInfo(lang === 'en' ? 'Recording… click again to stop' : '录音中……再次点击结束');
   }
 
   stop() {
@@ -732,10 +1083,10 @@ class Capture {
     const down = downsample(raw, this.ratio);
     this.blob = new Blob([encodeWav(down, 24000)], { type: 'audio/wav' });
     this.filename = 'mic-reference.wav';
-    this.info.textContent = `麦克风录音 · ${(down.length / 24000).toFixed(1)}s`;
+    this.setInfo(`${lang === 'en' ? 'Microphone recording' : '麦克风录音'} · ${(down.length / 24000).toFixed(1)}s`);
     this.chunks = [];
     this.rec.classList.remove('on');
-    this.rec.textContent = '● 录音';
+    this.rec.textContent = t('cap.record');
     this.onChange();
   }
 }
@@ -780,7 +1131,9 @@ const voiceCapture = new Capture($('voiceCapture'));
 if (!window.isSecureContext) {
   for (const cap of [synthCapture, voiceCapture]) {
     cap.rec.disabled = true;
-    cap.rec.title = '需要通过 HTTPS 或 localhost 访问才能使用麦克风';
+    cap.rec.title = lang === 'en'
+      ? 'Microphone access requires HTTPS or localhost'
+      : '需要通过 HTTPS 或 localhost 访问才能使用麦克风';
   }
 }
 
@@ -794,22 +1147,24 @@ function syncProfileUI() {
   const p = selectedProfile();
   $('adhoc').hidden = !!p;
   $('preview').disabled = !p;
-  $('preview').textContent = previewId && p && previewId === p.id ? '停止' : '试听';
+  $('preview').textContent = previewId && p && previewId === p.id ? t('stop') : t('preview');
   $('profilehint').textContent = p
-    ? `使用「${p.name}」· 参考文本：${p.prompt_text}`
-    : '选择一个已保存的声音，或使用下方的临时录音。';
+    ? (lang === 'en'
+      ? `Using "${p.name}" · transcript: ${p.prompt_text}`
+      : `使用「${p.name}」· 参考文本：${p.prompt_text}`)
+    : t('profilehint.default');
 }
 
 async function loadProfiles() {
   try {
     profiles = await api('/api/profiles');
   } catch (e) {
-    toast('读取声音库失败：' + e.message, true);
+    toast((lang === 'en' ? 'Failed to load voices: ' : '读取声音库失败：') + localizeError(e.message), true);
     return;
   }
   const sel = $('profile');
   const current = sel.value;
-  sel.innerHTML = '<option value="">— 临时录音 / 上传 —</option>';
+  sel.innerHTML = `<option value="">— ${lang === 'en' ? 'Temporary recording / upload' : '临时录音 / 上传'} —</option>`;
   for (const p of profiles) {
     const o = document.createElement('option');
     o.value = p.id;
@@ -833,9 +1188,9 @@ function renderVoices() {
       <div class="voice-meta">${fmtDur(p.duration_secs)} · ${fmtBytes(p.bytes)} · ${fmtDate(p.created_at)}</div>
       <div class="voice-text">${esc(p.prompt_text)}</div>
       <div class="voice-actions">
-        <button class="ghost small play" type="button">${previewId === p.id ? '停止' : '试听'}</button>
-        <button class="ghost small edit" type="button">编辑</button>
-        <button class="ghost small danger del" type="button">删除</button>
+        <button class="ghost small play" type="button">${previewId === p.id ? t('stop') : t('preview')}</button>
+        <button class="ghost small edit" type="button">${lang === 'en' ? 'Edit' : '编辑'}</button>
+        <button class="ghost small danger del" type="button">${lang === 'en' ? 'Delete' : '删除'}</button>
       </div>`;
     el.querySelector('.play').onclick = () => togglePreview(p.id);
     el.querySelector('.edit').onclick = () => editProfile(p);
@@ -866,30 +1221,33 @@ $('previewer').addEventListener('ended', () => {
 });
 
 async function editProfile(p) {
+  const en = lang === 'en';
   const res = await showDialog({
-    title: '编辑声音',
-    okText: '保存',
+    title: en ? 'Edit voice' : '编辑声音',
+    okText: en ? 'Save' : '保存',
     fields: [
-      { name: 'name', label: '名称', type: 'text', value: p.name },
+      { name: 'name', label: en ? 'Name' : '名称', type: 'text', value: p.name },
       {
         name: 'prompt_text',
-        label: '参考音频对应文字',
+        label: en ? 'Reference transcript' : '参考音频对应文字',
         type: 'textarea',
         value: p.prompt_text,
-        hint: 'ZipVoice 合成时必填；VoxCPM2 与 Qwen3-TTS 可以留空。',
+        hint: en
+          ? 'Required for ZipVoice; may be empty for VoxCPM2 and Qwen3-TTS.'
+          : 'ZipVoice 合成时必填；VoxCPM2 与 Qwen3-TTS 可以留空。',
       },
       {
         name: 'prompt',
-        label: '替换参考音频（可选，3–10 秒干净人声）',
+        label: en ? 'Replace reference clip (optional, 3–10 s clean speech)' : '替换参考音频（可选，3–10 秒干净人声）',
         type: 'file',
-        hint: '不选则保留原音频。',
+        hint: en ? 'Leave empty to keep the current audio.' : '不选则保留原音频。',
       },
     ],
   });
   if (!res || !res.ok) return;
   const { name, prompt_text, prompt } = res.values;
   if (!name) {
-    toast('名称不能为空', true);
+    toast(en ? 'Name cannot be empty' : '名称不能为空', true);
     return;
   }
   const fd = new FormData();
@@ -898,37 +1256,39 @@ async function editProfile(p) {
   if (prompt) fd.append('prompt', prompt, prompt.name || 'reference.wav');
   try {
     await api(`/api/profiles/${encodeURIComponent(p.id)}`, { method: 'POST', body: fd });
-    toast(`已更新「${name}」`);
+    toast(lang === 'en' ? `Updated "${name}"` : `已更新「${name}」`);
     await loadProfiles();
   } catch (e) {
-    toast('保存失败：' + e.message, true);
+    toast((lang === 'en' ? 'Save failed: ' : '保存失败：') + localizeError(e.message), true);
   }
 }
 
 async function deleteProfile(p) {
-  const yes = await confirmAction(`删除声音「${p.name}」？此操作不可撤销。`, {
-    title: '删除声音',
-    okText: '删除',
-  });
+  const en = lang === 'en';
+  const yes = await confirmAction(
+    en ? `Delete voice "${p.name}"? This cannot be undone.` : `删除声音「${p.name}」？此操作不可撤销。`,
+    { title: en ? 'Delete voice' : '删除声音', okText: en ? 'Delete' : '删除' },
+  );
   if (!yes) return;
   try {
     await api(`/api/profiles/${encodeURIComponent(p.id)}`, { method: 'DELETE' });
   } catch (e) {
-    toast('删除失败：' + e.message, true);
+    toast((lang === 'en' ? 'Delete failed: ' : '删除失败：') + localizeError(e.message), true);
     return;
   }
   if (previewId === p.id) {
     $('previewer').pause();
     previewId = null;
   }
-  toast(`已删除「${p.name}」`);
+  toast(lang === 'en' ? `Deleted "${p.name}"` : `已删除「${p.name}」`);
   await loadProfiles();
 }
 
 async function createProfile(name, promptText, blob, engineId) {
-  if (!blob) throw new Error('请先选择或录制参考声音');
-  if (!name) throw new Error('请给声音起个名字');
-  if (!promptText) throw new Error('请填写参考音频对应的文字');
+  const en = lang === 'en';
+  if (!blob) throw new Error(en ? 'Choose or record a reference voice first' : '请先选择或录制参考声音');
+  if (!name) throw new Error(en ? 'Please name the voice' : '请给声音起个名字');
+  if (!promptText) throw new Error(en ? 'Please fill in the reference transcript' : '请填写参考音频对应的文字');
   const fd = new FormData();
   fd.append('name', name);
   fd.append('prompt_text', promptText);
@@ -959,14 +1319,16 @@ $('saveprofile').onclick = async () => {
       $('engine').value,
     );
     $('profilename').value = '';
-    $('savehint').textContent = `已保存「${meta.name}」，下次可直接选用`;
+    $('savehint').textContent = lang === 'en'
+      ? `Saved "${meta.name}" — it will be in the voice picker next time`
+      : `已保存「${meta.name}」，下次可直接选用`;
     await loadProfiles();
     $('profile').value = meta.id;
     syncProfileUI();
-    toast(`已保存「${meta.name}」`);
+    toast(lang === 'en' ? `Saved "${meta.name}"` : `已保存「${meta.name}」`);
   } catch (e) {
     hint.className = 'hint err';
-    hint.textContent = '保存失败：' + e.message;
+    hint.textContent = (lang === 'en' ? 'Save failed: ' : '保存失败：') + localizeError(e.message);
   }
 };
 
@@ -994,10 +1356,10 @@ $('newSave').onclick = async () => {
     voiceCapture.clear();
     $('newVoiceCard').hidden = true;
     await loadProfiles();
-    toast(`已保存「${meta.name}」`);
+    toast(lang === 'en' ? `Saved "${meta.name}"` : `已保存「${meta.name}」`);
   } catch (e) {
     hint.className = 'hint err';
-    hint.textContent = '保存失败：' + e.message;
+    hint.textContent = (lang === 'en' ? 'Save failed: ' : '保存失败：') + localizeError(e.message);
   }
 };
 
@@ -1007,7 +1369,7 @@ async function loadEngines() {
   try {
     engines = await api('/api/engines');
   } catch (e) {
-    toast('读取引擎失败：' + e.message, true);
+    toast((lang === 'en' ? 'Failed to load engines: ' : '读取引擎失败：') + localizeError(e.message), true);
     return;
   }
   const sel = $('engine');
@@ -1015,7 +1377,7 @@ async function loadEngines() {
   sel.innerHTML = '';
   if (!engines.length) {
     const o = document.createElement('option');
-    o.textContent = '未发现模型 — 前往「模型」下载';
+    o.textContent = lang === 'en' ? 'No models found — download one under Models' : '未发现模型 — 前往「模型」下载';
     sel.appendChild(o);
     $('go').disabled = true;
   } else {
@@ -1045,17 +1407,20 @@ function renderEngineParams(e) {
   host.hidden = specs.length === 0;
   if (!specs.length) return;
 
-  host.appendChild(Object.assign(document.createElement('label'), { textContent: '引擎参数' }));
+  host.appendChild(Object.assign(document.createElement('label'), {
+    textContent: lang === 'en' ? 'Engine parameters' : '引擎参数',
+  }));
   const grid = document.createElement('div');
   grid.className = 'row';
   grid.style.marginTop = '10px';
   for (const p of specs) {
     const wrap = document.createElement('div');
-    wrap.appendChild(paramControl(p));
-    if (p.hint) {
+    wrap.appendChild(paramControl(p, e && e.kind));
+    const hintText = paramHint(e && e.kind, p);
+    if (hintText) {
       const h = document.createElement('div');
       h.className = 'hint';
-      h.textContent = p.hint;
+      h.textContent = hintText;
       wrap.appendChild(h);
     }
     grid.appendChild(wrap);
@@ -1068,7 +1433,33 @@ function fmtParamValue(p, v) {
   return p.type === 'float' ? String(Number(v)) : String(v);
 }
 
-function paramControl(p) {
+function paramLabel(kind, p) {
+  if (lang === 'en') {
+    const loc = paramI18n(kind, p.name);
+    if (loc && loc.label && loc.label.en) return loc.label.en;
+  }
+  return p.label || p.name;
+}
+
+function paramHint(kind, p) {
+  if (lang === 'en') {
+    const loc = paramI18n(kind, p.name);
+    if (loc && loc.hint && loc.hint.en) return loc.hint.en;
+  }
+  return p.hint || '';
+}
+
+function paramOptionLabel(kind, p, option) {
+  if (lang === 'en') {
+    if (kind === 'kokoro' && p.name === 'voice') return kokoroVoiceEn(option.label || option.value);
+    const loc = paramI18n(kind, p.name);
+    const hit = loc && loc.options && loc.options[option.value];
+    if (hit && hit.en) return hit.en;
+  }
+  return option.label || option.value;
+}
+
+function paramControl(p, kind) {
   const id = 'param-' + p.name;
   const min = Number(p.min), max = Number(p.max), step = p.step != null ? Number(p.step) : null;
   const wideRange = p.type === 'int' && (min < 0 || max - min > 1000);
@@ -1076,7 +1467,7 @@ function paramControl(p) {
   const box = document.createElement('div');
   const lab = document.createElement('label');
   lab.htmlFor = id;
-  lab.textContent = p.label || p.name;
+  lab.textContent = paramLabel(kind, p);
   box.appendChild(lab);
 
   let input;
@@ -1089,7 +1480,7 @@ function paramControl(p) {
     for (const o of p.options || []) {
       const opt = document.createElement('option');
       opt.value = o.value;
-      opt.textContent = o.label || o.value;
+      opt.textContent = paramOptionLabel(kind, p, o);
       if (o.value === String(p.default)) opt.selected = true;
       input.appendChild(opt);
     }
@@ -1148,13 +1539,7 @@ function collectEngineParams() {
   return out;
 }
 
-const CAPABILITY_LABELS = {
-  tts: '语音合成',
-  clone: '声音克隆',
-  'voice-design': '声音设计',
-  instruct: '指令控制',
-  'preset-voices': '预置音色',
-};
+const capabilityLabel = (c) => t('cap.' + c);
 
 function engineUsesClone(e) {
   // Preset-only engines (Kokoro) have no reference-audio cloning, so the
@@ -1169,7 +1554,7 @@ function syncEngine() {
     renderEngineParams(null);
     return;
   }
-  const caps = (e.capabilities || []).map((c) => CAPABILITY_LABELS[c] || c).join('、');
+  const caps = (e.capabilities || []).map(capabilityLabel).join(lang === 'en' ? ', ' : '、');
   $('engineHint').textContent = `${e.kind} · ${(e.languages || []).join(' / ')} · ${caps}`;
   const isClone = engineUsesClone(e);
   $('voicePickCard').hidden = !isClone;
@@ -1192,10 +1577,10 @@ $('go').onclick = async () => {
   const status = $('status');
   const saved = selectedProfile();
   const text = $('text').value.trim();
-  if (!text) { status.className = 'err'; status.textContent = '请输入要合成的文字'; return; }
+  if (!text) { status.className = 'err'; status.textContent = lang === 'en' ? 'Please enter text to synthesize' : '请输入要合成的文字'; return; }
 
   if (!saved && !synthCapture.blob && !$('engine').value) {
-    status.className = 'err'; status.textContent = '请选择引擎';
+    status.className = 'err'; status.textContent = lang === 'en' ? 'Please select an engine' : '请选择引擎';
     return;
   }
 
@@ -1226,9 +1611,10 @@ $('go').onclick = async () => {
   // percentage. Engine load dominates the first request for each engine.
   const kind = engine ? engine.kind : '';
   const loadNote = kind === 'qwen3tts'
-    ? 'Qwen3-TTS 首次加载约 20–90 秒'
-    : kind === 'longcat' ? 'LongCat-AudioDiT 首次加载约 30–90 秒'
-    : kind === 'voxcpm2' ? 'VoxCPM2 首次加载需数秒' : '首次加载模型需几秒';
+    ? (lang === 'en' ? 'first load takes ~20–90 s' : '首次加载约 20–90 秒')
+    : kind === 'longcat' ? (lang === 'en' ? 'first load takes ~30–90 s' : '首次加载约 30–90 秒')
+    : kind === 'voxcpm2' ? (lang === 'en' ? 'first load takes a few seconds' : '首次加载需数秒')
+    : (lang === 'en' ? 'first load takes a few seconds' : '首次加载模型需几秒');
   const labelEl = $('synthProgressLabel');
   const pbar = $('synthProgress');
   pbar.hidden = false;
@@ -1253,7 +1639,9 @@ $('go').onclick = async () => {
     fill.style.width = '';
   };
   setIndeterminate();
-  setStage(engine && engine.loaded ? '正在合成语音…' : `正在加载模型到内存（${loadNote}）`);
+  setStage(engine && engine.loaded
+    ? (lang === 'en' ? 'Generating speech…' : '正在合成语音…')
+    : (lang === 'en' ? `Loading model into memory (${loadNote})` : `正在加载模型到内存（${loadNote}）`));
   let audioText = '';
   const timer = setInterval(() => {
     labelEl.querySelector('b').textContent = fmtElapsed() + audioText;
@@ -1297,20 +1685,22 @@ $('go').onclick = async () => {
         } else if (event === 'steps') {
           const steps = Number(data);
           if (Number.isFinite(steps)) {
-            if (lastStage && !lastStage.includes('合成')) setStage('正在合成语音…');
+            if (lastStage && !lastStage.includes('合成') && !/generat/i.test(lastStage)) {
+              setStage(lang === 'en' ? 'Generating speech…' : '正在合成语音…');
+            }
             setDeterminate((steps / estCodecSteps(text)) * 100);
-            audioText = ` · 约 ${(steps / 12.5).toFixed(0)}s 音频`;
+            audioText = ` · ${(steps / 12.5).toFixed(0)}s ${lang === 'en' ? 'audio' : '音频'}`;
           }
         } else if (event === 'wav') {
           const bytes = Uint8Array.from(atob(data), (c) => c.charCodeAt(0));
           blob = new Blob([bytes], { type: 'audio/wav' });
         } else if (event === 'error') {
           const j = JSON.parse(data);
-          throw new Error(j.message || '合成失败');
+          throw new Error(localizeError(j.message || (lang === 'en' ? 'Synthesis failed' : '合成失败')));
         }
       }
     }
-    if (!blob) throw new Error('没有收到音频数据');
+    if (!blob) throw new Error(lang === 'en' ? 'No audio data received' : '没有收到音频数据');
     setDeterminate(100);
     const audioUrl = URL.createObjectURL(blob);
     const player = $('player');
@@ -1324,10 +1714,10 @@ $('go').onclick = async () => {
     dl.hidden = false;
     if (engine) engine.loaded = true;
     status.className = 'ok';
-    status.textContent = `完成 · ${(blob.size / 1024).toFixed(0)} KB · ${((performance.now() - t0) / 1000).toFixed(1)}s`;
+    status.textContent = `${lang === 'en' ? 'Done' : '完成'} · ${(blob.size / 1024).toFixed(0)} KB · ${((performance.now() - t0) / 1000).toFixed(1)}s`;
   } catch (e) {
     status.className = 'err';
-    status.textContent = '失败：' + e.message;
+    status.textContent = (lang === 'en' ? 'Failed: ' : '失败：') + localizeError(e.message);
   } finally {
     clearInterval(timer);
     pbar.hidden = true;
@@ -1348,14 +1738,15 @@ async function loadModels() {
   }
   $('modelsNotice').hidden = true;
   try {
-    modelsData = await api('/api/models');
+    modelsData = await api(`/api/models?lang=${lang}`);
   } catch (e) {
-    toast('读取模型列表失败：' + e.message, true);
+    toast((lang === 'en' ? 'Failed to load models: ' : '读取模型列表失败：') + localizeError(e.message), true);
     return;
   }
   $('modelPaths').hidden = false;
   $('modelsDirPath').textContent = modelsData.models_dir || '—';
-  $('scriptsDirPath').textContent = modelsData.scripts_dir || '未找到 scripts/ 目录（安装不可用）';
+  $('scriptsDirPath').textContent = modelsData.scripts_dir
+    || (lang === 'en' ? 'scripts/ directory not found (installs unavailable)' : '未找到 scripts/ 目录（安装不可用）');
   renderModels();
   schedulePoll();
 }
@@ -1371,9 +1762,9 @@ function renderInstalledOnly() {
     const el = document.createElement('div');
     el.className = 'model-card';
     el.innerHTML = `
-      <div class="model-head"><b>${esc(e.name)}</b><span class="pill ok">已安装</span></div>
+      <div class="model-head"><b>${esc(e.name)}</b><span class="pill ok">${t('models.installed')}</span></div>
       <div class="chips">${(e.languages || []).map((l) => `<span class="chip">${esc(l)}</span>`).join('')}</div>
-      <div class="hint">${esc(e.kind)} · ${esc((e.capabilities || []).map((c) => CAPABILITY_LABELS[c] || c).join('、'))}</div>`;
+      <div class="hint">${esc(e.kind)} · ${esc((e.capabilities || []).map(capabilityLabel).join(lang === 'en' ? ', ' : '、'))}</div>`;
     box.appendChild(el);
   }
   $('installedEmpty').hidden = engines.length > 0;
@@ -1402,9 +1793,9 @@ function renderModels() {
     const el = document.createElement('div');
     el.className = 'model-card';
     el.innerHTML = `
-      <div class="model-head"><b>${esc(engine.name)}</b><span class="pill ok">已安装</span></div>
+      <div class="model-head"><b>${esc(engine.name)}</b><span class="pill ok">${t('models.installed')}</span></div>
       <div class="chips">${(engine.languages || []).map((l) => `<span class="chip">${esc(l)}</span>`).join('')}</div>
-      <div class="hint">${esc(engine.kind)} · 手动安装的 manifest</div>`;
+      <div class="hint">${esc(engine.kind)} · ${lang === 'en' ? 'manually installed manifest' : '手动安装的 manifest'}</div>`;
     installedBox.appendChild(el);
   }
 
@@ -1414,7 +1805,10 @@ function renderModels() {
 
 function progressBarHtml(job) {
   const pct = typeof job.progress === 'number' ? Math.max(0, Math.min(100, job.progress)) : null;
-  const label = esc(job.stage || (pct === null ? '准备中…' : '下载中'));
+  const fallback = pct === null
+    ? (lang === 'en' ? 'Preparing…' : '准备中…')
+    : (lang === 'en' ? 'Downloading' : '下载中');
+  const label = esc(job.stage || fallback);
   const right = pct === null ? '' : `<b>${pct.toFixed(1)}%</b>`;
   const fill = pct === null
     ? '<div class="pbar-fill indeterminate"></div>'
@@ -1432,32 +1826,38 @@ function modelCard(model, installed) {
   el.innerHTML = `
     <div class="model-head">
       <b>${esc(model.name)}</b>
-      ${installed ? '<span class="pill ok">已安装</span>' : `<span class="pill">${esc(model.size || '')}</span>`}
+      ${installed ? `<span class="pill ok">${t('models.installed')}</span>` : `<span class="pill">${esc(model.size || '')}</span>`}
     </div>
     <div class="model-desc">${esc(model.description)}</div>
     <div class="chips">${(model.languages || []).map((l) => `<span class="chip">${esc(l)}</span>`).join('')}</div>
     ${model.note ? `<div class="hint">${esc(model.note)}</div>` : ''}
-    ${installed && engine ? `<div class="hint">${esc(engine.kind)} · ${engine.loaded ? '已加载到内存' : '首次使用时加载'}</div>` : ''}
+    ${installed && engine ? `<div class="hint">${esc(engine.kind)} · ${engine.loaded
+      ? (lang === 'en' ? 'loaded in memory' : '已加载到内存')
+      : (lang === 'en' ? 'loaded on first use' : '首次使用时加载')}</div>` : ''}
     ${running ? progressBarHtml(job) : ''}
     ${job && (running || failed) ? `<pre class="log">${esc(job.log || '')}</pre>` : ''}
     <div class="model-actions"></div>`;
 
   const actions = el.querySelector('.model-actions');
   if (installed) {
-    actions.innerHTML = `<span class="hint">目录：models/${esc(model.dir)}</span>`;
+    actions.innerHTML = `<span class="hint">${lang === 'en' ? 'Directory' : '目录'}: models/${esc(model.dir)}</span>`;
     return el;
   }
 
   const btn = document.createElement('button');
   btn.type = 'button';
-  btn.textContent = running ? '安装中…' : failed ? '重试安装' : '下载安装';
+  btn.textContent = running
+    ? (lang === 'en' ? 'Installing…' : '安装中…')
+    : failed
+      ? (lang === 'en' ? 'Retry install' : '重试安装')
+      : (lang === 'en' ? 'Download & install' : '下载安装');
   btn.disabled = running || !modelsData.scripts_dir;
   btn.onclick = () => installModel(model.id);
   actions.appendChild(btn);
   if (!modelsData.scripts_dir) {
     const hint = document.createElement('span');
     hint.className = 'hint err';
-    hint.textContent = '未找到 scripts/ 目录';
+    hint.textContent = lang === 'en' ? 'scripts/ directory not found' : '未找到 scripts/ 目录';
     actions.appendChild(hint);
   }
   return el;
@@ -1467,10 +1867,10 @@ async function installModel(id) {
   try {
     await api(`/api/models/${encodeURIComponent(id)}/install`, { method: 'POST' });
   } catch (e) {
-    toast('无法开始安装：' + e.message, true);
+    toast((lang === 'en' ? 'Could not start the install: ' : '无法开始安装：') + localizeError(e.message), true);
     return;
   }
-  toast('已开始下载，进度会显示在卡片里');
+  toast(lang === 'en' ? 'Download started; progress is shown on the card' : '已开始下载，进度会显示在卡片里');
   await loadModels();
 }
 
@@ -1487,7 +1887,7 @@ function schedulePoll() {
       return;
     }
     try {
-      modelsData = await api('/api/models');
+      modelsData = await api(`/api/models?lang=${lang}`);
     } catch (_) {
       return;
     }
@@ -1499,7 +1899,9 @@ function schedulePoll() {
       const failed = modelsData.models.some((m) => m.job && m.job.status === 'failed' && !m.installed);
       await loadEngines();
       await loadModels();
-      toast(failed ? '安装失败，请查看卡片中的日志' : '安装流程结束', failed);
+      toast(failed
+        ? (lang === 'en' ? 'Install failed; see the log on the card' : '安装失败，请查看卡片中的日志')
+        : (lang === 'en' ? 'Install finished' : '安装流程结束'), failed);
     }
   }, 1500);
 }
@@ -1513,7 +1915,7 @@ async function loadHistory() {
     const d = await api('/api/history');
     historyItems = d.history || [];
   } catch (e) {
-    toast('读取历史失败：' + e.message, true);
+    toast((lang === 'en' ? 'Failed to load history: ' : '读取历史失败：') + localizeError(e.message), true);
     return;
   }
   renderHistory();
@@ -1538,7 +1940,7 @@ function renderHistory() {
     const when = document.createElement('span');
     when.className = 'hint';
     when.textContent =
-      new Date(h.created_at * 1000).toLocaleString('zh-CN', { hour12: false }) +
+      new Date(h.created_at * 1000).toLocaleString(dateLocale(), { hour12: false }) +
       ` · ${fmtDur(h.duration_secs)} · ${fmtBytes(h.bytes)}`;
     meta.append(chip, when);
 
@@ -1557,7 +1959,7 @@ function renderHistory() {
     dl.className = 'hint';
     dl.href = audio.src;
     dl.download = `laverock-${h.id}.wav`;
-    dl.textContent = '下载 WAV';
+    dl.textContent = t('download.wav');
 
     let mp3 = null;
     if (mp3Supported) {
@@ -1565,18 +1967,19 @@ function renderHistory() {
       mp3.className = 'hint';
       mp3.href = `/api/history/${encodeURIComponent(h.id)}/audio?format=mp3`;
       mp3.download = `laverock-${h.id}.mp3`;
-      mp3.textContent = '下载 MP3';
+      mp3.textContent = t('download.mp3');
     }
 
     const del = document.createElement('button');
     del.className = 'ghost danger';
     del.type = 'button';
-    del.textContent = '删除';
+    del.textContent = lang === 'en' ? 'Delete' : '删除';
     del.onclick = async () => {
-      const yes = await confirmAction('删除这条生成记录？音频文件会一并删除。', {
-        title: '删除记录',
-        okText: '删除',
-      });
+      const en = lang === 'en';
+      const yes = await confirmAction(
+        en ? 'Delete this generation? The audio file is deleted as well.' : '删除这条生成记录？音频文件会一并删除。',
+        { title: en ? 'Delete entry' : '删除记录', okText: en ? 'Delete' : '删除' },
+      );
       if (!yes) return;
       del.disabled = true;
       try {
@@ -1587,7 +1990,7 @@ function renderHistory() {
         $('clearHistory').hidden = historyItems.length === 0;
       } catch (e) {
         del.disabled = false;
-        toast('删除失败：' + e.message, true);
+        toast((lang === 'en' ? 'Delete failed: ' : '删除失败：') + localizeError(e.message), true);
       }
     };
 
@@ -1600,26 +2003,28 @@ function renderHistory() {
 }
 
 $('clearHistory').onclick = async () => {
-  const yes = await confirmAction('清空全部生成记录？此操作不可恢复。', {
-    title: '清空历史',
-    okText: '清空',
-  });
+  const en = lang === 'en';
+  const yes = await confirmAction(
+    en ? 'Clear all generation history? This cannot be undone.' : '清空全部生成记录？此操作不可恢复。',
+    { title: en ? 'Clear history' : '清空历史', okText: en ? 'Clear' : '清空' },
+  );
   if (!yes) return;
   try {
     await api('/api/history', { method: 'DELETE' });
     historyItems = [];
     renderHistory();
-    toast('已清空历史');
+    toast(en ? 'History cleared' : '已清空历史');
   } catch (e) {
-    toast('清空失败：' + e.message, true);
+    toast((en ? 'Clear failed: ' : '清空失败：') + localizeError(e.message), true);
   }
 };
 
 // ---------------------------------------------------------------- settings
 
 function fillPreset(sel, presets) {
-  sel.innerHTML = presets.map((p) => `<option value="${esc(p.value)}">${esc(p.label)}</option>`).join('')
-    + '<option value="__custom">自定义…</option>';
+  sel.innerHTML = presets.map((p) =>
+    `<option value="${esc(p.value)}">${esc(p.labelKey ? t(p.labelKey) : p.label)}</option>`).join('')
+    + `<option value="__custom">${t('preset.custom')}</option>`;
 }
 
 function setPreset(prefix, value, presets) {
@@ -1671,13 +2076,23 @@ function syncProxyMode() {
   const hint = $('proxyHint');
   hint.className = 'hint';
   if (mode === 'system') {
-    hint.innerHTML = detectedProxy
-      ? '检测到系统代理 <code>' + esc(detectedProxy) + '</code>，模型下载会自动使用它。'
-      : '未检测到系统代理，模型下载将直连。';
+    if (lang === 'en') {
+      hint.innerHTML = detectedProxy
+        ? 'Detected system proxy <code>' + esc(detectedProxy) + '</code>; model downloads use it automatically.'
+        : 'No system proxy detected; model downloads connect directly.';
+    } else {
+      hint.innerHTML = detectedProxy
+        ? '检测到系统代理 <code>' + esc(detectedProxy) + '</code>，模型下载会自动使用它。'
+        : '未检测到系统代理，模型下载将直连。';
+    }
   } else if (mode === 'manual') {
-    hint.textContent = '仅用于模型下载，支持 http、https、socks5、socks5h。';
+    hint.textContent = lang === 'en'
+      ? 'Used for model downloads only; http, https, socks5 and socks5h are supported.'
+      : '仅用于模型下载，支持 http、https、socks5、socks5h。';
   } else {
-    hint.textContent = '始终直连，即使环境变量或系统里设置了代理。';
+    hint.textContent = lang === 'en'
+      ? 'Always connect directly, even if a proxy is configured in the environment or system.'
+      : '始终直连，即使环境变量或系统里设置了代理。';
   }
 }
 $('proxyMode').onchange = syncProxyMode;
@@ -1699,12 +2114,13 @@ async function loadSettingsPage() {
     setPreset('hf', s.hf_endpoint || '', HF_PRESETS);
     setPreset('pip', s.pip_index || '', PIP_PRESETS);
     $('pathModels').textContent = s.models_dir || '—';
-    $('pathScripts').textContent = s.scripts_dir || '未找到';
+    $('pathScripts').textContent = s.scripts_dir || (lang === 'en' ? 'not found' : '未找到');
+    serverSettings = s;
     $('settingsHint').className = 'hint';
     $('settingsHint').textContent = '';
   } catch (e) {
     $('settingsHint').className = 'hint err';
-    $('settingsHint').textContent = '读取设置失败：' + e.message;
+    $('settingsHint').textContent = (lang === 'en' ? 'Failed to load settings: ' : '读取设置失败：') + localizeError(e.message);
   }
 }
 
@@ -1715,6 +2131,7 @@ $('saveSettings').onclick = async () => {
     proxy: $('proxy').value.trim(),
     hf_endpoint: getPreset('hf'),
     pip_index: getPreset('pip'),
+    language: localStorage.getItem('laverock.lang') || '',
   };
   try {
     const saved = await api('/api/settings', {
@@ -1728,11 +2145,12 @@ $('saveSettings').onclick = async () => {
     setPreset('hf', saved.hf_endpoint || '', HF_PRESETS);
     setPreset('pip', saved.pip_index || '', PIP_PRESETS);
     hint.className = 'hint ok';
-    hint.textContent = '已保存，下次下载生效';
-    toast('下载设置已保存');
+    hint.textContent = lang === 'en' ? 'Saved; applies to the next download' : '已保存，下次下载生效';
+    toast(lang === 'en' ? 'Download settings saved' : '下载设置已保存');
+    serverSettings = saved;
   } catch (e) {
     hint.className = 'hint err';
-    hint.textContent = '保存失败：' + e.message;
+    hint.textContent = (lang === 'en' ? 'Save failed: ' : '保存失败：') + localizeError(e.message);
   }
 };
 
@@ -1744,6 +2162,18 @@ async function loadSession() {
   } catch (_) {
     session = { loopback: true, paired: false };
   }
+  // Language preference: explicit local choice, then the machine-wide
+  // server default, then the browser language.
+  const explicit = localStorage.getItem('laverock.lang');
+  if (!explicit && (session.language === 'zh' || session.language === 'en')) {
+    if (lang !== session.language) {
+      lang = session.language;
+      applyI18n();
+      fillPreset($('hfPreset'), HF_PRESETS);
+      fillPreset($('pipPreset'), PIP_PRESETS);
+    }
+  }
+  $('langSelect').value = explicit === 'zh' || explicit === 'en' ? explicit : 'system';
   const desktop = !!session.loopback;
   $('remoteCard').hidden = !desktop;
   $('phoneSettings').hidden = desktop;
@@ -1753,7 +2183,7 @@ async function loadSession() {
     const code = new URLSearchParams(location.search).get('pair');
     if (code) {
       $('pairCode').value = code;
-      $('pairMsg').textContent = '正在配对……';
+      $('pairMsg').textContent = lang === 'en' ? 'Pairing…' : '正在配对……';
       if (await claim(code)) return;
     }
     $('pairOverlay').classList.add('show');
@@ -1765,11 +2195,15 @@ async function loadSession() {
     $('lanToggle').checked = !!session.lan_enabled;
     $('lanPanel').hidden = !session.lan_enabled;
     if (session.lan_enabled) {
-      $('lanHint').textContent = `同一 Wi-Fi 下的手机可访问 ${session.lan_url || ''}`;
+      $('lanHint').textContent = lang === 'en'
+        ? `Phones on the same Wi-Fi can open ${session.lan_url || ''}`
+        : `同一 Wi-Fi 下的手机可访问 ${session.lan_url || ''}`;
       await loadDevices();
     }
   } else {
-    $('phoneInfo').textContent = `已连接到电脑${session.device_name ? '（' + session.device_name + '）' : ''}。`;
+    $('phoneInfo').textContent = lang === 'en'
+      ? `Connected to the computer${session.device_name ? ' (' + session.device_name + ')' : ''}.`
+      : `已连接到电脑${session.device_name ? '（' + session.device_name + '）' : ''}。`;
   }
 }
 
@@ -1789,7 +2223,7 @@ async function claim(code) {
     location.replace('/');
     return true;
   } catch (e) {
-    $('pairMsg').textContent = '配对失败：' + e.message;
+    $('pairMsg').textContent = (lang === 'en' ? 'Pairing failed: ' : '配对失败：') + localizeError(e.message);
     $('pairOverlay').classList.add('show');
     return false;
   }
@@ -1799,15 +2233,15 @@ function deviceName() {
   const ua = navigator.userAgent;
   if (/iPhone/.test(ua)) return 'iPhone';
   if (/iPad/.test(ua)) return 'iPad';
-  if (/Android/.test(ua)) return 'Android 手机';
-  if (/Macintosh/.test(ua)) return 'Mac 浏览器';
-  return '浏览器设备';
+  if (/Android/.test(ua)) return lang === 'en' ? 'Android phone' : 'Android 手机';
+  if (/Macintosh/.test(ua)) return lang === 'en' ? 'Mac browser' : 'Mac 浏览器';
+  return lang === 'en' ? 'Browser device' : '浏览器设备';
 }
 
 $('pairSubmit').onclick = () => {
   const code = $('pairCode').value.trim();
   if (!/^\d{6}$/.test(code)) {
-    $('pairMsg').textContent = '请输入 6 位配对码';
+    $('pairMsg').textContent = lang === 'en' ? 'Enter the 6-digit pairing code' : '请输入 6 位配对码';
     return;
   }
   claim(code);
@@ -1824,7 +2258,9 @@ $('unpair').onclick = () => {
 
 $('lanToggle').onchange = async () => {
   const enabled = $('lanToggle').checked;
-  $('lanHint').textContent = enabled ? '正在开启……' : '正在关闭……';
+  $('lanHint').textContent = enabled
+    ? (lang === 'en' ? 'Enabling…' : '正在开启……')
+    : (lang === 'en' ? 'Disabling…' : '正在关闭……');
   const res = await fetch('/api/settings/lan', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -1833,39 +2269,44 @@ $('lanToggle').onchange = async () => {
   const body = await res.json().catch(() => ({}));
   if (!res.ok) {
     $('lanToggle').checked = !enabled;
-    $('lanHint').textContent = '操作失败：' + (body.error || res.statusText);
+    $('lanHint').textContent = (lang === 'en' ? 'Operation failed: ' : '操作失败：') +
+      localizeError(body.error || res.statusText);
     return;
   }
   $('lanPanel').hidden = !enabled;
   $('qr').hidden = true;
   $('pairInfo').textContent = '';
   $('lanHint').textContent = enabled
-    ? `${body.url || ''}${body.fingerprint ? '  ·  证书指纹 ' + body.fingerprint.slice(0, 17) + '…' : ''}`
-    : '开启后，同一 Wi-Fi 下的手机经配对即可访问同一套界面';
-  if (!enabled) $('deviceList').textContent = '暂无';
+    ? `${body.url || ''}${body.fingerprint ? (lang === 'en' ? '  ·  cert fingerprint ' : '  ·  证书指纹 ') + body.fingerprint.slice(0, 17) + '…' : ''}`
+    : t('lan.hint.default');
+  if (!enabled) $('deviceList').textContent = t('devices.none');
   else loadDevices();
 };
 
 $('pairBtn').onclick = async () => {
-  $('pairInfo').textContent = '生成中……';
+  const en = lang === 'en';
+  $('pairInfo').textContent = en ? 'Generating…' : '生成中……';
   const res = await fetch('/api/pair/start', { method: 'POST' });
   const body = await res.json().catch(() => ({}));
   if (!res.ok) {
-    $('pairInfo').textContent = '失败：' + (body.error || res.statusText);
+    $('pairInfo').textContent = (en ? 'Failed: ' : '失败：') + localizeError(body.error || res.statusText);
     return;
   }
   $('qr').innerHTML = body.qr_svg;
   $('qr').hidden = false;
-  $('pairInfo').textContent = `配对码 ${body.code}`;
-  $('pairHint').textContent = '手机扫码即可打开 https 链接；首次访问会提示证书不受信任，请选择「高级 → 继续前往」以允许使用麦克风（证书指纹 ' +
-    (body.fingerprint ? body.fingerprint.slice(0, 17) + '…' : '') + '）。5 分钟内有效。';
+  $('pairInfo').textContent = `${en ? 'Pairing code' : '配对码'} ${body.code}`;
+  $('pairHint').textContent = en
+    ? 'Scan the code with your phone to open the https link. The first visit warns about an untrusted certificate; choose "Advanced → Proceed" to allow microphone access (cert fingerprint '
+      + (body.fingerprint ? body.fingerprint.slice(0, 17) + '…' : '') + '). Valid for 5 minutes.'
+    : '手机扫码即可打开 https 链接；首次访问会提示证书不受信任，请选择「高级 → 继续前往」以允许使用麦克风（证书指纹 '
+      + (body.fingerprint ? body.fingerprint.slice(0, 17) + '…' : '') + '）。5 分钟内有效。';
 };
 
 async function loadDevices() {
   let list = [];
   try { list = await api('/api/devices'); } catch (_) { list = []; }
   const box = $('deviceList');
-  if (!list.length) { box.textContent = '暂无'; return; }
+  if (!list.length) { box.textContent = t('devices.none'); return; }
   box.innerHTML = '';
   for (const d of list) {
     const row = document.createElement('div');
@@ -1873,22 +2314,23 @@ async function loadDevices() {
     row.style.marginTop = '8px';
     const name = document.createElement('span');
     name.className = 'fileinfo';
-    name.textContent = `${d.name} · ${new Date(d.created_at * 1000).toLocaleDateString()}`;
+    name.textContent = `${d.name} · ${new Date(d.created_at * 1000).toLocaleDateString(dateLocale())}`;
     const btn = document.createElement('button');
     btn.className = 'ghost small';
     btn.type = 'button';
-    btn.textContent = '撤销';
+    const en = lang === 'en';
+    btn.textContent = en ? 'Revoke' : '撤销';
     btn.onclick = async () => {
-      const yes = await confirmAction(`撤销设备「${d.name}」的访问权限？`, {
-        title: '撤销设备',
-        okText: '撤销',
-      });
+      const yes = await confirmAction(
+        en ? `Revoke access for "${d.name}"?` : `撤销设备「${d.name}」的访问权限？`,
+        { title: en ? 'Revoke device' : '撤销设备', okText: en ? 'Revoke' : '撤销' },
+      );
       if (!yes) return;
       try {
         await api(`/api/devices/${encodeURIComponent(d.id)}`, { method: 'DELETE' });
         loadDevices();
       } catch (e) {
-        toast('撤销失败：' + e.message, true);
+        toast((en ? 'Revoke failed: ' : '撤销失败：') + localizeError(e.message), true);
       }
     };
     row.append(name, btn);
@@ -1906,7 +2348,7 @@ function currentPage() {
 function showPage(page) {
   for (const p of PAGES) $('page-' + p).classList.toggle('active', p === page);
   document.querySelectorAll('nav a').forEach((a) => a.classList.toggle('active', a.dataset.page === page));
-  document.title = `${PAGE_TITLES[page]} · Laverock`;
+  document.title = `${t('nav.' + page)} · Laverock`;
   if (page !== 'models' && modelsTimer) {
     clearInterval(modelsTimer);
     modelsTimer = null;
@@ -1938,7 +2380,7 @@ $('downloadMp3').onclick = async (event) => {
     a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 10000);
   } catch (e) {
-    toast('导出 MP3 失败：' + e.message, true);
+    toast((lang === 'en' ? 'MP3 export failed: ' : '导出 MP3 失败：') + localizeError(e.message), true);
   }
 };
 
@@ -1957,6 +2399,10 @@ async function loadHealth() {
 }
 
 async function boot() {
+  lang = detectLang();
+  applyI18n();
+  fillPreset($('hfPreset'), HF_PRESETS);
+  fillPreset($('pipPreset'), PIP_PRESETS);
   await loadSession();
   loadHealth();
   if (!session.loopback && !session.paired) {

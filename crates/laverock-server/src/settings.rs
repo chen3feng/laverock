@@ -37,6 +37,9 @@ pub struct Settings {
     pub hf_endpoint: String,
     /// pip index used to build the Qwen3-TTS venv; empty means PyPI.
     pub pip_index: String,
+    /// UI language: "" follows the browser, otherwise a code such as
+    /// `zh` or `en`. Only the web UI interprets it.
+    pub language: String,
 }
 
 impl Settings {
@@ -94,6 +97,14 @@ impl Settings {
         }
         check_url("Hugging Face 镜像", &self.hf_endpoint, &["http", "https"])?;
         check_url("PyPI 镜像", &self.pip_index, &["http", "https"])?;
+
+        self.language = self.language.trim().to_string();
+        if !matches!(self.language.as_str(), "" | "zh" | "en") {
+            return Err(CoreError::BadRequest(format!(
+                "unsupported language: {}",
+                self.language
+            )));
+        }
         Ok(self)
     }
 }
@@ -220,6 +231,7 @@ mod tests {
             proxy: "  http://127.0.0.1:10808  ".into(),
             hf_endpoint: " https://hf-mirror.com/ ".into(),
             pip_index: "https://pypi.tuna.tsinghua.edu.cn/simple/".into(),
+            language: String::new(),
         }
         .normalize()
         .expect("valid settings");
@@ -263,6 +275,7 @@ mod tests {
             proxy: "http://127.0.0.1:10808".into(),
             hf_endpoint: "https://hf-mirror.com".into(),
             pip_index: "https://pypi.tuna.tsinghua.edu.cn/simple".into(),
+            language: String::new(),
         };
         let env = settings.download_env(None);
         let get = |key: &str| env.iter().find(|(k, _)| k == key).map(|(_, v)| v.as_str());
@@ -294,6 +307,18 @@ mod tests {
         assert!(settings
             .download_env(Some("http://127.0.0.1:7890"))
             .is_empty());
+    }
+
+    #[test]
+    fn accepts_supported_languages() {
+        for lang in ["", "zh", "en"] {
+            let mut s = Settings::default();
+            s.language = lang.into();
+            assert!(s.normalize().is_ok(), "{lang} accepted");
+        }
+        let mut s = Settings::default();
+        s.language = "fr".into();
+        assert!(s.normalize().is_err());
     }
 
     #[test]

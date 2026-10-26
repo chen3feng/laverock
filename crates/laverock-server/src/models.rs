@@ -32,6 +32,9 @@ struct CatalogEntry {
     dir: String,
     name: String,
     description: String,
+    /// Optional English override of `description`.
+    #[serde(default)]
+    description_en: Option<String>,
     size: String,
     languages: Vec<String>,
     capabilities: Vec<String>,
@@ -40,6 +43,26 @@ struct CatalogEntry {
     env: BTreeMap<String, String>,
     #[serde(default)]
     note: Option<String>,
+    /// Optional English override of `note`.
+    #[serde(default)]
+    note_en: Option<String>,
+}
+
+impl CatalogEntry {
+    /// Pick the localized description/notes for the requested UI language.
+    /// Only English has an override; Chinese is the catalog's default.
+    fn localized<'a>(&'a self, lang: &str) -> (&'a str, Option<&'a str>) {
+        if lang == "en" {
+            (
+                self.description_en.as_deref().unwrap_or(&self.description),
+                self.note_en
+                    .as_deref()
+                    .or(self.note.as_deref()),
+            )
+        } else {
+            (&self.description, self.note.as_deref())
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -139,7 +162,7 @@ impl ModelService {
         }
     }
 
-    pub fn list(&self) -> ModelList {
+    pub fn list(&self, lang: &str) -> ModelList {
         let engines = self.manager.list();
         let jobs = self.jobs.lock().expect("jobs lock poisoned");
         let mut models: Vec<ModelView> = Vec::new();
@@ -154,15 +177,16 @@ impl ModelService {
             } else if installed {
                 known.push(entry.dir.clone());
             }
+            let (description, note) = entry.localized(lang);
             models.push(ModelView {
                 id: entry.id.clone(),
                 dir: entry.dir.clone(),
                 name: entry.name.clone(),
-                description: entry.description.clone(),
+                description: description.to_string(),
                 size: entry.size.clone(),
                 languages: entry.languages.clone(),
                 capabilities: entry.capabilities.clone(),
-                note: entry.note.clone(),
+                note: note.map(str::to_string),
                 installed,
                 engine_id,
                 job: jobs.get(&entry.id).map(JobView::from),
@@ -178,11 +202,16 @@ impl ModelService {
             if !dir.join("engine.json").is_file() {
                 continue;
             }
+            let description = if lang == "en" {
+                "Manually installed model (manifest from the model directory)."
+            } else {
+                "手动安装的模型（manifest 来自模型目录）。"
+            };
             models.push(ModelView {
                 id: engine.id.clone(),
                 dir: engine.id.clone(),
                 name: engine.name,
-                description: "手动安装的模型（manifest 来自模型目录）。".to_string(),
+                description: description.to_string(),
                 size: String::new(),
                 languages: engine.languages,
                 capabilities: engine.capabilities,
@@ -724,13 +753,15 @@ mod tests {
             id: "fake".to_string(),
             dir: "fake".to_string(),
             name: "Fake".to_string(),
-            description: String::new(),
+            description: "中文说明".to_string(),
+            description_en: Some("English note".to_string()),
             size: String::new(),
             languages: Vec::new(),
             capabilities: Vec::new(),
             script: "fake.sh".to_string(),
             env: BTreeMap::new(),
             note: None,
+            note_en: None,
         };
         run_install(
             entry,
@@ -750,5 +781,27 @@ mod tests {
         assert!(models.join("fake/engine.json").is_file());
 
         let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn localized_text_falls_back_to_chinese() {
+        let entry = CatalogEntry {
+            id: "x".into(),
+            dir: "x".into(),
+            name: "X".into(),
+            description: "中文".into(),
+            description_en: Some("English".into()),
+            size: String::new(),
+            languages: Vec::new(),
+            capabilities: Vec::new(),
+            script: "x.sh".into(),
+            env: BTreeMap::new(),
+            note: Some("中文备注".into()),
+            note_en: Some("English note".into()),
+        };
+        assert_eq!(entry.localized("en"), ("English", Some("English note")));
+        // Unknown language and Chinese both use the default fields.
+        assert_eq!(entry.localized("zh").0, "中文");
+        assert_eq!(entry.localized("de").1, Some("中文备注"));
     }
 }

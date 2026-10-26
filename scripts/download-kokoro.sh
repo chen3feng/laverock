@@ -127,7 +127,7 @@ cat > "$DEST/engine.json" <<EOF
 {
   "id": "$MODEL",
   "kind": "kokoro",
-  "name": "Kokoro 82M 多语言 (INT8)",
+  "name": "Kokoro 82M (INT8)",
   "languages": ["zh", "en", "ja", "fr", "es", "it", "pt", "hi"],
   "capabilities": ["tts", "preset-voices"],
   "kokoro": {

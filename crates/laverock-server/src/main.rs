@@ -211,6 +211,9 @@ async fn session(
         "loopback": loopback,
         "paired": device.is_some(),
         "device_name": device.map(|d| d.name),
+        // Machine-wide default UI language ("" = follow the browser);
+        // clients may override it locally.
+        "language": state.settings.get().language,
         "lan_enabled": state.remote.lan_enabled(),
         // Do not hand the network address to unpaired peers.
         "lan_url": if loopback && state.remote.lan_enabled() {
@@ -387,6 +390,7 @@ async fn get_settings(
         "system_proxy": system_proxy,
         "hf_endpoint": settings.hf_endpoint,
         "pip_index": settings.pip_index,
+        "language": settings.language,
         "models_dir": state.models.models_dir().display().to_string(),
         "scripts_dir": state.models.scripts_dir().map(|p| p.display().to_string()),
     })))
@@ -403,14 +407,22 @@ async fn set_settings(
     Ok(Json(state.settings.update(body)?))
 }
 
+#[derive(serde::Deserialize)]
+struct LangQuery {
+    #[serde(default)]
+    lang: String,
+}
+
 async fn list_models(
     State(state): State<AppState>,
     ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    Query(query): Query<LangQuery>,
 ) -> Result<Json<models::ModelList>, ApiError> {
     if !is_loopback(&peer) {
         return Err(ApiError::forbidden());
     }
-    Ok(Json(state.models.list()))
+    let lang = if query.lang == "en" { "en" } else { "zh" };
+    Ok(Json(state.models.list(lang)))
 }
 
 async fn install_model(
