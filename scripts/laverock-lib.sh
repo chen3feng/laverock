@@ -177,29 +177,30 @@ lv_voxcpm2_runner() {
       return 1
     fi
 
-    extract="$cache/extract"
-    rm -rf "$extract"
-    mkdir -p "$extract"
+    # The archive is a flat directory: the runner plus, on Linux/Windows,
+    # the dlopen()ed libggml-cpu-* variant backends it needs alongside.
     if [ "$ext" = ".zip" ]; then
       if command -v unzip >/dev/null 2>&1; then
-        unzip -q "$cache/$asset" -d "$extract"
+        unzip -q -o "$cache/$asset" -d "$cache"
       else
         powershell -NoProfile -Command \
-          "Expand-Archive -LiteralPath '$(cygpath -w "$cache/$asset")' -DestinationPath '$(cygpath -w "$extract")' -Force"
+          "Expand-Archive -LiteralPath '$(cygpath -w "$cache/$asset")' -DestinationPath '$(cygpath -w "$cache")' -Force"
       fi
     else
-      tar -xzf "$cache/$asset" -C "$extract"
+      tar -xzf "$cache/$asset" -C "$cache"
     fi
-    [ -f "$extract/$inner" ] || { echo "$inner missing from $asset" >&2; return 1; }
-    cp "$extract/$inner" "$cache/"
-    if [ -f "$extract/LICENSE" ]; then
-      cp "$extract/LICENSE" "$cache/voxcpm2-cli-LICENSE.txt"
-    fi
+    [ -f "$cache/$inner" ] || { echo "$inner missing from $asset" >&2; return 1; }
     chmod +x "$cache/$inner" 2>/dev/null || true
-    rm -rf "$extract" "$cache/$asset" "$manifest"
+    rm -f "$cache/$asset" "$manifest"
   fi
 
-  cp "$cache/$inner" "$dest/$inner"
+  # Mirror the runner and every backend library next to the GGUFs (drop
+  # files from an older runner version first so removed libs don't linger).
+  rm -f "$dest/voxcpm2-cli" "$dest/voxcpm2-cli.exe" \
+        "$dest"/libggml-cpu-*.so "$dest"/libggml-cpu-*.so.* "$dest"/ggml-cpu*.dll 2>/dev/null
+  find "$cache" -maxdepth 1 -type f \
+    \( -name "$inner" -o -name '*.so' -o -name '*.so.*' -o -name '*.dll' \) \
+    -exec cp -f {} "$dest/" \;
   chmod +x "$dest/$inner" 2>/dev/null || true
   lv_stage "voxcpm2-cli 预编译版本就绪"
 }
