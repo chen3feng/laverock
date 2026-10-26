@@ -46,6 +46,7 @@ jobs:
               -DGGML_METAL_EMBED_LIBRARY=ON
               -DGGML_NATIVE=OFF
               -DLLAMA_CURL=OFF
+              -DLLAMA_OPENSSL=OFF
               -DBUILD_SHARED_LIBS=OFF
               -DCMAKE_OSX_DEPLOYMENT_TARGET=13.3
           - name: macos-x64
@@ -58,6 +59,7 @@ jobs:
               -DGGML_METAL=OFF
               -DGGML_NATIVE=OFF
               -DLLAMA_CURL=OFF
+              -DLLAMA_OPENSSL=OFF
               -DBUILD_SHARED_LIBS=OFF
               -DCMAKE_OSX_DEPLOYMENT_TARGET=13.3
           - name: linux-x64
@@ -71,6 +73,7 @@ jobs:
             args: >-
               -DGGML_NATIVE=OFF
               -DLLAMA_CURL=OFF
+              -DLLAMA_OPENSSL=OFF
               -DGGML_OPENMP=OFF
               -DBUILD_SHARED_LIBS=OFF
           - name: windows-x64
@@ -82,6 +85,7 @@ jobs:
             args: >-
               -DGGML_NATIVE=OFF
               -DLLAMA_CURL=OFF
+              -DLLAMA_OPENSSL=OFF
               -DGGML_STATIC=ON
               -DGGML_OPENMP=OFF
               -DBUILD_SHARED_LIBS=OFF
@@ -170,7 +174,7 @@ jobs:
               fi
               ldd stage/voxcpm2-cli
               ldd stage/voxcpm2-cli | awk '{print $1}' \
-                | grep -Ev '^(linux-vdso[^ ]*|ld-linux[^ ]*|lib(c|m|dl|rt|pthread)\.so[^ ]*|libstdc\+\+\.so[^ ]*|libgcc_s\.so[^ ]*)$' \
+                | grep -Ev '^((/lib64/|/lib/)?ld-linux[^ ]*|linux-vdso[^ ]*|lib(c|m|dl|rt|pthread)\.so[^ ]*|libstdc\+\+\.so[^ ]*|libgcc_s\.so[^ ]*)$' \
                 | grep . && { echo "::error::unexpected shared-library dependency"; exit 1; } || true ;;
             windows-x64)
               # vcomp140.dll would mean OpenMP crept back in; the UCRT set is
