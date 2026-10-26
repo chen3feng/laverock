@@ -37,3 +37,12 @@
  #endif
          if (fd < 0) {
              throw std::runtime_error(format("failed to open MoE experts file '%s': %s", path.c_str(), std::strerror(errno)));
+@@ -1419,7 +1427,7 @@
+             if (_lseeki64(fd, (int64_t) (offset + done), SEEK_SET) < 0) {
+                 throw std::runtime_error("failed to seek MoE experts");
+             }
+-            const ssize_t result = _read(fd, cur[0].iov_base, (unsigned int) cur[0].iov_len);
++            const int result = _read(fd, cur[0].iov_base, (unsigned int) cur[0].iov_len);
+ #else
+             const ssize_t result = preadv(fd, cur, cn, (off_t) (offset + done));
+ #endif

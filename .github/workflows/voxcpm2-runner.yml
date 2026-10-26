@@ -132,9 +132,29 @@ jobs:
           nproc=4
           command -v nproc >/dev/null && nproc=$(nproc)
           [ -n "${NUMBER_OF_PROCESSORS:-}" ] && nproc="$NUMBER_OF_PROCESSORS"
-          # Build everything: with GGML_BACKEND_DL the per-ISA CPU backends
-          # are separate shared-library targets, not dependencies of the CLI.
-          cmake --build build --config Release -j "$nproc"
+          # Only the runner: the fork's omni server/cli targets link
+          # ggml_backend_cpu_set_n_threads statically and fail under
+          # GGML_BACKEND_DL (undefined reference); voxcpm2-cli does not use
+          # that symbol and links fine.
+          cmake --build build --config Release --target voxcpm2-cli -j "$nproc"
+          case "${{ matrix.name }}" in
+            macos*) ;;
+            *)
+              # The per-ISA CPU backends are dlopen()ed modules, not link
+              # dependencies. Build every variant this compiler exposes; a
+              # real compile error fails the job, a missing target is skipped.
+              for v in x64 sse42 sandybridge ivybridge piledriver haswell \
+                       skylakex cannonlake cascadelake icelake cooperlake \
+                       zen4 alderlake sapphirerapids; do
+                if cmake --build build --target help 2>/dev/null | grep -q "ggml-cpu-$v" \
+                   || find build -name "ggml-cpu-$v.vcxproj" | grep -q .; then
+                  cmake --build build --config Release --target "ggml-cpu-$v" -j "$nproc"
+                else
+                  echo "variant $v not defined for this compiler, skipping"
+                fi
+              done
+              ;;
+          esac
 
       - name: Pack
         shell: bash
