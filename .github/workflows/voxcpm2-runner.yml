@@ -60,19 +60,25 @@ jobs:
             os: ubuntu-22.04
             exe: ""
             archive: tar.gz
-            # Build on 22.04 for the older glibc; CPU_ALL_VARIANTS gives one
-            # binary with runtime dispatch instead of -march=native code.
+            # Build on 22.04 for the older glibc; BACKEND_DL + CPU_ALL_VARIANTS
+            # ship the AVX/AVX2/AVX512 paths as dlopen()ed backend libs (the
+            # ggml loader finds them next to the exe via $ORIGIN).
             args: >-
               -DGGML_NATIVE=OFF
+              -DGGML_BACKEND_DL=ON
               -DGGML_CPU_ALL_VARIANTS=ON
               -DBUILD_SHARED_LIBS=OFF
+              '-DCMAKE_INSTALL_RPATH=$ORIGIN'
+              -DCMAKE_BUILD_WITH_INSTALL_RPATH=ON
           - name: windows-x64
             os: windows-latest
             exe: ".exe"
             archive: zip
-            # GGML_STATIC links the MSVC runtime so no VC redist is needed.
+            # GGML_STATIC links the MSVC runtime so no VC redist is needed;
+            # the AVX variant backends are still DLLs (BACKEND_DL).
             args: >-
               -DGGML_NATIVE=OFF
+              -DGGML_BACKEND_DL=ON
               -DGGML_CPU_ALL_VARIANTS=ON
               -DGGML_STATIC=ON
               -DBUILD_SHARED_LIBS=OFF
@@ -103,14 +109,16 @@ jobs:
         shell: bash
         run: cmake -S upstream -B build ${{ matrix.args }}
 
-      - name: Build voxcpm2-cli
+      - name: Build
         shell: bash
         run: |
           set -euo pipefail
           nproc=4
           command -v nproc >/dev/null && nproc=$(nproc)
           [ -n "${NUMBER_OF_PROCESSORS:-}" ] && nproc="$NUMBER_OF_PROCESSORS"
-          cmake --build build --config Release --target voxcpm2-cli -j "$nproc"
+          # Build everything: with GGML_BACKEND_DL the per-ISA CPU backends
+          # are separate shared-library targets, not dependencies of the CLI.
+          cmake --build build --config Release -j "$nproc"
 
       - name: Pack
         shell: bash
@@ -122,6 +130,17 @@ jobs:
           cp "$bin" "stage/voxcpm2-cli${{ matrix.exe }}"
           cp upstream/LICENSE stage/LICENSE
           cp upstream-commit.txt stage/COMMIT
+          # The dlopen()ed CPU variant backends (GGML_BACKEND_DL) must sit
+          # next to the exe; ggml loads them from the executable directory.
+          # macOS archives are single binaries (Metal embedded / plain CPU).
+          if [ "${{ matrix.archive }}" = "zip" ]; then
+            find build -type f \( -name 'ggml-cpu*.dll' -o -name 'ggml-base.dll' \) \
+              -exec cp -f {} stage/ \;
+          else
+            find -L build -type f \( -name 'libggml-cpu-*.so' -o -name 'libggml-cpu-*.so.*' \) \
+              -exec cp -fL {} stage/ \;
+          fi
+          echo "stage contents:"; ls -la stage
           if [ "${{ matrix.archive }}" = "tar.gz" ]; then
             tar -C stage -czf "voxcpm2-cli-${{ matrix.name }}.tar.gz" .
           else
