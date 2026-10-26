@@ -110,10 +110,12 @@ jobs:
 
             ### 首次使用需要下载模型
 
-            应用本身不含模型权重。安装后在终端运行：
+            应用本身不含模型权重。推荐直接在应用内「模型」页下载安装；
+            也可以在终端运行仓库中的脚本：
 
             ```bash
-            ./scripts/download-model.sh     # ZipVoice，~160 MB，中英
+            ./scripts/download-kokoro.sh    # Kokoro-82M，~135 MB，8 语言，54 预置音色（不支持克隆）
+            ./scripts/download-model.sh     # ZipVoice，~160 MB，中英克隆
             ./scripts/download-voxcpm2.sh   # VoxCPM2，~3.3 GB，30 语言；runner 默认走预编译下载
             ```
 
@@ -123,7 +125,9 @@ jobs:
 
             ### 功能
 
-            - 两个引擎：ZipVoice（ONNX，中英，需参考文本）与 VoxCPM2（GGUF，30 语言，仅需参考音频）
-            - 声音库：参考音频与转录本地保存，一次录音重复使用
+            - 七个本地引擎：ZipVoice（中英克隆）、Kokoro-82M（54 预置音色，不支持克隆）、
+              VoxCPM2（30 语言）、Qwen3-TTS（10 语言）、LongCat-AudioDiT、dots.tts 与 CosyVoice3
+            - 声音库：参考音频与转录本地保存，一次录音重复使用；预置音色引擎自动隐藏录音区
+            - 生成历史、MP3 导出、清单驱动的引擎参数
             - 手机遥控：局域网 HTTPS + 二维码配对 + 设备令牌，可随时撤销
             - 完全本地，无遥测
