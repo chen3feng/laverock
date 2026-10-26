@@ -24,9 +24,10 @@ pub struct KokoroEngine {
 
 impl KokoroEngine {
     pub fn build(dir: &Path, manifest: &Manifest) -> Result<Self> {
-        let k = manifest.kokoro.as_ref().ok_or_else(|| {
-            CoreError::Load(format!("{}: missing [kokoro] section", manifest.id))
-        })?;
+        let k = manifest
+            .kokoro
+            .as_ref()
+            .ok_or_else(|| CoreError::Load(format!("{}: missing [kokoro] section", manifest.id)))?;
 
         // Model-relative paths -> absolute, since the server CWD is unrelated.
         let resolve = |rel: &str| -> String {
@@ -105,9 +106,7 @@ impl KokoroEngine {
         if k.default_sid < 0 || k.default_sid >= num_speakers {
             return Err(CoreError::Load(format!(
                 "{}: default_sid {} out of range (model has {} speakers)",
-                manifest.id,
-                k.default_sid,
-                num_speakers
+                manifest.id, k.default_sid, num_speakers
             )));
         }
 
