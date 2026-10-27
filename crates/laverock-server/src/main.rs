@@ -16,6 +16,7 @@
 mod export;
 mod history;
 mod models;
+mod openai_compat;
 mod profiles;
 mod proxy;
 mod remote;
@@ -1154,6 +1155,13 @@ async fn main() {
         .route(
             "/api/transcribe",
             post(transcribe).layer(DefaultBodyLimit::max(64 * 1024 * 1024)),
+        )
+        // OpenAI-compatible TTS API for off-the-shelf clients.
+        .route("/v1/models", get(openai_compat::list_models))
+        .route("/v1/models/{model_id}", get(openai_compat::get_model))
+        .route(
+            "/v1/audio/speech",
+            post(openai_compat::create_speech).layer(DefaultBodyLimit::max(16 * 1024 * 1024)),
         )
         .route("/api/session", get(session))
         .route("/api/pair/start", post(start_pairing))

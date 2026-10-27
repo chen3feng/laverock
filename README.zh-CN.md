@@ -235,6 +235,31 @@ curl -X POST http://127.0.0.1:8787/api/engines/sherpa-onnx-zipvoice-distill-int8
   -o out.wav
 ```
 
+### OpenAI 兼容 API
+
+针对 OpenAI TTS API 编写的客户端（官方 SDK、Open WebUI、Home Assistant、
+SillyTavern、脚本等）只需把 base URL 改成本机地址即可使用。无需 API key——
+`Authorization` 头会被接受但忽略。
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/v1/models` | 已安装引擎及 `tts-1` 别名 |
+| GET | `/v1/models/{id}` | 单个模型条目 |
+| POST | `/v1/audio/speech` | JSON 请求体 → 音频 |
+
+`model` 填已安装引擎 id，或 `tts-1` / `tts-1-hd` / `gpt-4o-mini-tts`
+（使用所请求声音对应的引擎）。`voice` 对 Kokoro 填预置音色 id（`af_heart`、
+`zm_xiaoni` 等），对克隆引擎填已保存声音的名称或 id。`response_format` 支持
+`wav`（默认）、`mp3`、`pcm`（无头 16 位小端单声道）。错误返回 OpenAI 的
+`{"error": {"message", "type", "param", "code"}}` 结构。
+
+```sh
+curl http://127.0.0.1:8787/v1/audio/speech \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"tts-1","input":"你好，世界。","voice":"zm_xiaoni","response_format":"mp3"}' \
+  -o speech.mp3
+```
+
 ### 配置
 
 | 环境变量 | 默认值 | 用途 |
