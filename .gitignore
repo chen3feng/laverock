@@ -16,6 +16,9 @@
 # Sidecar binaries staged for bundling
 **/binaries/
 
+# Portable MinGit fetched for the Windows installer (scripts/fetch-mingit.sh)
+/crates/laverock-desktop/mingit/
+
 # Tauri generated ACL schemas
 **/gen/schemas/
 

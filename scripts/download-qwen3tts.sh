@@ -47,7 +47,13 @@ esac
 # torch has no wheels for the newest Python, so pick a supported one.
 PYTHON="${QWEN3TTS_PYTHON:-}"
 if [ -z "$PYTHON" ]; then
-  for candidate in python3.12 python3.11 python3.10 python3; do
+  candidates="python3.12 python3.11 python3.10 python3"
+  if lv_is_windows; then
+    # Git-Bash rarely ships python3; the python.org launcher and `python`
+    # are the usual finds on Windows.
+    candidates="python3.12 python3.11 python3.10 python python3 py"
+  fi
+  for candidate in $candidates; do
     if command -v "$candidate" >/dev/null 2>&1; then
       PYTHON="$candidate"
       break
@@ -58,24 +64,30 @@ command -v "$PYTHON" >/dev/null 2>&1 || { echo "a Python 3.10-3.12 interpreter i
 echo "Using $("$PYTHON" --version 2>&1) ($PYTHON)"
 mkdir -p "$MODELS_DIR" "$DEST" "$TOOLS"
 
+# Windows venvs put the interpreter in Scripts/, POSIX in bin/.
+VPY="$(lv_venv_python "$VENV")"
+HFCLI="$(lv_venv_cli "$VENV" huggingface-cli)"
+
 # 1. Isolated environment — Qwen's torch/transformers pins stay here.
-if [ ! -x "$VENV/bin/python" ]; then
+if [ ! -f "$VPY" ]; then
   lv_stage "创建 Python 虚拟环境"
   "$PYTHON" -m venv "$VENV"
 fi
 # Progress bars on even though pip/hf see a pipe, not a terminal.
 export PIP_PROGRESS_BAR=on HF_HUB_DISABLE_PROGRESS_BARS=0
 lv_stage "安装 qwen-tts 依赖（约 2 GB，首次较慢）"
-"$VENV/bin/python" -m pip install --upgrade pip
-"$VENV/bin/python" -m pip install --upgrade "qwen-tts" "huggingface_hub[cli]"
+"$VPY" -m pip install --upgrade pip
+"$VPY" -m pip install --upgrade "qwen-tts" "huggingface_hub[cli]"
 
 # 2. Weights. A dedicated HF cache keeps them next to the engine and lets
-#    the model resolve its tokenizer repo offline later.
-export HF_HOME="$DEST/.hf-cache"
+#    the model resolve its tokenizer repo offline later. The Windows build
+#    of python needs a native E:/.. path, not the MSYS mount.
+HF_CACHE="$(lv_native_path "$DEST/.hf-cache")"
+export HF_HOME="$HF_CACHE"
 lv_stage "下载分词器"
-"$VENV/bin/huggingface-cli" download Qwen/Qwen3-TTS-Tokenizer-12Hz
+"$HFCLI" download Qwen/Qwen3-TTS-Tokenizer-12Hz
 lv_stage "下载模型权重"
-"$VENV/bin/huggingface-cli" download "$MODEL"
+"$HFCLI" download "$MODEL"
 
 # 3. Runner script.
 cp "$SCRIPT_DIR/qwen3tts_runner.py" "$DEST/qwen3tts_runner.py"
@@ -83,7 +95,7 @@ cp "$SCRIPT_DIR/qwen3tts_runner.py" "$DEST/qwen3tts_runner.py"
 # 4. Manifest (absolute paths are allowed and used as-is).
 #    custom_voice exposes the nine preset speakers; voice_design exposes
 #    a free-text voice description field.
-PY="$VENV/bin/python"
+PY="$(lv_native_path "$VPY")"
 PARAMETERS=""
 if [ "$MODE" = "custom_voice" ]; then
   PARAMETERS='"parameters": [
@@ -133,7 +145,7 @@ cat > "$DEST/engine.json" <<EOF
     "device": "auto",
     "dtype": "auto",
     "attn": "sdpa",
-    "env": { "HF_HOME": "$DEST/.hf-cache" }
+    "env": { "HF_HOME": "$HF_CACHE" }
   },
   $PARAMETERS
   "defaults": { "speed": 1.0, "num_steps": 1 }

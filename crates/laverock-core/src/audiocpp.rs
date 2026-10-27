@@ -27,6 +27,7 @@ use std::{
 pub enum Family {
     Dots,
     CosyVoice,
+    VoxCpm2,
 }
 
 impl Family {
@@ -35,6 +36,7 @@ impl Family {
         match self {
             Family::Dots => "dots_tts",
             Family::CosyVoice => "cosyvoice3",
+            Family::VoxCpm2 => "voxcpm2",
         }
     }
 
@@ -42,6 +44,7 @@ impl Family {
         match self {
             Family::Dots => "dots.tts",
             Family::CosyVoice => "CosyVoice3",
+            Family::VoxCpm2 => "VoxCPM2",
         }
     }
 }
@@ -66,6 +69,7 @@ impl AudioCppEngine {
         let section = match family {
             Family::Dots => manifest.dots.as_ref(),
             Family::CosyVoice => manifest.cosyvoice.as_ref(),
+            Family::VoxCpm2 => manifest.voxcpm2.as_ref(),
         };
         let cfg = section.ok_or_else(|| {
             CoreError::Load(format!(
@@ -147,14 +151,15 @@ impl SpeechEngine for AudioCppEngine {
     }
 
     fn synthesize(&self, req: &SynthRequest) -> Result<Audio> {
-        if req.prompt_samples.is_empty() {
+        let has_prompt = !req.prompt_samples.is_empty();
+        if !has_prompt && matches!(self.family, Family::Dots | Family::CosyVoice) {
             return Err(CoreError::BadRequest(format!(
                 "{} 需要一段参考音频（3–10 秒效果最好）",
                 self.family.label()
             )));
         }
         match self.family {
-            Family::Dots => (),
+            Family::Dots | Family::VoxCpm2 => (),
             Family::CosyVoice => {
                 let template = self.param_str(req, "template", "zero_shot");
                 if template == "zero_shot" && self.prompt_text(req).is_none() {
@@ -183,9 +188,14 @@ impl SpeechEngine for AudioCppEngine {
         ));
         std::fs::create_dir_all(&tmp).map_err(CoreError::from)?;
         let out_wav = tmp.join("out.wav");
-        let ref_wav = tmp.join("reference.wav");
-        let bytes = encode_wav(&req.prompt_samples, req.prompt_sr)?;
-        std::fs::write(&ref_wav, bytes).map_err(CoreError::from)?;
+        let ref_wav = if has_prompt {
+            let path = tmp.join("reference.wav");
+            let bytes = encode_wav(&req.prompt_samples, req.prompt_sr)?;
+            std::fs::write(&path, bytes).map_err(CoreError::from)?;
+            Some(path)
+        } else {
+            None
+        };
 
         let seed = self.param_i64(req, "seed", self.seed);
         let mut cmd = Command::new(&self.binary);
@@ -198,10 +208,11 @@ impl SpeechEngine for AudioCppEngine {
             .arg("--backend")
             .arg(&self.backend)
             .arg("--text")
-            .arg(&req.text)
-            .arg("--voice-ref")
-            .arg(&ref_wav)
-            .arg("--seed")
+            .arg(&req.text);
+        if let Some(ref_wav) = &ref_wav {
+            cmd.arg("--voice-ref").arg(ref_wav);
+        }
+        cmd.arg("--seed")
             .arg(seed.to_string())
             .arg("--num-inference-steps")
             .arg(req.num_steps.to_string())
@@ -312,6 +323,13 @@ impl AudioCppEngine {
     fn task(&self, req: &SynthRequest) -> &'static str {
         match self.family {
             Family::Dots => "tts",
+            Family::VoxCpm2 => {
+                if req.prompt_samples.is_empty() {
+                    "tts"
+                } else {
+                    "clon"
+                }
+            }
             Family::CosyVoice => {
                 let template = self.param_str(req, "template", "zero_shot");
                 if template == "instruct" {
@@ -325,6 +343,19 @@ impl AudioCppEngine {
 
     fn add_family_options(&self, req: &SynthRequest, cmd: &mut Command) -> Result<()> {
         match self.family {
+            Family::VoxCpm2 => {
+                // VoxCPM2 shares dots' guidance knob; voice-design text is
+                // passed by the UI as the model's parenthesized description.
+                let guidance = req
+                    .params
+                    .get("guidance")
+                    .and_then(Value::as_f64)
+                    .map(|v| v as f32)
+                    .or(self.guidance);
+                if let Some(guidance) = guidance {
+                    cmd.arg("--guidance-scale").arg(format!("{guidance}"));
+                }
+            }
             Family::Dots => {
                 // x-vector (audio only) or continuation (audio + text).
                 let clone_mode = self.param_str(req, "clone_mode", "xvector");

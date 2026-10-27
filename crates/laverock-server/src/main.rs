@@ -13,6 +13,10 @@
 //! Phone/LAN access (pairing, TLS, device tokens) comes later; until
 //! then the server binds loopback only.
 
+// Release builds run headless as a desktop sidecar: no console window.
+// Debug builds keep the console so the tracing logs stay visible.
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
 mod export;
 mod history;
 mod models;
@@ -1081,8 +1085,31 @@ fn parse_param(spec: &laverock_core::ParamSpec, raw: &str) -> Result<serde_json:
     Ok(value)
 }
 
+/// tracing emits ANSI color codes by default, but the legacy Windows console
+/// (conhost) keeps virtual-terminal processing off, so they show up as raw
+/// `\x1b[32m…` sequences. Enable it so the colors actually render. A no-op
+/// when stdout is not a console (release GUI builds, or redirected output).
+#[cfg(windows)]
+fn enable_ansi_colors() {
+    use windows_sys::Win32::System::Console::{
+        GetConsoleMode, GetStdHandle, SetConsoleMode, ENABLE_VIRTUAL_TERMINAL_PROCESSING,
+        STD_OUTPUT_HANDLE,
+    };
+
+    unsafe {
+        let handle = GetStdHandle(STD_OUTPUT_HANDLE);
+        let mut mode = 0u32;
+        if GetConsoleMode(handle, &mut mode) != 0 {
+            let _ = SetConsoleMode(handle, mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING);
+        }
+    }
+}
+
 #[tokio::main]
 async fn main() {
+    #[cfg(windows)]
+    enable_ansi_colors();
+
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()

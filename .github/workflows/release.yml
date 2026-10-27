@@ -67,6 +67,13 @@ jobs:
         with:
           node-version: 20
 
+      # Windows bundles portable MinGit (bash + coreutils + curl) so model
+      # installer scripts run on machines without Git for Windows/WSL.
+      - name: Fetch MinGit for the Windows bundle
+        if: matrix.name == 'windows-x64'
+        shell: bash
+        run: ./scripts/fetch-mingit.sh
+
       - name: Build bundle
         working-directory: crates/laverock-desktop
         run: npx -y @tauri-apps/cli@2.12.4 build --target ${{ matrix.triple }} --bundles ${{ matrix.bundles }}

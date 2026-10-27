@@ -36,10 +36,7 @@ mkdir -p "$DEST"
 # 1. Shared audio.cpp runtime (also used by the CosyVoice engine).
 TOOLS="${LAVEROCK_TOOLS_DIR:-$ROOT/.tools}"
 BIN="$(lv_audiocpp_bin "$TOOLS" "$AC_VERSION" "$MODELS_DIR")"
-case "$(uname -s)" in
-  Darwin) BACKEND="metal" ;;
-  *)      BACKEND="best" ;;
-esac
+BACKEND="$(lv_audiocpp_backend)"
 
 # 2. Weights (Q8_0 GGUF) from Hugging Face, in parallel ranged requests.
 if [ ! -f "$GGUF" ]; then

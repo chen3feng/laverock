@@ -66,12 +66,19 @@ jobs:
             os: ubuntu-22.04
             exe: ""
             archive: tar.gz
-            # Build on 22.04 for the older glibc. Static, NATIVE off: one
-            # x86-64 baseline (SSE2) binary that runs on every CPU. OpenMP
-            # off so the binary needs no libgomp.so.1 — same choice the
-            # audio.cpp cpu-portable runtime makes.
+            # Build on 22.04 for the older glibc. Static, NATIVE off, and the
+            # SIMD tiers explicitly pinned to the x86-64 (SSE2) floor:
+            # GGML_NATIVE=OFF alone does NOT do this — GGML_AVX2/GGML_FMA
+            # default ON regardless, so an unspecified build SIGILLs on
+            # pre-Haswell CPUs (e.g. Ivy Bridge, which has AVX but not AVX2).
+            # OpenMP off so the binary needs no libgomp.so.1 — same choice
+            # the audio.cpp cpu-portable runtime makes.
             args: >-
               -DGGML_NATIVE=OFF
+              -DGGML_AVX=OFF
+              -DGGML_AVX2=OFF
+              -DGGML_FMA=OFF
+              -DGGML_F16C=OFF
               -DLLAMA_CURL=OFF
               -DLLAMA_OPENSSL=OFF
               -DGGML_OPENMP=OFF
@@ -81,9 +88,14 @@ jobs:
             exe: ".exe"
             archive: zip
             # Static baseline x86-64; GGML_STATIC links the MSVC runtime in
-            # so no VC redist is needed on the user's machine.
+            # so no VC redist is needed. As on Linux, pin the SIMD floor to
+            # SSE2 explicitly so the runner starts on pre-Haswell CPUs.
             args: >-
               -DGGML_NATIVE=OFF
+              -DGGML_AVX=OFF
+              -DGGML_AVX2=OFF
+              -DGGML_FMA=OFF
+              -DGGML_F16C=OFF
               -DLLAMA_CURL=OFF
               -DLLAMA_OPENSSL=OFF
               -DGGML_STATIC=ON
