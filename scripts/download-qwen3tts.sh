@@ -14,9 +14,14 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 . "$SCRIPT_DIR/laverock-lib.sh"
 MODELS_DIR="${LAVEROCK_MODELS_DIR:-$ROOT/models}"
 TOOLS="${LAVEROCK_TOOLS_DIR:-$ROOT/.tools}"
-DEST="$MODELS_DIR/qwen3tts"
 VENV="$TOOLS/qwen-tts-venv"
 VARIANT="${QWEN3TTS_VARIANT:-base}"
+# base keeps its historical directory/id; the other modes sit alongside.
+case "$VARIANT" in
+  base)   ENGINE_ID="qwen3tts"; DEST="$MODELS_DIR/qwen3tts" ;;
+  custom) ENGINE_ID="qwen3tts-custom"; DEST="$MODELS_DIR/qwen3tts-custom" ;;
+  design) ENGINE_ID="qwen3tts-design"; DEST="$MODELS_DIR/qwen3tts-design" ;;
+esac
 
 case "$VARIANT" in
   base)
@@ -25,7 +30,7 @@ case "$VARIANT" in
     ;;
   custom)
     MODEL="${QWEN3TTS_MODEL:-Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice}"
-    MODE="custom_voice"; SPEAKER="Vivian"; EXTRA_CAPS='"presets","instruct"'
+    MODE="custom_voice"; SPEAKER="Vivian"; EXTRA_CAPS='"preset-voices","instruct"'
     NAME="Qwen3-TTS 0.6B (custom voice)"
     ;;
   design)
@@ -76,10 +81,44 @@ lv_stage "下载模型权重"
 cp "$SCRIPT_DIR/qwen3tts_runner.py" "$DEST/qwen3tts_runner.py"
 
 # 4. Manifest (absolute paths are allowed and used as-is).
+#    custom_voice exposes the nine preset speakers; voice_design exposes
+#    a free-text voice description field.
 PY="$VENV/bin/python"
+PARAMETERS=""
+if [ "$MODE" = "custom_voice" ]; then
+  PARAMETERS='"parameters": [
+    {
+      "name": "speaker", "label": "预置音色 / Preset speaker", "type": "choice",
+      "options": [
+        { "value": "Vivian",   "label": "Vivian · 中文女声（明亮年轻） / bright young female" },
+        { "value": "Serena",   "label": "Serena · 中文女声（温柔） / warm gentle female" },
+        { "value": "Uncle_Fu", "label": "Uncle Fu · 中文男声（低沉醇厚） / low mellow male" },
+        { "value": "Dylan",    "label": "Dylan · 北京男声（清透自然） / clear Beijing male" },
+        { "value": "Eric",     "label": "Eric · 成都男声（微哑活力） / lively husky male" },
+        { "value": "Ryan",     "label": "Ryan · English male (dynamic rhythm)" },
+        { "value": "Aiden",    "label": "Aiden · English male (sunny American)" },
+        { "value": "Ono_Anna", "label": "Ono Anna · 日本語女性（轻盈灵动） / playful Japanese female" },
+        { "value": "Sohee",    "label": "Sohee · 한국어 여성（温暖感性） / warm Korean female" }
+      ],
+      "default": "Vivian", "hint": "九个内置预置音色，无需参考音频。"
+    },
+    {
+      "name": "instruct", "label": "语气指令 / Instruct", "type": "text_area",
+      "default": "", "hint": "可选，用自然语言调整语气，如「用兴奋的语气」。"
+    }
+  ],'
+elif [ "$MODE" = "voice_design" ]; then
+  PARAMETERS='"parameters": [
+    {
+      "name": "instruct", "label": "音色描述 / Voice description", "type": "text_area",
+      "default": "", "hint": "必填：用自然语言描述想要的音色，如「一位温柔的年轻女性，语速稍慢」。"
+    }
+  ],'
+fi
+
 cat > "$DEST/engine.json" <<EOF
 {
-  "id": "qwen3tts",
+  "id": "$ENGINE_ID",
   "kind": "qwen3tts",
   "name": "$NAME",
   "languages": ["zh", "en", "ja", "ko", "de", "fr", "ru", "pt", "es", "it"],
@@ -96,6 +135,7 @@ cat > "$DEST/engine.json" <<EOF
     "attn": "sdpa",
     "env": { "HF_HOME": "$DEST/.hf-cache" }
   },
+  $PARAMETERS
   "defaults": { "speed": 1.0, "num_steps": 1 }
 }
 EOF

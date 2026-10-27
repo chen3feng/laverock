@@ -76,7 +76,9 @@ Windows 包未签名——首次打开会有一次 Gatekeeper/SmartScreen 提示
 ./scripts/download-kokoro.sh       # Kokoro-82M，约 135 MB，8 种语言，预置音色
 ./scripts/download-stt.sh          # SenseVoice 语音识别，约 234 MB，录音自动转写
 ./scripts/download-voxcpm2.sh      # VoxCPM2，约 3.3 GB，30 种语言，GGUF
-./scripts/download-qwen3tts.sh     # Qwen3-TTS，隔离 venv + 约 1.5 GB 模型
+./scripts/download-qwen3tts.sh     # Qwen3-TTS 克隆，隔离 venv + 约 1.5 GB 模型
+QWEN3TTS_VARIANT=custom ./scripts/download-qwen3tts.sh  # 9 个预置音色
+QWEN3TTS_VARIANT=design ./scripts/download-qwen3tts.sh  # 1.7B 声音设计
 ./scripts/download-longcat.sh      # LongCat-AudioDiT 1B，隔离 venv + 5.7 GB 权重
 ./scripts/download-dots.sh         # dots.tts SOAR，48 kHz，audio.cpp 运行时 + 3 GB GGUF
 ./scripts/download-cosyvoice.sh    # CosyVoice3 0.5B，2.3 GB GGUF（共用运行时）
@@ -92,7 +94,9 @@ cargo run -p laverock-server
 对应文字；VoxCPM2、Qwen3-TTS 与 dots.tts 仅凭声音即可克隆；CosyVoice3 只有零样本
 模板需要文字（跨语种模板不需要）。Kokoro 完全不使用参考音频——它内置 54 个音色，
 通过清单声明的 `voice` 参数选择，界面会为它隐藏克隆区。Qwen3-TTS 还可以通过
-`QWEN3TTS_VARIANT=custom|design` 使用预置音色和声音设计。新增一个受支持类型的
+两种非克隆安装（共用同一 venv）：`QWEN3TTS_VARIANT=custom` 提供九个内置说话人
+（Vivian、Ryan、Sohee 等，合成页选择，无需参考音频）；`QWEN3TTS_VARIANT=design`
+为 1.7B 模型，通过 instruct 字段的自然语言描述来创造音色。新增一个受支持类型的
 模型只需再放一个带清单的目录；需要 Python 的引擎在 `.tools/` 下各自独立的 venv 中
 运行，绝不进入核心进程。
 

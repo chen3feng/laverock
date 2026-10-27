@@ -104,6 +104,23 @@ impl SpeechEngine for Qwen3TtsEngine {
                 "Qwen3-TTS 克隆模式需要一段参考音频（3 秒以上效果更好）".into(),
             ));
         }
+        if self.mode == "voice_design" {
+            let has_instruct = req
+                .params
+                .get("instruct")
+                .and_then(|v| v.as_str())
+                .map(|s| !s.trim().is_empty())
+                .unwrap_or(false)
+                || self
+                    .instruct
+                    .as_deref()
+                    .is_some_and(|s| !s.trim().is_empty());
+            if !has_instruct {
+                return Err(CoreError::BadRequest(
+                    "声音设计模式需要填写音色描述（instruct）".into(),
+                ));
+            }
+        }
 
         let _guard = self.run_lock.lock().expect("qwen3tts run lock");
 
@@ -138,10 +155,27 @@ impl SpeechEngine for Qwen3TtsEngine {
         if let Some(language) = &self.language {
             cmd.arg("--language").arg(language);
         }
-        if let Some(speaker) = &self.speaker {
+        // Per-request overrides win over the manifest's defaults, so a
+        // single custom_voice install can offer all preset speakers and a
+        // voice_design install takes its description from the request.
+        let speaker = req
+            .params
+            .get("speaker")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.trim().is_empty())
+            .map(str::to_string)
+            .or_else(|| self.speaker.clone());
+        if let Some(speaker) = speaker {
             cmd.arg("--speaker").arg(speaker);
         }
-        if let Some(instruct) = &self.instruct {
+        let instruct = req
+            .params
+            .get("instruct")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.trim().is_empty())
+            .map(str::to_string)
+            .or_else(|| self.instruct.clone());
+        if let Some(instruct) = instruct {
             cmd.arg("--instruct").arg(instruct);
         }
         for (key, value) in &self.env {

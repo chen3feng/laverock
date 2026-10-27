@@ -790,6 +790,20 @@ const PARAM_I18N = {
     label: { zh: '音色', en: 'Voice' },
     hint: { zh: 'Kokoro 只提供预置音色，不支持用自己的音频克隆。', en: 'Kokoro offers preset voices only; it cannot clone your own audio.' },
   },
+  'qwen3tts:speaker': {
+    label: { zh: '预置音色', en: 'Preset speaker' },
+    hint: {
+      zh: '九个内置说话人，无需参考音频。',
+      en: 'Nine built-in speakers; no reference clip needed.',
+    },
+  },
+  'qwen3tts:instruct': {
+    label: { zh: '语气指令', en: 'Instruct' },
+    hint: {
+      zh: '可选，用自然语言调整语气，如「用兴奋的语气」。',
+      en: 'Optional natural-language tone instruction, e.g. "speak excitedly".',
+    },
+  },
 };
 
 function paramI18n(kind, name) {
