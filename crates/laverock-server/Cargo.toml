@@ -26,3 +26,4 @@ serde.workspace = true
 serde_json.workspace = true
 base64 = "0.22"
 tokio-stream = "0.1"
+zip = { version = "2", default-features = false, features = ["deflate"] }

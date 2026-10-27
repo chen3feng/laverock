@@ -200,6 +200,173 @@ impl ProfileStore {
         fs::remove_dir_all(dir)?;
         Ok(())
     }
+
+    /// Pack a voice into a portable `.lvvoice` archive:
+    /// `manifest.json` (format version + metadata) and `reference.wav`.
+    /// The WAV is stored uncompressed — PCM already resists deflate well,
+    /// and ZIP_STORED keeps packing/extraction instant.
+    pub fn export_zip(&self, id: &str) -> Result<Vec<u8>> {
+        use std::io::Write;
+        use zip::{write::SimpleFileOptions, CompressionMethod, ZipWriter};
+
+        let (meta, wav) = self.get(id)?;
+        let exported_at = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let manifest = serde_json::json!({
+            "format": "laverock-voice",
+            "version": 1,
+            "name": meta.name,
+            "prompt_text": meta.prompt_text,
+            "engine_id": meta.engine_id,
+            "exported_at": exported_at,
+        });
+
+        let mut zip = ZipWriter::new(std::io::Cursor::new(Vec::new()));
+        let opts = SimpleFileOptions::default().compression_method(CompressionMethod::Stored);
+        zip.start_file("manifest.json", opts)
+            .map_err(|e| CoreError::Wav(format!("cannot write archive: {e}")))?;
+        zip.write_all(serde_json::to_vec_pretty(&manifest)?.as_slice())
+            .map_err(|e| CoreError::Wav(format!("cannot write archive: {e}")))?;
+        zip.start_file("reference.wav", opts)
+            .map_err(|e| CoreError::Wav(format!("cannot write archive: {e}")))?;
+        zip.write_all(&wav)
+            .map_err(|e| CoreError::Wav(format!("cannot write archive: {e}")))?;
+        let cursor = zip
+            .finish()
+            .map_err(|e| CoreError::Wav(format!("cannot finish archive: {e}")))?;
+        Ok(cursor.into_inner())
+    }
+
+    /// Import a `.lvvoice` archive, creating a fresh id. A name clash
+    /// gets a numeric suffix. Returns the imported profile.
+    pub fn import_zip(&self, bytes: &[u8]) -> Result<ProfileMeta> {
+        use std::io::Read;
+        use zip::ZipArchive;
+
+        let mut archive = ZipArchive::new(std::io::Cursor::new(bytes))
+            .map_err(|e| CoreError::BadRequest(format!("无效的音色文件（不是 ZIP）：{e}")))?;
+
+        let mut manifest: Option<serde_json::Value> = None;
+        let mut wav: Option<Vec<u8>> = None;
+        for i in 0..archive.len() {
+            let mut file = archive
+                .by_index(i)
+                .map_err(|e| CoreError::BadRequest(format!("无法读取音色文件：{e}")))?;
+            if file.is_dir() {
+                continue;
+            }
+            match file.name() {
+                "manifest.json" => {
+                    let mut buf = String::new();
+                    file.read_to_string(&mut buf)
+                        .map_err(|e| CoreError::BadRequest(format!("manifest 读取失败：{e}")))?;
+                    manifest = Some(serde_json::from_str(&buf)?);
+                }
+                "reference.wav" => {
+                    let mut buf = Vec::new();
+                    file.read_to_end(&mut buf)
+                        .map_err(|e| CoreError::BadRequest(format!("参考音频读取失败：{e}")))?;
+                    wav = Some(buf);
+                }
+                _ => {}
+            }
+        }
+
+        let manifest =
+            manifest.ok_or_else(|| CoreError::BadRequest("音色文件缺少 manifest.json".into()))?;
+        if manifest.get("format").and_then(|v| v.as_str()) != Some("laverock-voice") {
+            return Err(CoreError::BadRequest(
+                "不是 laverock 音色文件（format 不匹配）".into(),
+            ));
+        }
+        let wav = wav.ok_or_else(|| CoreError::BadRequest("音色文件缺少 reference.wav".into()))?;
+        let name = manifest
+            .get("name")
+            .and_then(|v| v.as_str())
+            .unwrap_or("导入的声音")
+            .trim()
+            .to_string();
+        let prompt_text = manifest
+            .get("prompt_text")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .trim()
+            .to_string();
+        let engine_id = manifest
+            .get("engine_id")
+            .and_then(|v| v.as_str())
+            .map(str::to_string);
+
+        // Validate the clip and enforce the size limit like a recording.
+        decode_wav(&wav)?;
+        if wav.len() > MAX_REFERENCE_BYTES {
+            return Err(CoreError::BadRequest("参考音频超过 20 MB".into()));
+        }
+        let name = if name.is_empty() {
+            "导入的声音".to_string()
+        } else {
+            self.unique_name(&name)
+        };
+        if prompt_text.is_empty() {
+            // An imported clip may legitimately carry no transcript.
+            self.create_without_transcript(&name, engine_id, &wav)
+        } else {
+            self.create(&name, &prompt_text, engine_id, &wav)
+        }
+    }
+
+    /// A name not already used by another voice, suffixed like "Name (2)".
+    fn unique_name(&self, wanted: &str) -> String {
+        let existing: std::collections::HashSet<String> = self
+            .list()
+            .map(|ps| ps.into_iter().map(|p| p.meta.name).collect())
+            .unwrap_or_default();
+        if !existing.contains(wanted) {
+            return wanted.to_string();
+        }
+        for n in 2..1000 {
+            let candidate = format!("{wanted} ({n})");
+            if !existing.contains(&candidate) {
+                return candidate;
+            }
+        }
+        // Extremely unlikely; stamp with time to guarantee uniqueness.
+        let stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_secs() % 1_000_000)
+            .unwrap_or(0);
+        format!("{wanted} ({stamp})")
+    }
+
+    fn create_without_transcript(
+        &self,
+        name: &str,
+        engine_id: Option<String>,
+        wav: &[u8],
+    ) -> Result<ProfileMeta> {
+        let created_at = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let id = format!("p{created_at}-{:04x}", random_suffix());
+        let dir = self.root.join(&id);
+        fs::create_dir_all(&dir)?;
+        let meta = ProfileMeta {
+            id: id.clone(),
+            name: name.to_string(),
+            prompt_text: String::new(),
+            engine_id,
+            created_at,
+        };
+        fs::write(dir.join("reference.wav"), wav)?;
+        write_atomic(
+            &dir.join("profile.json"),
+            &serde_json::to_vec_pretty(&meta)?,
+        )?;
+        Ok(meta)
+    }
 }
 
 /// Duration and size of a reference clip; missing or unreadable clips

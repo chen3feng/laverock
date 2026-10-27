@@ -332,7 +332,11 @@
     <section id="page-voices" class="page">
       <div class="page-head" style="display:flex;align-items:flex-end;justify-content:space-between;gap:12px;flex-wrap:wrap">
         <div><h1 data-i18n="voices.title">语音素材</h1><p class="sub" data-i18n="voices.sub">保存的参考声音可以复用到任何克隆引擎。</p></div>
-        <button id="newVoiceBtn" type="button" data-i18n="voice.new">＋ 新建声音</button>
+        <div style="display:flex;gap:8px">
+          <button id="importVoiceBtn" class="ghost" type="button" data-i18n="voice.import">⬆ 导入声音</button>
+          <button id="newVoiceBtn" type="button" data-i18n="voice.new">＋ 新建声音</button>
+          <input id="importVoiceFile" type="file" accept=".zip,.lvvoice.zip" hidden />
+        </div>
       </div>
 
       <div class="card" id="newVoiceCard" hidden>
@@ -554,6 +558,9 @@ const I18N = {
     'voice.prompt': '参考音频对应文字（ZipVoice 必填）',
     'voice.prompt.ph': '录音里说了什么就填什么',
     'voice.save': '保存到声音库', 'cancel': '取消',
+    'voice.import': '⬆ 导入声音', 'voice.exported': '已导出声音',
+    'voice.imported': '已导入声音「{name}」', 'voice.import.fail': '导入失败',
+    'voice.export.fail': '导出失败',
     'voices.empty': '还没有保存的声音。点击「新建声音」录音或上传一段 3–10 秒的参考音频。',
 
     'models.title': '模型',
@@ -630,6 +637,9 @@ const I18N = {
     'voice.prompt': 'Reference transcript (required for ZipVoice)',
     'voice.prompt.ph': 'Write exactly what the recording says',
     'voice.save': 'Save to library', 'cancel': 'Cancel',
+    'voice.import': '⬆ Import voice', 'voice.exported': 'Voice exported',
+    'voice.imported': 'Imported voice "{name}"', 'voice.import.fail': 'Import failed',
+    'voice.export.fail': 'Export failed',
     'voices.empty': 'No saved voices yet. Click "New voice" to record or upload a 3–10 s reference clip.',
 
     'models.title': 'Models',
@@ -1422,10 +1432,12 @@ function renderVoices() {
       <div class="voice-actions">
         <button class="ghost small play" type="button">${previewId === p.id ? t('stop') : t('preview')}</button>
         <button class="ghost small edit" type="button">${lang === 'en' ? 'Edit' : '编辑'}</button>
+        <button class="ghost small export" type="button">${lang === 'en' ? 'Export' : '导出'}</button>
         <button class="ghost small danger del" type="button">${lang === 'en' ? 'Delete' : '删除'}</button>
       </div>`;
     el.querySelector('.play').onclick = () => togglePreview(p.id);
     el.querySelector('.edit').onclick = () => editProfile(p);
+    el.querySelector('.export').onclick = () => exportProfile(p);
     el.querySelector('.del').onclick = () => deleteProfile(p);
     grid.appendChild(el);
   }
@@ -1516,6 +1528,39 @@ async function deleteProfile(p) {
   await loadProfiles();
 }
 
+function voiceFileName(name, ext) {
+  const stem = String(name || 'voice').trim().replace(/[\\/:*?"<>|]+/g, '_').replace(/\s+/g, '-') || 'voice';
+  return `${stem}.${ext}`;
+}
+
+async function exportProfile(p) {
+  try {
+    const res = await fetch(`/api/profiles/${encodeURIComponent(p.id)}/export`);
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.error || res.statusText);
+    }
+    await saveBlob(await res.blob(), voiceFileName(p.name, 'lvvoice.zip'));
+    toast(lang === 'en' ? 'Voice exported' : '已导出声音');
+  } catch (e) {
+    toast((lang === 'en' ? 'Export failed: ' : '导出失败：') + localizeError(e.message), true);
+  }
+}
+
+async function importProfile(file) {
+  const fd = new FormData();
+  fd.append('file', file, file.name || 'voice.lvvoice.zip');
+  try {
+    const p = await api('/api/profiles/import', { method: 'POST', body: fd });
+    await loadProfiles();
+    toast((lang === 'en' ? 'Imported voice "{name}"' : '已导入声音「{name}」').replace('{name}', p.name));
+    return p;
+  } catch (e) {
+    toast((lang === 'en' ? 'Import failed: ' : '导入失败：') + localizeError(e.message), true);
+    return null;
+  }
+}
+
 async function createProfile(name, promptText, blob, engineId) {
   const en = lang === 'en';
   if (!blob) throw new Error(en ? 'Choose or record a reference voice first' : '请先选择或录制参考声音');
@@ -1563,6 +1608,12 @@ $('saveprofile').onclick = async () => {
   }
 };
 
+$('importVoiceBtn').onclick = () => $('importVoiceFile').click();
+$('importVoiceFile').onchange = async function () {
+  const file = this.files[0];
+  this.value = '';
+  if (file) await importProfile(file);
+};
 $('newVoiceBtn').onclick = () => {
   const card = $('newVoiceCard');
   card.hidden = !card.hidden;
