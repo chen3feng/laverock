@@ -66,15 +66,16 @@ mkdir -p "$MODELS_DIR" "$DEST" "$TOOLS"
 
 # Windows venvs put the interpreter in Scripts/, POSIX in bin/.
 VPY="$(lv_venv_python "$VENV")"
-HFCLI="$(lv_venv_cli "$VENV" huggingface-cli)"
 
 # 1. Isolated environment — Qwen's torch/transformers pins stay here.
 if [ ! -f "$VPY" ]; then
   lv_stage "创建 Python 虚拟环境"
   "$PYTHON" -m venv "$VENV"
 fi
-# Progress bars on even though pip/hf see a pipe, not a terminal.
-export PIP_PROGRESS_BAR=on HF_HUB_DISABLE_PROGRESS_BARS=0
+# Use the validated venv interpreter for the download helpers' JSON parsing.
+export LV_PY="$VPY"
+# Progress bars on even though pip sees a pipe, not a terminal.
+export PIP_PROGRESS_BAR=on
 lv_stage "安装 qwen-tts 依赖（约 2 GB，首次较慢）"
 "$VPY" -m pip install --upgrade pip
 # The default PyPI torch wheel is CPU-only on Windows, so an NVIDIA machine
@@ -83,17 +84,16 @@ lv_stage "安装 qwen-tts 依赖（约 2 GB，首次较慢）"
 if lv_is_windows && lv_has_nvidia; then
   "$VPY" -m pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu130
 fi
-"$VPY" -m pip install --upgrade "qwen-tts" "huggingface_hub[cli]"
+"$VPY" -m pip install --upgrade "qwen-tts"
 
-# 2. Weights. A dedicated HF cache keeps them next to the engine and lets
-#    the model resolve its tokenizer repo offline later. The Windows build
-#    of python needs a native E:/.. path, not the MSYS mount.
-HF_CACHE="$(lv_native_path "$DEST/.hf-cache")"
-export HF_HOME="$HF_CACHE"
-lv_stage "下载分词器"
-"$HFCLI" download Qwen/Qwen3-TTS-Tokenizer-12Hz
-lv_stage "下载模型权重"
-"$HFCLI" download "$MODEL"
+# 2. Weights. The model repo already bundles its speech tokenizer under
+#    speech_tokenizer/ plus the text tokenizer, so download it whole into one
+#    plain directory and load by path — no HF cache and fully offline.
+#    resolve-URL GET/range requests (not `hf download`) keep this working
+#    through hf-mirror.com, whose redirects huggingface_hub 0.36 rejects.
+WEIGHTS="$DEST/weights"
+lv_stage "下载模型与分词器（首次约 2.5 GB）"
+lv_hf_download_repo "$MODEL" "$WEIGHTS" 8
 
 # 3. Runner script.
 cp "$SCRIPT_DIR/qwen3tts_runner.py" "$DEST/qwen3tts_runner.py"
@@ -144,14 +144,14 @@ cat > "$DEST/engine.json" <<EOF
   "qwen3tts": {
     "python": "$PY",
     "script": "qwen3tts_runner.py",
-    "model": "$MODEL",
+    "model": "weights",
     "mode": "$MODE",
     "speaker": "$SPEAKER",
     "language": "Auto",
     "device": "auto",
     "dtype": "auto",
     "attn": "sdpa",
-    "env": { "HF_HOME": "$HF_CACHE", "PYTHONIOENCODING": "utf-8" }
+    "env": { "PYTHONIOENCODING": "utf-8" }
   },
   $PARAMETERS
   "defaults": { "speed": 1.0, "num_steps": 1 }
