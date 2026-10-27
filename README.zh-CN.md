@@ -74,6 +74,7 @@ Windows 包未签名——首次打开会有一次 Gatekeeper/SmartScreen 提示
 # 1. 下载模型（可重复执行）
 ./scripts/download-model.sh        # ZipVoice，约 160 MB，中英，ONNX
 ./scripts/download-kokoro.sh       # Kokoro-82M，约 135 MB，8 种语言，预置音色
+./scripts/download-stt.sh          # SenseVoice 语音识别，约 234 MB，录音自动转写
 ./scripts/download-voxcpm2.sh      # VoxCPM2，约 3.3 GB，30 种语言，GGUF
 ./scripts/download-qwen3tts.sh     # Qwen3-TTS，隔离 venv + 约 1.5 GB 模型
 ./scripts/download-longcat.sh      # LongCat-AudioDiT 1B，隔离 venv + 5.7 GB 权重
@@ -125,6 +126,9 @@ CosyVoice3（FunAudioLLM）是 0.5B 流式 LLM TTS，与 dots.tts 共用 audio.c
 文字稿，相似度最高）、跨语种克隆（仅凭声音，文字稿不可靠时使用）和指令控制
 （用文字描述语气，例如「用温和的语气，语速稍慢」）。Top-K 与流解码步数可逐次
 调整，长文本由运行时分段。
+
+安装可选的 SenseVoice 语音识别模型（`download-stt.sh`）后，录音或上传的参考音频会
+自动转写并填入文字稿，也可用「转写」按钮手动重跑；支持中英日韩粤，ONNX 本地推理。
 
 录制或选择 3–10 秒干净的参考人声，填入与录音完全一致的文字稿（ZipVoice 靠它对齐
 音色和韵律），输入要合成的文字，点击生成即可。
@@ -205,6 +209,7 @@ macOS 会弹窗请求权限，之后会被记住。
 | POST | `/api/profiles` | multipart：`name`、`prompt_text`、`prompt`（WAV）→ 保存声音 |
 | GET | `/api/profiles/:id/audio` | 某条已保存声音的参考音频 |
 | POST | `/api/audio/mp3` | 请求体：WAV → MP3（需要 ffmpeg 或 lame） |
+| POST | `/api/transcribe` | multipart：`audio`（WAV）→ 转写文字（需下载 SenseVoice 模型） |
 | POST | `/api/profiles/:id` | multipart：`name`、`prompt_text`、可选 `prompt` → 编辑声音 |
 | DELETE | `/api/profiles/:id` | 删除已保存声音 |
 | GET | `/api/history` | 已生成音频，最新在前 |
