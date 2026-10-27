@@ -77,6 +77,12 @@ fi
 export PIP_PROGRESS_BAR=on HF_HUB_DISABLE_PROGRESS_BARS=0
 lv_stage "安装 qwen-tts 依赖（约 2 GB，首次较慢）"
 "$VPY" -m pip install --upgrade pip
+# The default PyPI torch wheel is CPU-only on Windows, so an NVIDIA machine
+# would silently fall back to CPU inference. Install a CUDA build first; the
+# qwen-tts install below then sees torch/torchaudio as already satisfied.
+if lv_is_windows && lv_has_nvidia; then
+  "$VPY" -m pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu130
+fi
 "$VPY" -m pip install --upgrade "qwen-tts" "huggingface_hub[cli]"
 
 # 2. Weights. A dedicated HF cache keeps them next to the engine and lets
@@ -145,7 +151,7 @@ cat > "$DEST/engine.json" <<EOF
     "device": "auto",
     "dtype": "auto",
     "attn": "sdpa",
-    "env": { "HF_HOME": "$HF_CACHE" }
+    "env": { "HF_HOME": "$HF_CACHE", "PYTHONIOENCODING": "utf-8" }
   },
   $PARAMETERS
   "defaults": { "speed": 1.0, "num_steps": 1 }

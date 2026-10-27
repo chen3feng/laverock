@@ -10,6 +10,10 @@
 # The markers are stripped from the visible log; everything else the
 # scripts print is shown as before.
 
+# Python subprocesses (huggingface-cli, runners) print emoji/CJK on
+# Windows; force UTF-8 stdout so cp1252 never raises UnicodeEncodeError.
+export PYTHONIOENCODING=utf-8
+
 # lv_stage <label>
 lv_stage() {
   printf '@@LV stage %s\n' "$*"
@@ -336,7 +340,11 @@ lv_fetch_parallel() {
         : >"$dest.part$i"
       fi
       [ "$have" -eq "$want" ] && continue
-      curl -sSL --fail --retry 5 --retry-delay 2 --retry-all-errors \
+      # No --retry-all-errors: it makes curl re-request a fixed `-r` range
+      # after a mid-transfer reset (error 18) and append it again, so the
+      # .part file grows past `want`. The three-pass loop above is what
+      # resumes a partial slice, by re-computing `have` and the range.
+      curl -sSL --fail --retry 5 --retry-delay 2 \
         -r "$((s + have))-$e" "$url" >>"$dest.part$i" &
       pids+=($!)
     done
