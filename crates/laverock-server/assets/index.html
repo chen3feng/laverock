@@ -860,6 +860,52 @@ let mp3Supported = false;
 let lastSynthBlob = null;
 let serverSettings = null;
 
+// ---------------------------------------------------------------- downloads
+
+// Save a blob while letting the user choose the directory and file name:
+// 1. File System Access API (Chrome/Edge/WebView2): a native Save As
+//    dialog with an editable name;
+// 2. anchor download: desktop WKWebView forwards it to the native
+//    download hook (which shows the same kind of panel), plain browsers
+//    use their download directory with the suggested name.
+async function saveBlob(blob, suggestedName) {
+  if (window.showSaveFilePicker) {
+    try {
+      const ext = (suggestedName.match(/\.([a-z0-9]+)$/i) || [, ''])[1].toLowerCase();
+      const types = ext
+        ? [{ description: ext.toUpperCase() + ' audio', accept: { [`audio/${ext === 'mp3' ? 'mpeg' : ext}`]: ['.' + ext] } }]
+        : [];
+      const handle = await window.showSaveFilePicker({ suggestedName, types });
+      const writable = await handle.createWritable();
+      await writable.write(blob);
+      await writable.close();
+      return;
+    } catch (e) {
+      if (e && e.name === 'AbortError') return; // user cancelled the panel
+      // fall through to the anchor path on any other failure
+    }
+  }
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = suggestedName;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 10000);
+}
+
+function audioFileName(ext, engineId) {
+  const d = new Date();
+  const p = (n) => String(n).padStart(2, '0');
+  const stamp = `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
+  let engine = (engineId || '').replace(/^sherpa-onnx-/, '');
+  if (engine.length > 24) {
+    engine = engine.slice(0, 25).split('-').slice(0, -1).join('-');
+  }
+  return `laverock-${stamp}${engine ? '-' + engine : ''}.${ext}`;
+}
+
 const esc = (value) => String(value ?? '').replace(/[&<>"']/g, (c) => (
   { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
 ));
@@ -1810,6 +1856,11 @@ $('go').onclick = async () => {
     player.play().catch(() => {});
     const dl = $('download');
     dl.href = audioUrl;
+    dl.download = audioFileName('wav', engine && engine.id);
+    dl.onclick = (event) => {
+      event.preventDefault();
+      saveBlob(blob, audioFileName('wav', engine && engine.id));
+    };
     dl.hidden = false;
     // Remember the WAV so the MP3 link can convert it on demand.
     lastSynthBlob = blob;
@@ -2057,19 +2108,44 @@ function renderHistory() {
     audio.preload = 'none';
     audio.src = `/api/history/${encodeURIComponent(h.id)}/audio`;
 
+    const saveFromUrl = async (el, url, name, busyLabel) => {
+      const label = el.textContent;
+      el.style.pointerEvents = 'none';
+      el.textContent = busyLabel;
+      try {
+        const res = await fetch(url);
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        await saveBlob(await res.blob(), name);
+      } catch (e) {
+        toast((lang === 'en' ? 'Download failed: ' : '下载失败：') + localizeError(e.message), true);
+      } finally {
+        el.style.pointerEvents = '';
+        el.textContent = label;
+      }
+    };
+
     const dl = document.createElement('a');
     dl.className = 'hint';
     dl.href = audio.src;
-    dl.download = `laverock-${h.id}.wav`;
     dl.textContent = t('download.wav');
+    dl.onclick = (e) => {
+      e.preventDefault();
+      saveFromUrl(dl, audio.src, `laverock-${h.id}.wav`,
+        lang === 'en' ? 'Preparing…' : '准备中…');
+    };
 
     let mp3 = null;
     if (mp3Supported) {
       mp3 = document.createElement('a');
       mp3.className = 'hint';
       mp3.href = `/api/history/${encodeURIComponent(h.id)}/audio?format=mp3`;
-      mp3.download = `laverock-${h.id}.mp3`;
       mp3.textContent = t('download.mp3');
+      const mp3Url = mp3.href;
+      mp3.onclick = (e) => {
+        e.preventDefault();
+        saveFromUrl(mp3, mp3Url, `laverock-${h.id}.mp3`,
+          lang === 'en' ? 'Converting…' : '转换中…');
+      };
     }
 
     const del = document.createElement('button');
@@ -2477,14 +2553,8 @@ $('downloadMp3').onclick = async (event) => {
       throw new Error(msg);
     }
     const mp3 = await res.blob();
-    const url = URL.createObjectURL(mp3);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'laverock.mp3';
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 10000);
+    const engine = engines.find((x) => x.id === $('engine').value);
+    await saveBlob(mp3, audioFileName('mp3', engine && engine.id));
   } catch (e) {
     toast((lang === 'en' ? 'MP3 export failed: ' : '导出 MP3 失败：') + localizeError(e.message), true);
   } finally {
