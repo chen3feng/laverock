@@ -64,6 +64,8 @@ if [ ! -f "$VPY" ]; then
   lv_stage "创建 Python 虚拟环境"
   "$PYTHON" -m venv "$VENV"
 fi
+# Use the validated venv interpreter for the download helpers' JSON parsing.
+export LV_PY="$VPY"
 export PIP_PROGRESS_BAR=on
 lv_stage "安装依赖（PyTorch 与 transformers 5，约 1–2 GB）"
 "$VPY" -m pip install --upgrade pip
@@ -78,56 +80,21 @@ fi
 # back to it when converting, so keep the library available.
 "$VPY" -m pip install sentencepiece
 
-# huggingface_hub 2.x ships `hf`; older versions ship `huggingface-cli`.
-HFCLI="$(lv_venv_cli "$VENV" hf)"
-[ -f "$HFCLI" ] || HFCLI="$(lv_venv_cli "$VENV" huggingface-cli)"
-
-# 3. Weights and tokenizer, both local to the model directory so the app
-#    runs fully offline afterwards.
-export HF_HUB_DISABLE_PROGRESS_BARS=0
-# Xet transfers do not reliably use the configured HTTP proxy and report
-# no byte progress, so use plain HTTPS downloads here.
-export HF_HUB_DISABLE_XET=1
-
-# Expected size from the hub API, for a real percentage in the UI.
-HF_BASE="${HF_ENDPOINT:-https://huggingface.co}"
-HF_BASE="${HF_BASE%/}"
-
-# Small repo files (config.json, README, images) come straight from the
-# HF CLI; the multi-GB blob below uses parallel ranged curl instead.
-lv_stage "下载模型配置"
-"$HFCLI" download "$MODEL" --local-dir "$WEIGHTS_N" --exclude "*.safetensors"
-
-# The safetensors blob dominates the download and is the most fragile part
-# of an HF-CLI transfer: one flaky-proxy reset aborts the whole stream.
-# Fetch it with the same parallel ranged curl the VoxCPM2 engine uses, so
-# a reset costs only one unfinished slice and it resumes from partials.
-WEIGHT_FILE="model.safetensors"
-WEIGHT_TOTAL=$(curl -sL "$HF_BASE/api/models/$MODEL/tree/main" \
-  | "$VPY" -c 'import json,sys
-try:
-    print(next(f.get("size", 0) for f in json.load(sys.stdin)
-               if f.get("path") == "model.safetensors"))
-except Exception:
-    print(0)' 2>/dev/null || echo 0)
-if [ "${WEIGHT_TOTAL:-0}" -le 0 ]; then
-  echo "cannot determine the weight size for $MODEL" >&2
-  exit 1
-fi
-WEIGHT_URL="$HF_BASE/$MODEL/resolve/main/$WEIGHT_FILE"
-if [ ! -f "$WEIGHTS/$WEIGHT_FILE" ] || \
-   [ "$(lv_filesize "$WEIGHTS/$WEIGHT_FILE")" -ne "$WEIGHT_TOTAL" ]; then
-  lv_stage "下载模型权重（${SIZE_NOTE}）"
-  lv_fetch_parallel "$WEIGHT_URL" "$WEIGHTS/$WEIGHT_FILE" "$WEIGHT_TOTAL" 8
-fi
+# 3. Weights and tokenizer in plain local directories so the app runs fully
+#    offline afterwards. Files come through resolve-URL GET/range requests
+#    (lv_hf_download_repo), not `hf download`: huggingface_hub 0.36's
+#    metadata HEAD negotiation rejects hf-mirror redirects, and a single
+#    flaky-proxy reset used to abort the multi-GB stream. The helper resumes
+#    per file and skips files already present with the right size.
+lv_stage "下载模型权重（${SIZE_NOTE}）"
+lv_hf_download_repo "$MODEL" "$WEIGHTS" 8
 # An interrupted earlier attempt can leave multi-GB partials behind.
 find "$WEIGHTS/.cache" -name "*.incomplete" -delete 2>/dev/null || true
 lv_stage "下载 UMT5 分词器"
-# Explicit filenames: `hf download` treats extra positionals as a file
-# list (and then ignores --include).
-"$HFCLI" download google/umt5-base \
-  tokenizer.json tokenizer_config.json special_tokens_map.json spiece.model \
-  --local-dir "$TOKENIZER_N"
+# Only the four tokenizer files: the umt5-base repo also ships multi-GB
+# encoder weights that LongCat does not load.
+lv_hf_download_repo google/umt5-base "$TOKENIZER" 8 \
+  tokenizer.json tokenizer_config.json special_tokens_map.json spiece.model
 
 # 4. Runner plus the audiodit package next to it.
 lv_stage "安装运行脚本"
@@ -156,7 +123,8 @@ cat > "$DEST/engine.json" <<EOF
     "dtype": "auto",
     "guidance": "apg",
     "cfg_strength": 4.0,
-    "seed": 1024
+    "seed": 1024,
+    "env": { "PYTHONIOENCODING": "utf-8" }
   },
   "parameters": [
     { "name": "num_steps", "label": "采样步数 (NFE)", "type": "int",

@@ -393,6 +393,122 @@ lv_fetch_parallel() {
   lv_progress 100
 }
 
+# lv_pybin: a usable interpreter for the tiny JSON/size helpers below.
+# Callers that already built a venv set LV_PY to its (validated) python;
+# otherwise fall back to a system one (on Windows `python3` may be only the
+# non-functional Store alias, so prefer plain `python` there).
+lv_pybin() {
+  if [ -n "${LV_PY:-}" ]; then
+    printf '%s\n' "$LV_PY"
+  elif lv_is_windows; then
+    command -v python 2>/dev/null || command -v python3 2>/dev/null
+  else
+    command -v python3 2>/dev/null || command -v python 2>/dev/null
+  fi
+}
+
+# lv_hf_repo_files <repo> [hf_base]
+#
+# Print `size<TAB>path` for every regular file on a repo's main branch via
+# the plain tree API (a GET of JSON; no hub metadata headers). Mirrors such
+# as hf-mirror.com serve this even though huggingface_hub 0.36's metadata
+# HEAD negotiation rejects their redirects (the X-Repo-Commit header is
+# dropped -> FileMetadataError).
+lv_hf_repo_files() {
+  local repo="$1" base="${2:-${HF_ENDPOINT:-https://huggingface.co}}"
+  base="${base%/}"
+  local py; py="$(lv_pybin)"
+  if [ -z "$py" ]; then
+    echo "python3 is required to list $repo" >&2
+    return 1
+  fi
+  curl -fsSL --retry 5 --retry-delay 2 \
+    "$base/api/models/$repo/tree/main?recursive=true" \
+    | "$py" -c '
+import json, sys
+try:
+    entries = json.load(sys.stdin)
+except Exception:
+    sys.exit(2)
+if not isinstance(entries, list):
+    sys.exit(2)
+for e in entries:
+    if e.get("type") == "file" and e.get("path"):
+        print("%s\t%s" % (e.get("size", 0), e["path"]))
+'
+}
+
+# lv_hf_download_repo <repo> <dest_dir> [workers] [file ...]
+#
+# Download an HF repo revision into <dest_dir>, preserving subdirectories,
+# using only resolve-URL GET/range requests (works against hf-mirror.com or
+# the official endpoint behind a proxy; honors HF_ENDPOINT and *_proxy).
+# Files >= 8 MiB go through lv_fetch_parallel (resumable ranged slices);
+# smaller files use a single curl. A file already present with the exact
+# expected size is skipped, so re-runs resume cheaply. With extra `file`
+# arguments only those repo paths are fetched.
+lv_hf_download_repo() {
+  local repo="$1" dest="$2" workers="${3:-8}"
+  shift 3 2>/dev/null || true
+  local wants=("$@")
+  local base="${HF_ENDPOINT:-https://huggingface.co}"
+  base="${base%/}"
+  local parallel_min=$((8 * 1024 * 1024))
+
+  local listing
+  listing="$(lv_hf_repo_files "$repo" "$base")" || return 1
+  if [ -z "$listing" ]; then
+    echo "no files listed for $repo" >&2
+    return 1
+  fi
+  mkdir -p "$dest"
+
+  # A here-string (not a pipe) keeps this loop in the current shell so
+  # `return` propagates and downloads run in the foreground.
+  local size rel fdest url tmp ok w
+  while IFS=$'\t' read -r size rel; do
+    # Native-Windows Python writes CRLF when piped; drop the trailing CR
+    # so the allowlist string compare matches on every line.
+    rel="${rel%$'\r'}"
+    [ -n "${rel:-}" ] || continue
+    if [ "${#wants[@]}" -gt 0 ]; then
+      ok=0
+      for w in "${wants[@]}"; do
+        [ "$rel" = "$w" ] && ok=1 && break
+      done
+      [ "$ok" = 1 ] || continue
+    fi
+    fdest="$dest/$rel"
+    mkdir -p "$(dirname "$fdest")"
+    if [ -f "$fdest" ] && [ "$(lv_filesize "$fdest")" = "${size:-0}" ]; then
+      continue
+    fi
+    url="$base/$repo/resolve/main/$rel"
+    lv_stage "下载 $rel（$(awk -v b="${size:-0}" 'BEGIN { printf "%.1f MB", b / 1048576 }')）"
+    if [ "${size:-0}" -ge "$parallel_min" ]; then
+      lv_fetch_parallel "$url" "$fdest" "$size" "$workers"
+    else
+      tmp="$fdest.tmp.$$"
+      curl -fsSL --retry 5 --retry-delay 2 -o "$tmp" "$url"
+      if [ "$(lv_filesize "$tmp")" != "${size:-0}" ]; then
+        echo "$rel: expected ${size:-0} bytes, got $(lv_filesize "$tmp")" >&2
+        rm -f "$tmp"
+        return 1
+      fi
+      mv -f "$tmp" "$fdest"
+    fi
+  done <<< "$listing"
+
+  if [ "${#wants[@]}" -gt 0 ]; then
+    for w in "${wants[@]}"; do
+      if [ ! -f "$dest/$w" ]; then
+        echo "$repo: $w missing after download" >&2
+        return 1
+      fi
+    done
+  fi
+}
+
 # lv_track <dir> <total_bytes> <command...>
 #
 # Run a command that fills <dir> (e.g. `hf download --local-dir`) and
