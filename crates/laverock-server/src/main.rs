@@ -602,6 +602,106 @@ async fn profile_audio(
         .into_response())
 }
 
+/// Download a portable `.lvvoice.zip` archive of a saved voice.
+async fn export_profile(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Response, ApiError> {
+    let (meta, _) = state.profiles.get(&id)?;
+    let zip = state.profiles.export_zip(&id)?;
+    Ok((
+        StatusCode::OK,
+        [
+            (header::CONTENT_TYPE, "application/zip".to_string()),
+            (
+                header::CONTENT_DISPOSITION,
+                rfc5987_attachment(&meta.name, "lvvoice.zip"),
+            ),
+        ],
+        zip,
+    )
+        .into_response())
+}
+
+/// Build a Content-Disposition with both an ASCII fallback filename and
+/// a UTF-8 encoded one (RFC 5987), so CJK voice names survive downloads.
+fn rfc5987_attachment(name: &str, ext: &str) -> String {
+    let ascii_stem: String = name
+        .trim()
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '-'
+            }
+        })
+        .collect();
+    let ascii_stem = ascii_stem.trim_matches('-');
+    let fallback = if ascii_stem.is_empty() {
+        "voice"
+    } else {
+        ascii_stem
+    };
+    let encoded: String = percent_encode(name.trim().as_bytes());
+    format!("attachment; filename=\"{fallback}.{ext}\"; filename*=UTF-8''{encoded}.{ext}")
+}
+
+/// Minimal RFC 5987 percent-encoding (unreserved chars stay literal).
+fn percent_encode(bytes: &[u8]) -> String {
+    let mut out = String::with_capacity(bytes.len());
+    for &b in bytes {
+        let allowed = b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.' | b'~');
+        if allowed {
+            out.push(b as char);
+        } else {
+            out.push_str(&format!("%{b:02X}"));
+        }
+    }
+    out
+}
+
+/// Import an exported voice archive (multipart field `file` or `voice`).
+async fn import_profile(
+    State(state): State<AppState>,
+    mut multipart: Multipart,
+) -> Result<Json<profiles::ProfileView>, ApiError> {
+    let mut bytes: Option<Vec<u8>> = None;
+    while let Some(mut field) = multipart
+        .next_field()
+        .await
+        .map_err(|e| ApiError::bad_request(format!("malformed multipart: {e}")))?
+    {
+        if matches!(field.name(), Some("file") | Some("voice")) {
+            let mut buf = Vec::new();
+            while let Some(chunk) = field
+                .chunk()
+                .await
+                .map_err(|e| ApiError::bad_request(format!("bad upload: {e}")))?
+            {
+                buf.extend_from_slice(&chunk);
+            }
+            bytes = Some(buf);
+        }
+    }
+    let bytes =
+        bytes.ok_or_else(|| ApiError::bad_request("missing voice archive (field: file)"))?;
+    let profiles = state.profiles.clone();
+    let meta = tokio::task::spawn_blocking(move || profiles.import_zip(&bytes))
+        .await
+        .map_err(|e| ApiError {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            message: format!("import task panicked: {e}"),
+        })??;
+    let view = state
+        .profiles
+        .list()?
+        .into_iter()
+        .find(|p| p.meta.id == meta.id)
+        .ok_or_else(|| ApiError::internal("imported profile disappeared"))?;
+    Ok(Json(view))
+}
+
 // ---------------------------------------------------------------- history
 
 async fn list_history(State(state): State<AppState>) -> Json<serde_json::Value> {
@@ -1140,10 +1240,15 @@ async fn main() {
         .route("/api/engines/{id}/synthesize", post(synthesize))
         .route("/api/profiles", get(list_profiles).post(create_profile))
         .route(
+            "/api/profiles/import",
+            post(import_profile).layer(DefaultBodyLimit::max(64 * 1024 * 1024)),
+        )
+        .route(
             "/api/profiles/{id}",
             delete(delete_profile).post(update_profile),
         )
         .route("/api/profiles/{id}/audio", get(profile_audio))
+        .route("/api/profiles/{id}/export", get(export_profile))
         .route("/api/history", get(list_history).delete(clear_history))
         .route("/api/history/{id}", delete(delete_history))
         .route("/api/history/{id}/audio", get(history_audio))
