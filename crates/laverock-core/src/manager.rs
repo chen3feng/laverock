@@ -9,7 +9,6 @@ use crate::{
     kokoro::KokoroEngine,
     longcat::LongCatEngine,
     qwen3tts::Qwen3TtsEngine,
-    voxcpm2::VoxCpm2Engine,
     zipvoice::ZipVoiceEngine,
     Audio, CoreError, EngineKind, Manifest, ParamSpec, Result,
 };
@@ -177,7 +176,9 @@ impl EngineManager {
         let dir: PathBuf = self.root.join(&manifest.id);
         let engine: Arc<dyn SpeechEngine> = match manifest.kind {
             EngineKind::ZipVoice => Arc::new(ZipVoiceEngine::build(&dir, &manifest)?),
-            EngineKind::VoxCpm2 => Arc::new(VoxCpm2Engine::build(&dir, &manifest)?),
+            EngineKind::VoxCpm2 => {
+                Arc::new(AudioCppEngine::build(&dir, &manifest, Family::VoxCpm2)?)
+            }
             EngineKind::Qwen3Tts => Arc::new(Qwen3TtsEngine::build(&dir, &manifest)?),
             EngineKind::LongCat => Arc::new(LongCatEngine::build(&dir, &manifest)?),
             EngineKind::Dots => Arc::new(AudioCppEngine::build(&dir, &manifest, Family::Dots)?),

@@ -33,6 +33,7 @@ mkdir -p "$DEST"
 
 # 1. Shared audio.cpp runtime.
 BIN="$(lv_audiocpp_bin "$TOOLS" "$AC_VERSION" "$MODELS_DIR")"
+BACKEND="$(lv_audiocpp_backend)"
 
 # 2. Weights.
 if [ ! -f "$GGUF" ]; then
@@ -59,7 +60,7 @@ cat > "$DEST/engine.json" <<EOF
   "cosyvoice": {
     "binary": "$BIN",
     "model": "$(basename "$GGUF")",
-    "backend": "best",
+    "backend": "$BACKEND",
     "seed": 1986
   },
   "defaults": { "speed": 1.0, "num_steps": 10 }

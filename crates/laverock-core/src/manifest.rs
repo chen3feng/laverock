@@ -86,7 +86,7 @@ pub struct Manifest {
     #[serde(default)]
     pub zipvoice: Option<ZipVoiceManifest>,
     #[serde(default)]
-    pub voxcpm2: Option<VoxCpm2Manifest>,
+    pub voxcpm2: Option<AudioCppManifest>,
     #[serde(default)]
     pub qwen3tts: Option<Qwen3TtsManifest>,
     #[serde(default)]
@@ -147,15 +147,14 @@ impl Manifest {
                     "越大语速越快，不改变音色",
                 ),
                 ParamSpec::int_slider("num_steps", "扩散步数", 10, 1, 30, 1, "越多越稳但越慢"),
-                ParamSpec::slider("cfg", "提示词强度 (CFG)", 2.0, 0.0, 5.0, 0.1, "过高会失真"),
                 ParamSpec::slider(
-                    "temperature",
-                    "随机性",
-                    1.0,
-                    0.1,
+                    "guidance",
+                    "引导强度 (CFG)",
                     2.0,
-                    0.05,
-                    "越高变化越大，越低越确定",
+                    0.0,
+                    5.0,
+                    0.1,
+                    "过高会失真，过低音色偏离参考",
                 ),
                 ParamSpec {
                     name: "seed".into(),
@@ -575,37 +574,6 @@ fn default_guidance() -> f32 {
 }
 fn default_threads() -> i32 {
     2
-}
-
-/// A VoxCPM2 model: a llama.cpp `voxcpm2-cli` binary plus two GGUF files.
-///
-/// All paths are relative to the model directory. The runner binary can be
-/// provided either by the `binary` field or, when unset, is looked up as
-/// `voxcpm2-cli` next to the GGUF files.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct VoxCpm2Manifest {
-    pub base_lm: String,
-    pub acoustic: String,
-    #[serde(default)]
-    pub binary: Option<String>,
-    #[serde(default = "default_voxcpm2_cfg")]
-    pub cfg: f32,
-    #[serde(default = "default_voxcpm2_temperature")]
-    pub temperature: f32,
-    #[serde(default = "default_voxcpm2_seed")]
-    pub seed: i32,
-    #[serde(default)]
-    pub cpu: bool,
-}
-
-fn default_voxcpm2_cfg() -> f32 {
-    2.0
-}
-fn default_voxcpm2_temperature() -> f32 {
-    1.0
-}
-fn default_voxcpm2_seed() -> i32 {
-    42
 }
 
 /// Qwen3-TTS runs through the official `qwen-tts` Python package in its

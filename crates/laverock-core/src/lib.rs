@@ -12,7 +12,6 @@ mod manager;
 mod manifest;
 mod qwen3tts;
 mod transcribe;
-mod voxcpm2;
 mod zipvoice;
 
 pub use audio::{decode_wav, encode_wav};
@@ -21,8 +20,7 @@ pub use manager::{
 };
 pub use manifest::{
     AudioCppManifest, EngineKind, KokoroManifest, LongCatManifest, Manifest, ParamKind,
-    ParamOption, ParamSpec, Qwen3TtsManifest, SttManifest, SynthDefaults, VoxCpm2Manifest,
-    ZipVoiceManifest,
+    ParamOption, ParamSpec, Qwen3TtsManifest, SttManifest, SynthDefaults, ZipVoiceManifest,
 };
 pub use transcribe::Transcriber;
 

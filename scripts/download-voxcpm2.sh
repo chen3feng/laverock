@@ -1,136 +1,66 @@
 #!/usr/bin/env bash
-# Download the VoxCPM2 engine (runner + weights).
+# Install the VoxCPM2 engine (2B, 30-language zero-shot TTS) as a Laverock
+# engine.
 #
-# VoxCPM2 runs from GGUF weights via llama.cpp's `voxcpm2-cli`, which is
-# not shipped as a standalone binary upstream. laverock publishes a
-# prebuilt runner on its "voxcpm2-runner" GitHub release (built by
-# .github/workflows/voxcpm2-runner.yml); we download that, like the
-# audio.cpp runtime, and only compile from tc-mb/llama.cpp-omni as a
-# fallback when no prebuilt asset exists or the download fails.
+# VoxCPM2 runs from a single audio.cpp GGUF package through the same native
+# runtime dots.tts and CosyVoice3 use (Metal on macOS, CUDA/CPU on Windows and
+# Linux), so there is no separate voxcpm2-cli to build and no Python stack.
+# The earlier llama.cpp-omni runner is gone: it had no working Windows CUDA
+# build and its static binaries assumed AVX2 (SIGILL on pre-Haswell CPUs).
 #
-# Total download ~3.3 GB weights (BaseLM Q8_0 1.6 GB + Acoustic F16 1.7 GB),
-# plus a ~tens-of-MB runner. The fallback build additionally needs git,
-# cmake and a C++ toolchain (Xcode CLT on macOS / build-essential).
+#   VOXCPM2_PRECISION=q8_0|bf16   weights precision (default q8_0)
+#   DOTS_VERSION=...              pin a different audio.cpp release tag
+#
+# Disk: ~2.8 GB Q8_0 weights, plus the one-time shared audio.cpp runtime.
 set -euo pipefail
 
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck source=laverock-lib.sh
 . "$SCRIPT_DIR/laverock-lib.sh"
 
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 MODELS_DIR="${LAVEROCK_MODELS_DIR:-$ROOT/models}"
 TOOLS="${LAVEROCK_TOOLS_DIR:-$ROOT/.tools}"
-SRC="$TOOLS/llama.cpp-omni"
 DEST="$MODELS_DIR/voxcpm2"
-HF="${HF_ENDPOINT:-https://huggingface.co}/DennisHuang648/VoxCPM2-GGUF/resolve/main"
+AC_VERSION="${DOTS_VERSION:-v0.9.2-drama3-base-small}"
+PRECISION="${VOXCPM2_PRECISION:-q8_0}"
+PACKAGE="VoxCPM2-GGUF/voxcpm2-${PRECISION}.gguf"
+GGUF="$DEST/$(basename "$PACKAGE")"
 
-mkdir -p "$MODELS_DIR" "$TOOLS" "$DEST"
+mkdir -p "$DEST"
 
-# 1. Runner: prebuilt from the rolling "voxcpm2-runner" release first,
-#    then a source build as fallback (unreleased platform / bad network).
-if [ ! -x "$DEST/voxcpm2-cli" ] && [ ! -x "$DEST/voxcpm2-cli.exe" ]; then
-  if lv_voxcpm2_runner "$DEST" "$TOOLS"; then
-    echo "Using prebuilt voxcpm2-cli"
-  else
-    echo "Prebuilt voxcpm2-cli unavailable, building from source..." >&2
-    for tool in git cmake cc c++; do
-      command -v "$tool" >/dev/null 2>&1 || { echo "missing: $tool" >&2; exit 1; }
-    done
+# 1. Shared audio.cpp runtime (CUDA on Windows machines with an NVIDIA GPU).
+BIN="$(lv_audiocpp_bin "$TOOLS" "$AC_VERSION" "$MODELS_DIR")"
+BACKEND="$(lv_audiocpp_backend)"
 
-    # A newer macOS often ships an Xcode whose linker cannot parse the
-    # CommandLineTools SDK (or vice versa). When CommandLineTools is present,
-    # use its self-consistent toolchain instead of mixing the two.
-    if [ "$(uname -s)" = "Darwin" ] && [ -d /Library/Developer/CommandLineTools ]; then
-      export DEVELOPER_DIR="/Library/Developer/CommandLineTools"
-    fi
-
-    # 1b. Sources (shallow; cached).
-    if [ ! -d "$SRC/.git" ]; then
-      lv_stage "拉取 llama.cpp-omni 源码"
-      git clone --depth 1 --progress https://github.com/tc-mb/llama.cpp-omni.git "$SRC"
-    fi
-    cd "$SRC"
-    if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-      git -C "$SRC" pull --ff-only >/dev/null 2>&1 || true
-    fi
-
-    # Upstream master only compiles on macOS as-is: F_NOCACHE is Apple-only
-    # and struct iovec is missing on Windows. Apply our portability patch if
-    # it still fits (silently skip when already applied or upstream fixed it).
-    PATCH="$SCRIPT_DIR/patches/0001-moe-slot-portability.patch"
-    if [ -f "$PATCH" ] && git -C "$SRC" apply --check "$PATCH" >/dev/null 2>&1; then
-      git -C "$SRC" apply "$PATCH"
-    fi
-
-    # 1c. Build the CLI target once. Static, NATIVE off: same flags as the
-    # prebuilt CI runner (x86-64 baseline / embedded Metal), so the binary
-    # drops in next to the GGUFs with no companion libraries.
-    if [ ! -x "$SRC/build/bin/voxcpm2-cli" ] && [ ! -f "$SRC/build/bin/Release/voxcpm2-cli.exe" ]; then
-      lv_stage "编译 voxcpm2-cli（首次约数分钟）"
-      case "$(uname -s)" in
-        Darwin) BACKEND="-DGGML_METAL=ON";;
-        *)      BACKEND="";;
-      esac
-      cmake -B build -S . \
-        -DCMAKE_BUILD_TYPE=Release \
-        -DGGML_NATIVE=OFF \
-        -DBUILD_SHARED_LIBS=OFF \
-        $BACKEND
-      NPROC=$(sysctl -n hw.ncpu 2>/dev/null || nproc 2>/dev/null || echo 4)
-      cmake --build build -j"$NPROC" --target voxcpm2-cli
-    fi
-
-    # Place the runner next to the weights (MSVC puts it in Release/).
-    if [ -f "$SRC/build/bin/voxcpm2-cli.exe" ]; then
-      cp "$SRC/build/bin/voxcpm2-cli.exe" "$DEST/voxcpm2-cli.exe"
-    elif [ -f "$SRC/build/bin/Release/voxcpm2-cli.exe" ]; then
-      cp "$SRC/build/bin/Release/voxcpm2-cli.exe" "$DEST/voxcpm2-cli.exe"
-    else
-      cp "$SRC/build/bin/voxcpm2-cli" "$DEST/voxcpm2-cli"
-    fi
+# 2. Weights from the audio.cpp GGUF repo, in parallel ranged requests.
+if [ ! -f "$GGUF" ]; then
+  HF_BASE="${HF_ENDPOINT:-https://huggingface.co}"
+  HF_BASE="${HF_BASE%/}"
+  URL="$HF_BASE/audio-cpp/audio.cpp-gguf/resolve/main/$PACKAGE"
+  lv_stage "下载 VoxCPM2 权重（${PRECISION}，约 2.8 GB）"
+  TOTAL=$(curl -sIL "$URL" | tr -d '\r' | awk 'tolower($1)=="content-length:" { v = $2 } END { print v + 0 }')
+  if [ "${TOTAL:-0}" -le 0 ]; then
+    echo "cannot determine the download size for $URL" >&2
+    exit 1
   fi
+  lv_fetch_parallel "$URL" "$GGUF" "$TOTAL" 8
 fi
 
-# 2. Weights. Resume partial downloads and verify the exact byte count —
-#    a truncated GGUF otherwise fails much later with an opaque error.
-fetch_model() { # url dest expected_bytes
-  local url="$1" dest="$2" want="$3"
-  if [ -f "$dest" ] && [ "$(wc -c <"$dest" | tr -d ' ')" = "$want" ]; then
-    echo "ok $(basename "$dest")"
-    return 0
-  fi
-  lv_download "$url" "$dest"
-  local got
-  got=$(wc -c <"$dest" | tr -d ' ')
-  if [ "$got" != "$want" ]; then
-    echo "size mismatch for $(basename "$dest"): got $got, want $want" >&2
-    return 1
-  fi
-}
-
-lv_stage "下载权重（1/2）· BaseLM 约 1.6 GB"
-fetch_model "$HF/VoxCPM2-BaseLM-Q8_0.gguf" \
-  "$DEST/VoxCPM2-BaseLM-Q8_0.gguf" 1727309920
-lv_stage "下载权重（2/2）· Acoustic 约 1.7 GB"
-fetch_model "$HF/VoxCPM2-Acoustic-F16.gguf" \
-  "$DEST/VoxCPM2-Acoustic-F16.gguf" 1825096352
-lv_stage "写入引擎清单"
-
-# 3. Manifest.
-cat > "$DEST/engine.json" <<'EOF'
+# 3. Manifest. VoxCPM2 supports prompt-less TTS as well as zero-shot cloning;
+#    the runner adds --voice-ref only when the request carries a prompt.
+cat > "$DEST/engine.json" <<EOF
 {
   "id": "voxcpm2",
   "kind": "voxcpm2",
-  "name": "VoxCPM2 (30 语言 · 零样本克隆)",
+  "name": "VoxCPM2 2B (${PRECISION})",
   "languages": ["zh", "en", "ja", "ko", "ar", "es", "fr", "+ 30 languages"],
   "capabilities": ["tts", "clone", "voice-design"],
   "voxcpm2": {
-    "base_lm": "VoxCPM2-BaseLM-Q8_0.gguf",
-    "acoustic": "VoxCPM2-Acoustic-F16.gguf",
-    "cfg": 2.0,
-    "temperature": 1.0,
-    "seed": 42,
-    "cpu": false
+    "binary": "$BIN",
+    "model": "$(basename "$GGUF")",
+    "backend": "$BACKEND",
+    "seed": 42
   },
   "defaults": { "speed": 1.0, "num_steps": 10 }
 }

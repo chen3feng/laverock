@@ -40,78 +40,180 @@ lv_content_length() {
     END { printf "%d", v + 0 }'
 }
 
+# lv_is_windows: succeeds under Git-Bash / MSYS2 / Cygwin.
+lv_is_windows() {
+  case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) return 0 ;; *) return 1 ;; esac
+}
+
+# lv_has_nvidia: succeeds when an NVIDIA driver is visible to the OS.
+# nvidia-smi ships with the driver, so it is present on machines that can
+# use a CUDA runtime even though no CUDA toolkit is installed.
+lv_has_nvidia() {
+  command -v nvidia-smi >/dev/null 2>&1 && nvidia-smi >/dev/null 2>&1
+}
+
+# lv_native_path <path>: path form that the platform's own binaries accept.
+# Rust (std::process) and python.exe reject MSYS /e/.. mounts, so on Windows
+# we emit E:/.. (forward slashes stay valid in JSON and for the Win32 API).
+lv_native_path() {
+  if command -v cygpath >/dev/null 2>&1; then
+    cygpath -m "$1"
+  else
+    printf '%s' "$1"
+  fi
+}
+
+# lv_venv_python <venv_dir>: interpreter path inside a venv for this OS.
+# Windows venvs use Scripts/ instead of bin/.
+lv_venv_python() {
+  if lv_is_windows; then
+    printf '%s/Scripts/python.exe' "$1"
+  else
+    printf '%s/bin/python' "$1"
+  fi
+}
+
+# lv_venv_cli <venv_dir> <command>: console-script executable in a venv.
+# e.g. lv_venv_cli "$venv" huggingface-cli
+lv_venv_cli() {
+  local venv="$1" name="$2"
+  if lv_is_windows; then
+    printf '%s/Scripts/%s.exe' "$venv" "$name"
+  else
+    printf '%s/bin/%s' "$venv" "$name"
+  fi
+}
+
+# lv_unzip <archive> <dest_dir>: extract a zip, falling back to PowerShell
+# on Git-Bash for Windows (which ships without Info-ZIP unzip).
+lv_unzip() {
+  local zip="$1" dest="$2"
+  mkdir -p "$dest"
+  if command -v unzip >/dev/null 2>&1; then
+    unzip -q "$zip" -d "$dest"
+  else
+    powershell -NoProfile -Command \
+      "Expand-Archive -LiteralPath '$(cygpath -w "$zip")' -DestinationPath '$(cygpath -w "$dest")' -Force"
+  fi
+}
+
 # lv_audiocpp_bin <tools_dir> <version> <models_dir>
 #
 # Ensure the audio.cpp native runtime is available and print its path.
 # The runtime is shared by every audio.cpp-backed engine (dots.tts,
-# CosyVoice3, …) and lives under <tools>/audiocpp so it is downloaded
-# once. A runtime bundled inside an older per-model directory is copied
-# over rather than re-downloaded.
+# CosyVoice3, …) and lives under <tools>/audiocpp[-cuda<ver>] so it is
+# downloaded once. On Windows with an NVIDIA GPU we fetch the CUDA build
+# plus the matching cudart bundle (CUDA/cuBLAS/cuFFT DLLs); the target
+# machine needs only the driver, not a CUDA toolkit. Override detection
+# with AUDIOCPP_CUDA=off (force CPU) or AUDIOCPP_CUDA_VERSION=<ver>.
+# The printed path is in the platform-native form (E:/.. on Windows),
+# which is what Rust and the engine.json manifests require.
 lv_audiocpp_bin() {
   local tools="$1" version="$2" models="$3"
-  local dir="$tools/audiocpp"
-  local bin="$dir/audiocpp_cli"
-  local exe="$dir/audiocpp_cli.exe"
-
-  if [ -x "$bin" ] || [ -x "$exe" ]; then
-    [ -x "$bin" ] && echo "$bin" || echo "$exe"
-    return 0
-  fi
-
-  # A runtime installed by an earlier per-model engine still works; copy
-  # it into the shared location so removing that model cannot break us.
-  local legacy
-  legacy=$(find "$models" -maxdepth 4 -name audiocpp_cli -type f -perm -u+x 2>/dev/null | head -1)
-  if [ -z "$legacy" ]; then
-    legacy=$(find "$models" -maxdepth 4 -name audiocpp_cli.exe -type f 2>/dev/null | head -1)
-  fi
-  if [ -n "$legacy" ]; then
-    mkdir -p "$dir"
-    cp "$legacy" "$dir/"
-    [ -f "$(dirname "$legacy")/LICENSE" ] && cp "$(dirname "$legacy")/LICENSE" "$dir/"
-    echo "$dir/$(basename "$legacy")"
-    return 0
-  fi
-
-  local platform asset ext url tmp
+  local platform
   platform="$(uname -s)"
+
+  # Choose the runtime flavor up front so CPU and CUDA installs can live
+  # side by side without either masquerading as the other.
+  local asset ext dir ac_cuda=0 cuda_ver=""
   case "$platform" in
     Darwin)
       case "$(uname -m)" in
         arm64) asset="bin-macos-arm64-metal" ;;
         *)     asset="bin-macos-x64-metal" ;;
       esac
-      ext=".tar.gz" ;;
+      ext=".tar.gz"
+      dir="$tools/audiocpp" ;;
     Linux)
-      asset="bin-ubuntu-x64-cpu-portable"; ext=".tar.gz" ;;
+      asset="bin-ubuntu-x64-cpu-portable"; ext=".tar.gz"
+      dir="$tools/audiocpp" ;;
     MINGW*|MSYS*|CYGWIN*)
-      asset="bin-windows-x64-cpu-portable"; ext=".zip" ;;
+      ext=".zip"
+      if [ "${AUDIOCPP_CUDA:-auto}" != "off" ] && lv_has_nvidia; then
+        ac_cuda=1
+        cuda_ver="${AUDIOCPP_CUDA_VERSION:-12.4}"
+        asset="bin-windows-x64-cuda${cuda_ver}"
+        dir="$tools/audiocpp-cuda${cuda_ver}"
+      else
+        asset="bin-windows-x64-cpu-portable"
+        dir="$tools/audiocpp"
+      fi ;;
     *)
       echo "unsupported platform for audio.cpp: $platform" >&2
       return 1 ;;
   esac
 
-  url="https://github.com/0xShug0/audio.cpp/releases/download/$version/audio-$version-$asset$ext"
+  local bin="$dir/audiocpp_cli" exe="$dir/audiocpp_cli.exe"
+  if [ -x "$bin" ] || [ -x "$exe" ]; then
+    if [ -x "$bin" ]; then lv_native_path "$bin"; else lv_native_path "$exe"; fi
+    return 0
+  fi
+
+  # A runtime installed by an earlier per-model engine still works; copy
+  # it (and any backend DLLs beside it) into the shared location so removing
+  # that model cannot break us.
+  local legacy ldir
+  legacy=$(find "$models" -maxdepth 4 -name audiocpp_cli -type f -perm -u+x 2>/dev/null | head -1)
+  if [ -z "$legacy" ]; then
+    legacy=$(find "$models" -maxdepth 4 -name audiocpp_cli.exe -type f 2>/dev/null | head -1)
+  fi
+  if [ -n "$legacy" ]; then
+    ldir="$(dirname "$legacy")"
+    mkdir -p "$dir"
+    cp "$legacy" "$dir/"
+    cp "$ldir"/*.dll "$dir/" 2>/dev/null || true
+    [ -f "$ldir/LICENSE" ] && cp "$ldir/LICENSE" "$dir/"
+    chmod +x "$dir/audiocpp_cli" "$exe" 2>/dev/null || true
+    lv_native_path "$dir/$(basename "$legacy")"
+    return 0
+  fi
+
+  local base tmp
+  base="https://github.com/0xShug0/audio.cpp/releases/download/$version"
   tmp="$(mktemp -d)"
-  lv_stage "下载 audio.cpp 运行时（${asset}）"
-  lv_download "$url" "$tmp/runtime$ext" 0
   mkdir -p "$tmp/ex" "$dir"
+
+  lv_stage "下载 audio.cpp 运行时（${asset}）"
+  lv_download "$base/audio-$version-$asset$ext" "$tmp/runtime$ext" 0
   if [ "$ext" = ".zip" ]; then
-    if command -v unzip >/dev/null 2>&1; then
-      unzip -q "$tmp/runtime.zip" -d "$tmp/ex"
-    else
-      powershell -NoProfile -Command \
-        "Expand-Archive -LiteralPath '$(cygpath -w "$tmp/runtime.zip")' -DestinationPath '$(cygpath -w "$tmp/ex")' -Force"
+    lv_unzip "$tmp/runtime.zip" "$tmp/ex"
+    # The CUDA build splits the exe and each backend into its own DLL; the
+    # OS loads those from the exe's directory, so copy the whole tree rather
+    # than the single binary the portable CPU build yields.
+    cp -a "$tmp/ex/." "$dir/"
+    if [ "$ac_cuda" = 1 ]; then
+      lv_stage "下载 CUDA 运行库（cudart ${cuda_ver}，免安装 CUDA）"
+      lv_download "$base/audio-$version-cudart-windows-x64-cuda${cuda_ver}.zip" \
+        "$tmp/cudart.zip" 0
+      mkdir -p "$tmp/cu"
+      lv_unzip "$tmp/cudart.zip" "$tmp/cu"
+      find "$tmp/cu" -name '*.dll' -exec cp -f {} "$dir/" \;
     fi
   else
     tar -xzf "$tmp/runtime.tar.gz" -C "$tmp/ex"
+    cp "$tmp/ex/audiocpp_cli" "$dir/" 2>/dev/null || true
+    [ -f "$tmp/ex/LICENSE" ] && cp "$tmp/ex/LICENSE" "$dir/"
   fi
-  cp "$tmp/ex/audiocpp_cli" "$dir/" 2>/dev/null || cp "$tmp/ex/audiocpp_cli.exe" "$dir/"
-  if [ -f "$tmp/ex/LICENSE" ]; then cp "$tmp/ex/LICENSE" "$dir/"; fi
-  chmod +x "$dir/audiocpp_cli" 2>/dev/null || true
+  chmod +x "$dir/audiocpp_cli" "$exe" 2>/dev/null || true
   rm -rf "$tmp"
 
-  if [ -x "$bin" ]; then echo "$bin"; else echo "$exe"; fi
+  if [ -x "$bin" ]; then lv_native_path "$bin"; else lv_native_path "$exe"; fi
+}
+
+# lv_audiocpp_backend: the --backend value matching the runtime flavor that
+# lv_audiocpp_bin selects above (explicit cuda for the CUDA build, so we do
+# not rely on the runtime's own "best" probing; metal on Apple Silicon).
+lv_audiocpp_backend() {
+  case "$(uname -s)" in
+    Darwin) echo metal ;;
+    MINGW*|MSYS*|CYGWIN*)
+      if [ "${AUDIOCPP_CUDA:-auto}" != "off" ] && lv_has_nvidia; then
+        echo cuda
+      else
+        echo best
+      fi ;;
+    *) echo best ;;
+  esac
 }
 
 # lv_sha256 <path>: hex digest, via whichever tool ships on the platform.

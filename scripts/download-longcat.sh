@@ -22,6 +22,10 @@ SRC="$TOOLS/LongCat-AudioDiT"
 VENV="$TOOLS/longcat-venv"
 WEIGHTS="$DEST/weights"
 TOKENIZER="$DEST/tokenizer"
+# Native (E:/..) forms for the Windows python child and the manifest; the
+# POSIX vars above stay for bash-side mkdir/find/lv_track.
+WEIGHTS_N="$(lv_native_path "$WEIGHTS")"
+TOKENIZER_N="$(lv_native_path "$TOKENIZER")"
 
 case "$MODEL" in
   *3.5B*|*3_5B*) SIZE_NOTE="~15.3 GB" ;;
@@ -31,7 +35,11 @@ esac
 # transformers 5.x needs Python 3.10+; prefer the newest supported one.
 PYTHON="${LONGCAT_PYTHON:-}"
 if [ -z "$PYTHON" ]; then
-  for candidate in python3.12 python3.11 python3.10 python3; do
+  candidates="python3.12 python3.11 python3.10 python3"
+  if lv_is_windows; then
+    candidates="python3.12 python3.11 python3.10 python python3 py"
+  fi
+  for candidate in $candidates; do
     if command -v "$candidate" >/dev/null 2>&1; then
       PYTHON="$candidate"
       break
@@ -50,22 +58,23 @@ if [ ! -d "$SRC/.git" ]; then
   git clone --depth 1 --progress https://github.com/meituan-longcat/LongCat-AudioDiT.git "$SRC"
 fi
 
-# 2. Isolated environment.
-if [ ! -x "$VENV/bin/python" ]; then
+# 2. Isolated environment. Windows venvs use Scripts/ instead of bin/.
+VPY="$(lv_venv_python "$VENV")"
+if [ ! -f "$VPY" ]; then
   lv_stage "创建 Python 虚拟环境"
   "$PYTHON" -m venv "$VENV"
 fi
 export PIP_PROGRESS_BAR=on
 lv_stage "安装依赖（PyTorch 与 transformers 5，约 1–2 GB）"
-"$VENV/bin/python" -m pip install --upgrade pip
-"$VENV/bin/python" -m pip install -r "$SRC/requirements.txt"
+"$VPY" -m pip install --upgrade pip
+"$VPY" -m pip install -r "$SRC/requirements.txt"
 # The UMT5 tokenizer ships a SentencePiece model; transformers can fall
 # back to it when converting, so keep the library available.
-"$VENV/bin/python" -m pip install sentencepiece
+"$VPY" -m pip install sentencepiece
 
 # huggingface_hub 2.x ships `hf`; older versions ship `huggingface-cli`.
-HFCLI="$VENV/bin/hf"
-[ -x "$HFCLI" ] || HFCLI="$VENV/bin/huggingface-cli"
+HFCLI="$(lv_venv_cli "$VENV" hf)"
+[ -f "$HFCLI" ] || HFCLI="$(lv_venv_cli "$VENV" huggingface-cli)"
 
 # 3. Weights and tokenizer, both local to the model directory so the app
 #    runs fully offline afterwards.
@@ -78,7 +87,7 @@ export HF_HUB_DISABLE_XET=1
 HF_BASE="${HF_ENDPOINT:-https://huggingface.co}"
 HF_BASE="${HF_BASE%/}"
 TOTAL_BYTES=$(curl -sL "$HF_BASE/api/models/$MODEL/tree/main" \
-  | "$VENV/bin/python" -c 'import json,sys
+  | "$VPY" -c 'import json,sys
 try:
     print(sum(f.get("size", 0) for f in json.load(sys.stdin) if f.get("type") == "file"))
 except Exception:
@@ -86,7 +95,7 @@ except Exception:
 
 lv_stage "下载模型权重（${SIZE_NOTE}）"
 lv_track "$WEIGHTS" "${TOTAL_BYTES:-0}" \
-  "$HFCLI" download "$MODEL" --local-dir "$WEIGHTS"
+  "$HFCLI" download "$MODEL" --local-dir "$WEIGHTS_N"
 # An interrupted earlier attempt can leave multi-GB partials behind.
 find "$WEIGHTS/.cache" -name "*.incomplete" -delete 2>/dev/null || true
 lv_stage "下载 UMT5 分词器"
@@ -94,7 +103,7 @@ lv_stage "下载 UMT5 分词器"
 # list (and then ignores --include).
 "$HFCLI" download google/umt5-base \
   tokenizer.json tokenizer_config.json special_tokens_map.json spiece.model \
-  --local-dir "$TOKENIZER"
+  --local-dir "$TOKENIZER_N"
 
 # 4. Runner plus the audiodit package next to it.
 lv_stage "安装运行脚本"
@@ -102,8 +111,9 @@ cp "$SCRIPT_DIR/longcat_runner.py" "$DEST/longcat_runner.py"
 rm -rf "$DEST/audiodit"
 cp -R "$SRC/audiodit" "$DEST/audiodit"
 
-# 5. Manifest. `python` and the paths are absolute (allowed and used as-is).
-PY="$VENV/bin/python"
+# 5. Manifest. `python` and the paths are absolute (allowed and used as-is),
+# in native E:/.. form for the Windows python child.
+PY="$(lv_native_path "$VPY")"
 NAME="LongCat-AudioDiT 1B"
 case "$MODEL" in *3.5B*|*3_5B*) NAME="LongCat-AudioDiT 3.5B" ;; esac
 cat > "$DEST/engine.json" <<EOF
@@ -116,8 +126,8 @@ cat > "$DEST/engine.json" <<EOF
   "longcat": {
     "python": "$PY",
     "script": "longcat_runner.py",
-    "model": "$WEIGHTS",
-    "tokenizer": "$TOKENIZER",
+    "model": "$WEIGHTS_N",
+    "tokenizer": "$TOKENIZER_N",
     "device": "auto",
     "dtype": "auto",
     "guidance": "apg",

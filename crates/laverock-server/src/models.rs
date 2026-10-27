@@ -337,12 +337,18 @@ fn run_install(
         ProxyMode::Manual | ProxyMode::Direct => None,
     };
 
-    let mut cmd = Command::new("bash");
+    let shell = resolve_bash(&script_dir);
+    let mut cmd = Command::new(&shell.program);
     cmd.arg(&script)
         .env("LAVEROCK_MODELS_DIR", &models_root)
         .env("LAVEROCK_SCRIPTS_DIR", &script_dir)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+    // Bundled MinGit: make its bash/coreutils/curl visible to the script and
+    // every process it spawns, without relying on the system PATH.
+    if let Some(path) = shell.augmented_path() {
+        cmd.env("PATH", path);
+    }
     for (key, value) in &entry.env {
         cmd.env(key, value);
     }
@@ -364,6 +370,13 @@ fn run_install(
         (ProxyMode::Direct, _) => "直连".to_string(),
     };
     append_log(&jobs, &entry.id, &format!("下载网络：{network}\n"));
+    if shell.bundled {
+        append_log(
+            &jobs,
+            &entry.id,
+            "命令行环境：内置 MinGit（无需安装 Git for Windows / WSL）\n",
+        );
+    }
 
     let mut child = match cmd.spawn() {
         Ok(child) => child,
@@ -633,6 +646,86 @@ pub fn resolve_scripts_dir() -> Option<PathBuf> {
         }
     }
     candidates.into_iter().find(|dir| dir.is_dir())
+}
+
+/// The POSIX shell used to run `download-*.sh`. On Windows the installer
+/// carries a portable MinGit (no Git-for-Windows/WSL needed on the target
+/// machine); we prefer that over any `bash` on PATH so installs work on a
+/// clean system.
+struct BashShell {
+    program: PathBuf,
+    /// MinGit bin directories to prepend to PATH (bash, coreutils, curl…).
+    prepend_path: Vec<PathBuf>,
+    bundled: bool,
+}
+
+impl BashShell {
+    fn system() -> Self {
+        Self {
+            program: PathBuf::from("bash"),
+            prepend_path: Vec::new(),
+            bundled: false,
+        }
+    }
+
+    /// PATH with the MinGit bin directories in front, if any.
+    fn augmented_path(&self) -> Option<std::ffi::OsString> {
+        if self.prepend_path.is_empty() {
+            return None;
+        }
+        let mut entries = self.prepend_path.clone();
+        if let Some(cur) = std::env::var_os("PATH") {
+            entries.extend(std::env::split_paths(&cur));
+        }
+        std::env::join_paths(entries).ok()
+    }
+}
+
+fn resolve_bash(scripts_dir: &Path) -> BashShell {
+    if let Some(p) = std::env::var_os("LAVEROCK_BASH") {
+        let p = PathBuf::from(p);
+        if p.is_file() {
+            return BashShell {
+                program: p,
+                prepend_path: Vec::new(),
+                bundled: false,
+            };
+        }
+    }
+
+    if cfg!(windows) {
+        let mut roots = vec![
+            scripts_dir.join("../mingit"), // packaged resource, sibling of scripts/
+            scripts_dir.join("mingit"),
+            scripts_dir.join("../crates/laverock-desktop/mingit"), // development checkout
+        ];
+        if let Ok(exe) = std::env::current_exe() {
+            if let Some(dir) = exe.parent() {
+                roots.push(dir.join("mingit"));
+                roots.push(dir.join("../mingit"));
+            }
+        }
+        for root in roots {
+            let bash = root.join("bin/bash.exe");
+            if bash.is_file() {
+                // Resolve ../ so the PATH entries we hand to children are real.
+                let root = std::fs::canonicalize(&root).unwrap_or(root);
+                return BashShell {
+                    program: std::fs::canonicalize(root.join("bin/bash.exe")).unwrap_or(bash),
+                    // PortableGit 2.56 ships its mingw tools under ucrt64/,
+                    // not the older mingw64/; curl/git live in ucrt64/bin.
+                    prepend_path: vec![
+                        root.join("bin"),
+                        root.join("usr/bin"),
+                        root.join("ucrt64/bin"),
+                    ],
+                    bundled: true,
+                };
+            }
+        }
+    }
+
+    BashShell::system()
 }
 
 fn now_secs() -> u64 {
