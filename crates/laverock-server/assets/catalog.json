@@ -202,5 +202,67 @@
     },
     "note": "需要 Python 3.10–3.12；脚本会自动创建隔离环境。Apple Silicon 上自动使用 MPS。",
     "note_en": "Requires Python 3.10–3.12; the script creates the isolated environment automatically. Uses MPS automatically on Apple Silicon."
+  },
+  {
+    "id": "qwen3tts-custom",
+    "dir": "qwen3tts-custom",
+    "name": "Qwen3-TTS 0.6B (custom voice)",
+    "description": "Qwen3-TTS 预置音色：9 个内置说话人（中英日韩），无需参考音频，并可用自然语言指令调整语气。",
+    "description_en": "Qwen3-TTS preset speakers: nine built-in voices (Chinese/English/Japanese/Korean) with no reference clip needed, plus natural-language tone instructions.",
+    "size": "~2–3 GB（含 venv）",
+    "languages": [
+      "zh",
+      "en",
+      "ja",
+      "ko",
+      "de",
+      "fr",
+      "ru",
+      "pt",
+      "es",
+      "it"
+    ],
+    "capabilities": [
+      "tts",
+      "preset-voices",
+      "instruct"
+    ],
+    "script": "download-qwen3tts.sh",
+    "env": {
+      "QWEN3TTS_VARIANT": "custom"
+    },
+    "note": "与克隆版共用同一个 Python 环境，重复安装只下载模型权重。需要 Python 3.10–3.12。",
+    "note_en": "Shares one Python environment with the clone variant; reinstalling only downloads weights. Requires Python 3.10–3.12."
+  },
+  {
+    "id": "qwen3tts-design",
+    "dir": "qwen3tts-design",
+    "name": "Qwen3-TTS 1.7B (voice design)",
+    "description": "用自然语言描述来创造音色（声音设计），例如「一位温柔的年轻女性，语速稍慢」。无需参考音频。",
+    "description_en": "Create a voice from a natural-language description (voice design), e.g. \"a gentle young woman speaking slightly slowly\". No reference clip needed.",
+    "size": "~4–5 GB（含 venv）",
+    "languages": [
+      "zh",
+      "en",
+      "ja",
+      "ko",
+      "de",
+      "fr",
+      "ru",
+      "pt",
+      "es",
+      "it"
+    ],
+    "capabilities": [
+      "tts",
+      "voice-design",
+      "instruct"
+    ],
+    "script": "download-qwen3tts.sh",
+    "env": {
+      "QWEN3TTS_VARIANT": "design"
+    },
+    "note": "1.7B 模型，合成时必须填写音色描述。需要 Python 3.10–3.12。",
+    "note_en": "The 1.7B model; a voice description is required to synthesize. Requires Python 3.10–3.12."
   }
 ]

@@ -89,7 +89,9 @@ a one-time Gatekeeper/SmartScreen prompt.
 ./scripts/download-kokoro.sh       # Kokoro-82M, ~135 MB, 8 langs, preset voices
 ./scripts/download-stt.sh          # SenseVoice STT, ~234 MB, auto-transcribes reference clips
 ./scripts/download-voxcpm2.sh      # VoxCPM2, ~3.3 GB, 30 langs, GGUF
-./scripts/download-qwen3tts.sh     # Qwen3-TTS, isolated venv + ~1.5 GB model
+./scripts/download-qwen3tts.sh     # Qwen3-TTS clone, isolated venv + ~1.5 GB model
+QWEN3TTS_VARIANT=custom ./scripts/download-qwen3tts.sh  # 9 preset speakers
+QWEN3TTS_VARIANT=design ./scripts/download-qwen3tts.sh  # 1.7B voice design
 ./scripts/download-longcat.sh      # LongCat-AudioDiT 1B, isolated venv + 5.7 GB weights
 ./scripts/download-dots.sh         # dots.tts SOAR, 48 kHz, audio.cpp runtime + 3 GB GGUF
 ./scripts/download-cosyvoice.sh    # CosyVoice3 0.5B, 2.3 GB GGUF (shares the runtime)
@@ -108,8 +110,11 @@ dots.tts clone from the audio alone; CosyVoice3 needs it only for its
 zero-shot template (its cross-lingual template does not). Kokoro takes no
 reference audio at all — it has 54 built-in speakers chosen from a
 manifest-declared `voice` parameter, and the UI hides the cloning section
-for it. Qwen3-TTS also supports preset speakers and voice design through
-`QWEN3TTS_VARIANT=custom|design`. Adding another
+for it. Qwen3-TTS also has two non-cloning installs sharing the same
+venv: `QWEN3TTS_VARIANT=custom` (nine built-in speakers Vivian/Ryan/Sohee…
+chosen in the synth page, no reference clip) and `QWEN3TTS_VARIANT=design`
+(1.7B model that builds a voice from a natural-language description in
+the instruct field). Adding another
 model of a supported kind is just another directory with a manifest;
 engines that need Python run in their own venv under `.tools/`, never in
 the core process.

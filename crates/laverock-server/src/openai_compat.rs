@@ -110,22 +110,48 @@ enum VoiceTarget {
         prompt_text: String,
         engine_hint: Option<String>,
     },
+    /// Voice-design engines take their description from `instruct`.
+    DesignOnly,
+}
+
+/// If `voice` matches an engine's declared preset choice (Kokoro's
+/// `voice`, Qwen custom voice's `speaker`), return its parameter name
+/// and the value to send (a voice name is mapped to its option value,
+/// which may be an integer sid).
+fn engine_preset(
+    manager: &EngineManager,
+    engine_id: &str,
+    voice: &str,
+) -> Option<(String, String)> {
+    manager
+        .list()
+        .into_iter()
+        .find(|e| e.id == engine_id)
+        .and_then(|e| {
+            e.parameters.into_iter().find_map(|p| {
+                if p.kind != laverock_core::ParamKind::Choice {
+                    return None;
+                }
+                p.options.iter().find_map(|o| {
+                    // Match the sid/value, the whole bilingual label, or a
+                    // bare voice id embedded in the label ("… (af_heart)").
+                    let label_id = o
+                        .label
+                        .rfind('(')
+                        .zip(o.label.rfind(')'))
+                        .filter(|(a, b)| b > a)
+                        .map(|(a, b)| &o.label[a + 1..b]);
+                    (o.value == voice || o.label == voice || label_id.is_some_and(|id| id == voice))
+                        .then(|| (p.name.clone(), o.value.clone()))
+                })
+            })
+        })
 }
 
 fn resolve_voice(
     profiles: &ProfileStore,
     voice: &str,
 ) -> Result<VoiceTarget, (StatusCode, String, String)> {
-    // Kokoro-style preset ids are always `xx_name` (e.g. af_heart, zm_xiaoni).
-    let is_preset_id = voice.len() >= 4
-        && voice.as_bytes()[2] == b'_'
-        && voice[..2].chars().all(|c| c.is_ascii_alphabetic());
-    if is_preset_id {
-        return Ok(VoiceTarget::Preset {
-            name: "voice".to_string(),
-            value: voice.to_string(),
-        });
-    }
     match profiles.get(voice) {
         Ok((meta, wav)) => Ok(VoiceTarget::Profile {
             wav,
@@ -149,7 +175,7 @@ fn resolve_voice(
             Err((
                 StatusCode::BAD_REQUEST,
                 format!(
-                    "Voice '{voice}' not found. Pass a preset id (e.g. af_heart) or a saved voice name/id."
+                    "Voice '{voice}' not found. Pass a preset id (e.g. af_heart, Vivian) or a saved voice name/id."
                 ),
                 "voice_not_found".to_string(),
             ))
@@ -195,7 +221,7 @@ pub async fn create_speech(
     }
 
     // Engine selection: explicit id, an OpenAI alias, or the only engine.
-    let engine_id = match body.model.as_deref() {
+    let mut engine_id = match body.model.as_deref() {
         Some(m) if !OPENAI_ALIASES.contains(&m) => {
             if state.manager.list().iter().any(|e| e.id == m) {
                 m.to_string()
@@ -223,15 +249,42 @@ pub async fn create_speech(
         },
     };
 
+    let was_alias = body
+        .model
+        .as_deref()
+        .map(|m| OPENAI_ALIASES.contains(&m))
+        .unwrap_or(true);
+
     let voice_arg = body.voice.as_deref().unwrap_or("").trim().to_string();
-    let target = if voice_arg.is_empty() {
-        // Default to the preset-voice engine's default voice choice
-        // (the `voice` parameter's default), otherwise require one.
+    // For explicit models, only that engine's preset choices qualify.
+    // With an alias, a preset id may belong to another engine (e.g. the
+    // Qwen custom speaker "Vivian"), so search across engines.
+    let mut preset = engine_preset(&state.manager, &engine_id, &voice_arg);
+    if preset.is_none() && was_alias && !voice_arg.is_empty() {
+        for e in state.manager.list() {
+            if let Some(found) = engine_preset(&state.manager, &e.id, &voice_arg) {
+                engine_id = e.id.clone();
+                preset = Some(found);
+                break;
+            }
+        }
+    }
+
+    let is_voice_design = state
+        .manager
+        .list()
+        .iter()
+        .find(|e| e.id == engine_id)
+        .is_some_and(|e| e.capabilities.iter().any(|c| c == "voice-design"));
+
+    let target = if let Some((name, value)) = preset {
+        VoiceTarget::Preset { name, value }
+    } else if voice_arg.is_empty() {
+        // Default to the engine's first preset choice; voice-design engines
+        // take their description from `instruct` instead of a voice.
         match default_preset_voice(&state.manager, &engine_id) {
-            Some(value) => VoiceTarget::Preset {
-                name: "voice".to_string(),
-                value,
-            },
+            Some((param, value)) => VoiceTarget::Preset { name: param, value },
+            None if is_voice_design => VoiceTarget::DesignOnly,
             None => {
                 return oai_error(
                     StatusCode::BAD_REQUEST,
@@ -250,25 +303,15 @@ pub async fn create_speech(
 
     // A saved profile may pin a specific engine; honor it when the model
     // argument was just an alias.
-    let engine_id = if let VoiceTarget::Profile {
+    if let VoiceTarget::Profile {
         engine_hint: Some(hint),
         ..
     } = &target
     {
-        if body
-            .model
-            .as_deref()
-            .map(|m| OPENAI_ALIASES.contains(&m))
-            .unwrap_or(true)
-            && state.manager.list().iter().any(|e| &e.id == hint)
-        {
-            hint.clone()
-        } else {
-            engine_id
+        if was_alias && state.manager.list().iter().any(|e| &e.id == hint) {
+            engine_id = hint.clone();
         }
-    } else {
-        engine_id
-    };
+    }
 
     // The OpenAI API has no sampling-steps concept; use the engine's
     // manifest default (some runners such as dots.tts reject a zero).
@@ -310,6 +353,7 @@ pub async fn create_speech(
             request.prompt_sr = sr;
             request.prompt_text = Some(prompt_text.clone());
         }
+        VoiceTarget::DesignOnly => {}
     }
     if let Some(instruct) = body.instructions.clone().filter(|s| !s.trim().is_empty()) {
         request
@@ -371,8 +415,9 @@ pub async fn create_speech(
     }
 }
 
-/// Default value of a preset engine's `voice` parameter, if it has one.
-fn default_preset_voice(manager: &EngineManager, engine_id: &str) -> Option<String> {
+/// Default value of an engine's first preset-choice parameter
+/// (`voice` for Kokoro, `speaker` for Qwen custom voice), if any.
+fn default_preset_voice(manager: &EngineManager, engine_id: &str) -> Option<(String, String)> {
     manager
         .list()
         .into_iter()
@@ -380,8 +425,8 @@ fn default_preset_voice(manager: &EngineManager, engine_id: &str) -> Option<Stri
         .and_then(|e| {
             e.parameters
                 .into_iter()
-                .find(|p| p.name == "voice")
-                .and_then(|p| p.default.as_str().map(str::to_string))
+                .find(|p| p.kind == laverock_core::ParamKind::Choice)
+                .and_then(|p| p.default.as_str().map(|v| (p.name, v.to_string())))
         })
 }
 
