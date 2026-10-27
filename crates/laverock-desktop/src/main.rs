@@ -66,6 +66,16 @@ fn main() {
                 .title("Laverock")
                 .inner_size(1040.0, 800.0)
                 .min_inner_size(400.0, 560.0)
+                // Ask where to save every download (folder + editable file
+                // name) instead of silently writing into ~/Downloads.
+                .on_download(|_webview, event| {
+                    use tauri::webview::DownloadEvent;
+                    match event {
+                        DownloadEvent::Requested { destination, .. } => ask_save_path(destination),
+                        DownloadEvent::Finished { .. } => true,
+                        _ => true,
+                    }
+                })
                 .build()?;
 
             // Closing the window hides it; quitting happens from the tray.
@@ -143,6 +153,37 @@ fn build_tray(app: &tauri::App) -> tauri::Result<()> {
     }
     builder.build(app)?;
     Ok(())
+}
+
+/// Present a native "Save As" panel prefilled with the download's
+/// suggested directory and file name. Runs inside wry's download-started
+/// hook, which is invoked on the main thread, so the modal blocks until
+/// the user chooses. `false` cancels the download.
+fn ask_save_path(destination: &mut PathBuf) -> bool {
+    let Some(file_name) = destination.file_name().map(|s| s.to_owned()) else {
+        return true;
+    };
+    let mut dialog = rfd::FileDialog::new()
+        .set_can_create_directories(true)
+        .set_file_name(file_name.to_string_lossy().as_ref());
+    if let Some(dir) = destination.parent() {
+        dialog = dialog.set_directory(dir);
+    }
+    let extension = destination
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or_default();
+    if !extension.is_empty() {
+        let label = extension.to_ascii_uppercase();
+        dialog = dialog.add_filter(label, &[extension]);
+    }
+    match dialog.save_file() {
+        Some(path) => {
+            *destination = path;
+            true
+        }
+        None => false,
+    }
 }
 
 fn open_path(path: &Path) {

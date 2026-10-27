@@ -634,7 +634,13 @@ async fn history_audio(
         let bytes = tokio::fs::read(&wav_path).await?;
         return Ok((
             StatusCode::OK,
-            [(header::CONTENT_TYPE, "audio/wav".to_string())],
+            [
+                (header::CONTENT_TYPE, "audio/wav".to_string()),
+                (
+                    header::CONTENT_DISPOSITION,
+                    format!("attachment; filename=\"laverock-{id}.wav\""),
+                ),
+            ],
             bytes,
         )
             .into_response());
@@ -659,7 +665,13 @@ async fn history_audio(
     };
     Ok((
         StatusCode::OK,
-        [(header::CONTENT_TYPE, "audio/mpeg".to_string())],
+        [
+            (header::CONTENT_TYPE, "audio/mpeg".to_string()),
+            (
+                header::CONTENT_DISPOSITION,
+                format!("attachment; filename=\"laverock-{id}.mp3\""),
+            ),
+        ],
         bytes,
     )
         .into_response())
@@ -674,7 +686,13 @@ async fn export_mp3(body: Bytes) -> Result<Response, ApiError> {
         })??;
     Ok((
         StatusCode::OK,
-        [(header::CONTENT_TYPE, "audio/mpeg".to_string())],
+        [
+            (header::CONTENT_TYPE, "audio/mpeg".to_string()),
+            (
+                header::CONTENT_DISPOSITION,
+                "attachment; filename=\"laverock.mp3\"".to_string(),
+            ),
+        ],
         mp3,
     )
         .into_response())
