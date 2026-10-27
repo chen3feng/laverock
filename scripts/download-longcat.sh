@@ -67,6 +67,12 @@ fi
 export PIP_PROGRESS_BAR=on
 lv_stage "安装依赖（PyTorch 与 transformers 5，约 1–2 GB）"
 "$VPY" -m pip install --upgrade pip
+# The default PyPI torch wheel is CPU-only on Windows; install a CUDA build
+# first so an NVIDIA machine does not silently fall back to CPU inference.
+# The requirements.txt install below then leaves torch/torchaudio alone.
+if lv_is_windows && lv_has_nvidia; then
+  "$VPY" -m pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu130
+fi
 "$VPY" -m pip install -r "$SRC/requirements.txt"
 # The UMT5 tokenizer ships a SentencePiece model; transformers can fall
 # back to it when converting, so keep the library available.
@@ -86,16 +92,34 @@ export HF_HUB_DISABLE_XET=1
 # Expected size from the hub API, for a real percentage in the UI.
 HF_BASE="${HF_ENDPOINT:-https://huggingface.co}"
 HF_BASE="${HF_BASE%/}"
-TOTAL_BYTES=$(curl -sL "$HF_BASE/api/models/$MODEL/tree/main" \
+
+# Small repo files (config.json, README, images) come straight from the
+# HF CLI; the multi-GB blob below uses parallel ranged curl instead.
+lv_stage "下载模型配置"
+"$HFCLI" download "$MODEL" --local-dir "$WEIGHTS_N" --exclude "*.safetensors"
+
+# The safetensors blob dominates the download and is the most fragile part
+# of an HF-CLI transfer: one flaky-proxy reset aborts the whole stream.
+# Fetch it with the same parallel ranged curl the VoxCPM2 engine uses, so
+# a reset costs only one unfinished slice and it resumes from partials.
+WEIGHT_FILE="model.safetensors"
+WEIGHT_TOTAL=$(curl -sL "$HF_BASE/api/models/$MODEL/tree/main" \
   | "$VPY" -c 'import json,sys
 try:
-    print(sum(f.get("size", 0) for f in json.load(sys.stdin) if f.get("type") == "file"))
+    print(next(f.get("size", 0) for f in json.load(sys.stdin)
+               if f.get("path") == "model.safetensors"))
 except Exception:
     print(0)' 2>/dev/null || echo 0)
-
-lv_stage "下载模型权重（${SIZE_NOTE}）"
-lv_track "$WEIGHTS" "${TOTAL_BYTES:-0}" \
-  "$HFCLI" download "$MODEL" --local-dir "$WEIGHTS_N"
+if [ "${WEIGHT_TOTAL:-0}" -le 0 ]; then
+  echo "cannot determine the weight size for $MODEL" >&2
+  exit 1
+fi
+WEIGHT_URL="$HF_BASE/$MODEL/resolve/main/$WEIGHT_FILE"
+if [ ! -f "$WEIGHTS/$WEIGHT_FILE" ] || \
+   [ "$(lv_filesize "$WEIGHTS/$WEIGHT_FILE")" -ne "$WEIGHT_TOTAL" ]; then
+  lv_stage "下载模型权重（${SIZE_NOTE}）"
+  lv_fetch_parallel "$WEIGHT_URL" "$WEIGHTS/$WEIGHT_FILE" "$WEIGHT_TOTAL" 8
+fi
 # An interrupted earlier attempt can leave multi-GB partials behind.
 find "$WEIGHTS/.cache" -name "*.incomplete" -delete 2>/dev/null || true
 lv_stage "下载 UMT5 分词器"
