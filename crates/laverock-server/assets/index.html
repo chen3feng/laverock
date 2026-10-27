@@ -504,6 +504,7 @@
     <input type="file" class="cap-file" accept="audio/wav,.wav" hidden />
     <button class="ghost cap-pick" type="button" data-i18n="cap.file">选择文件</button>
     <button class="rec cap-rec" type="button" data-i18n="cap.record">● 录音</button>
+    <button class="ghost cap-transcribe" type="button" hidden data-i18n="cap.transcribe">✎ 转写</button>
     <span class="fileinfo cap-info" data-i18n="cap.none">未选择</span>
   </div>
 </template>
@@ -593,9 +594,10 @@ const I18N = {
     'dialog.ok': '确定', 'dialog.cancel': '取消',
 
     'cap.tts': '语音合成', 'cap.clone': '声音克隆', 'cap.voice-design': '声音设计',
-    'cap.instruct': '指令控制', 'cap.preset-voices': '预置音色',
+    'cap.instruct': '指令控制', 'cap.preset-voices': '预置音色', 'cap.stt': '语音识别',
 
     'cap.file': '选择文件', 'cap.record': '● 录音', 'cap.stop': '■ 停止', 'cap.none': '未选择',
+    'cap.transcribe': '✎ 转写', 'transcribe.busy': '转写中…',
     'preset.official.hf': '官方（huggingface.co）', 'preset.cn': 'hf-mirror.com（国内加速）',
     'preset.official.pip': '官方（pypi.org）', 'preset.custom': '自定义…',
   },
@@ -669,9 +671,10 @@ const I18N = {
     'dialog.ok': 'OK', 'dialog.cancel': 'Cancel',
 
     'cap.tts': 'Speech synthesis', 'cap.clone': 'Voice cloning', 'cap.voice-design': 'Voice design',
-    'cap.instruct': 'Voice instructions', 'cap.preset-voices': 'Preset voices',
+    'cap.instruct': 'Voice instructions', 'cap.preset-voices': 'Preset voices', 'cap.stt': 'Speech-to-text',
 
     'cap.file': 'Choose file', 'cap.record': '● Record', 'cap.stop': '■ Stop', 'cap.none': 'None',
+    'cap.transcribe': '✎ Transcribe', 'transcribe.busy': 'Transcribing…',
     'preset.official.hf': 'Official (huggingface.co)', 'preset.cn': 'hf-mirror.com (faster in China)',
     'preset.official.pip': 'Official (pypi.org)', 'preset.custom': 'Custom…',
   },
@@ -857,6 +860,7 @@ let modelsTimer = null;
 let previewId = null;
 let toastTimer = null;
 let mp3Supported = false;
+let transcribeAvailable = false;
 let lastSynthBlob = null;
 let serverSettings = null;
 
@@ -1036,30 +1040,88 @@ class Capture {
     this.file = host.querySelector('.cap-file');
     this.pick = host.querySelector('.cap-pick');
     this.rec = host.querySelector('.cap-rec');
+    this.transBtn = host.querySelector('.cap-transcribe');
     this.info = host.querySelector('.cap-info');
     this.blob = null;
     this.filename = null;
     this.recording = false;
+    this.transcribing = false;
     this.onChange = () => {};
+    this.onTranscribed = () => {};
 
     this.pick.onclick = () => this.file.click();
+    this.transBtn.onclick = () => this.transcribe();
     this.file.onchange = () => {
       const f = this.file.files[0];
       if (!f) return;
       this.blob = f;
       this.filename = f.name;
-      this.info.textContent = `${f.name} · ${fmtBytes(f.size)}`;
+      this.fileLabel = `${f.name} · ${fmtBytes(f.size)}`;
+      this.setInfo(this.fileLabel);
+      this.syncTranscribeButton();
       this.onChange();
     };
     this.rec.onclick = () => this.toggle();
   }
 
+  syncTranscribeButton() {
+    this.transBtn.hidden = !(transcribeAvailable && this.blob && !this.transcribing);
+  }
+
+  setTranscribing(on) {
+    this.transcribing = on;
+    this.transBtn.disabled = on;
+    this.syncTranscribeButton();
+    if (on) {
+      this.transBtn.hidden = false;
+      this.transBtn.textContent = t('transcribe.busy');
+      this.setInfo(t('transcribe.busy'));
+    } else {
+      this.transBtn.textContent = t('cap.transcribe');
+    }
+  }
+
+  // Send the current clip to the on-device STT model. Resolves with the
+  // text; null when nothing is selected or transcription is unavailable.
+  async transcribe() {
+    if (!this.blob || this.transcribing) return null;
+    if (!transcribeAvailable) {
+      toast(lang === 'en'
+        ? 'Install the SenseVoice speech-to-text model under Models first.'
+        : '请先在「模型」页下载 SenseVoice 语音识别模型。', true);
+      return null;
+    }
+    this.setTranscribing(true);
+    try {
+      const fd = new FormData();
+      fd.append('audio', this.blob, this.filename || 'reference.wav');
+      const res = await fetch('/api/transcribe', { method: 'POST', body: fd });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error || res.statusText);
+      }
+      const { text } = await res.json();
+      if (!text) throw new Error(lang === 'en' ? 'No speech recognized' : '未识别到语音');
+      this.onTranscribed(text);
+      if (this.fileLabel) this.setInfo(this.fileLabel);
+      return text;
+    } catch (e) {
+      if (this.fileLabel) this.setInfo(this.fileLabel);
+      toast((lang === 'en' ? 'Transcription failed: ' : '转写失败：') + localizeError(e.message), true);
+      return null;
+    } finally {
+      this.setTranscribing(false);
+    }
+  }
+
   clear() {
-    if (this.recording) this.stop();
+    if (this.recording) this.stop({ autoTranscribe: false });
     this.blob = null;
     this.filename = null;
+    this.fileLabel = '';
     this.file.value = '';
     this.setInfo(t('cap.none'));
+    this.syncTranscribeButton();
     this.onChange();
   }
 
@@ -1118,22 +1180,25 @@ class Capture {
     this.setInfo(lang === 'en' ? 'Recording… click again to stop' : '录音中……再次点击结束');
   }
 
-  stop() {
+  stop({ autoTranscribe = true } = {}) {
     if (!this.recording) return;
     this.recording = false;
     try { this.node.disconnect(); this.srcNode.disconnect(); } catch (_) { /* already closed */ }
-    this.stream.getTracks().forEach((t) => t.stop());
+    this.stream.getTracks().forEach((tr) => tr.stop());
     this.ctx.close();
 
     const raw = concatFloat(this.chunks);
     const down = downsample(raw, this.ratio);
     this.blob = new Blob([encodeWav(down, 24000)], { type: 'audio/wav' });
     this.filename = 'mic-reference.wav';
-    this.setInfo(`${lang === 'en' ? 'Microphone recording' : '麦克风录音'} · ${(down.length / 24000).toFixed(1)}s`);
+    this.fileLabel = `${lang === 'en' ? 'Microphone recording' : '麦克风录音'} · ${(down.length / 24000).toFixed(1)}s`;
+    this.setInfo(this.fileLabel);
     this.chunks = [];
     this.rec.classList.remove('on');
     this.rec.textContent = t('cap.record');
+    this.syncTranscribeButton();
     this.onChange();
+    if (autoTranscribe && transcribeAvailable) this.transcribe();
   }
 }
 
@@ -1172,7 +1237,14 @@ function encodeWav(samples, sr) {
 }
 
 const synthCapture = new Capture($('synthCapture'));
+synthCapture.onTranscribed = (text) => {
+  $('prompt_text').value = text;
+  saveDraft();
+};
 const voiceCapture = new Capture($('voiceCapture'));
+voiceCapture.onTranscribed = (text) => {
+  $('newPromptText').value = text;
+};
 
 if (!window.isSecureContext) {
   for (const cap of [synthCapture, voiceCapture]) {
@@ -2052,6 +2124,8 @@ function schedulePoll() {
       const failed = modelsData.models.some((m) => m.job && m.job.status === 'failed' && !m.installed);
       await loadEngines();
       await loadModels();
+      // An STT model install flips the transcribe health flag.
+      loadHealth();
       toast(failed
         ? (lang === 'en' ? 'Install failed; see the log on the card' : '安装失败，请查看卡片中的日志')
         : (lang === 'en' ? 'Install finished' : '安装流程结束'), failed);
@@ -2572,6 +2646,8 @@ async function loadHealth() {
     $('connState').classList.remove('off');
     mp3Supported = !!h.mp3;
     if (!mp3Supported) $('downloadMp3').hidden = true;
+    transcribeAvailable = !!h.transcribe;
+    for (const cap of [synthCapture, voiceCapture]) cap.syncTranscribeButton();
   } catch (_) {
     $('connState').classList.add('off');
   }

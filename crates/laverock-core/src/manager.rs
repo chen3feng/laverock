@@ -185,6 +185,11 @@ impl EngineManager {
                 Arc::new(AudioCppEngine::build(&dir, &manifest, Family::CosyVoice)?)
             }
             EngineKind::Kokoro => Arc::new(KokoroEngine::build(&dir, &manifest)?),
+            // STT models are discovered by the transcriber, not built as
+            // synthesis engines.
+            EngineKind::Stt => {
+                return Err(CoreError::Load("unsupported synthesis kind: stt".into()))
+            }
         };
 
         let mut loaded = self.loaded.lock().expect("engine lock poisoned");
@@ -224,6 +229,11 @@ fn scan(root: &Path) -> Result<Vec<Manifest>> {
             }
             match fs::read_to_string(&manifest_path) {
                 Ok(raw) => match serde_json::from_str::<Manifest>(&raw) {
+                    Ok(m) if m.kind == crate::manifest::EngineKind::Stt => {
+                        // Speech-to-text models live in the same directory but
+                        // are not synthesis engines; the transcriber finds them.
+                        tracing::debug!(model = %m.id, "skipping STT model in engine scan");
+                    }
                     Ok(m) => {
                         tracing::info!(engine = %m.id, kind = ?m.kind, "registered engine");
                         manifests.push(m);

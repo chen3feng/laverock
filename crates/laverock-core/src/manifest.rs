@@ -24,6 +24,38 @@ pub enum EngineKind {
     CosyVoice,
     #[serde(rename = "kokoro")]
     Kokoro,
+    /// Speech-to-text models (SenseVoice via sherpa-onnx). Not a
+    /// synthesis engine; discovered by the transcriber instead.
+    #[serde(rename = "stt")]
+    Stt,
+}
+
+/// Backend configuration for a speech-to-text model.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SttManifest {
+    /// Recognizer family, currently only `sense_voice`.
+    #[serde(default = "default_stt_engine")]
+    pub engine: String,
+    pub model: String,
+    pub tokens: String,
+    /// SenseVoice language hint: `auto`, `zh`, `en`, `ja`, `ko`, `yue`.
+    #[serde(default = "default_stt_language")]
+    pub language: String,
+    /// Inverse text normalization (digits, dates, punctuation).
+    #[serde(default = "default_true")]
+    pub use_itn: bool,
+    #[serde(default = "default_threads")]
+    pub num_threads: i32,
+}
+
+fn default_stt_engine() -> String {
+    "sense_voice".to_string()
+}
+fn default_stt_language() -> String {
+    "auto".to_string()
+}
+fn default_true() -> bool {
+    true
 }
 
 impl EngineKind {
@@ -36,6 +68,7 @@ impl EngineKind {
             EngineKind::Dots => "dots",
             EngineKind::CosyVoice => "cosyvoice",
             EngineKind::Kokoro => "kokoro",
+            EngineKind::Stt => "stt",
         }
     }
 }
@@ -64,6 +97,9 @@ pub struct Manifest {
     pub cosyvoice: Option<AudioCppManifest>,
     #[serde(default)]
     pub kokoro: Option<KokoroManifest>,
+    /// STT configuration when `kind == "stt"`.
+    #[serde(default)]
+    pub stt: Option<SttManifest>,
     #[serde(default)]
     pub defaults: SynthDefaults,
     /// User-tunable synthesis parameters shown by the UI. When absent,
@@ -86,6 +122,8 @@ impl Manifest {
     pub fn default_parameters(kind: EngineKind) -> Vec<ParamSpec> {
         use serde_json::json;
         match kind {
+            // STT is not a synthesis engine; it has no per-request params.
+            EngineKind::Stt => Vec::new(),
             EngineKind::ZipVoice => vec![
                 ParamSpec::slider(
                     "speed",

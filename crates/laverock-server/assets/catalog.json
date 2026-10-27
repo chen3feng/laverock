@@ -46,6 +46,28 @@
     "note_en": "Pure ONNX runtime — no Python or build toolchain needed. Preset voices only: when selected, the synth page hides the voice library/recorder/transcript and offers a built-in voice picker."
   },
   {
+    "id": "stt-sensevoice",
+    "dir": "sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17-int8",
+    "name": "SenseVoice Small (INT8)",
+    "description": "本地语音识别（参考音频自动转写）。中英日韩粤，数字与标点自动归一化；录音后可一键填入参考文字，无需手敲。",
+    "description_en": "On-device speech recognition for automatic reference-clip transcription. Chinese/English/Japanese/Korean/Cantonese with automatic number and punctuation normalization; fills the reference transcript with one tap after recording.",
+    "size": "~234 MB",
+    "languages": [
+      "zh",
+      "en",
+      "ja",
+      "ko",
+      "yue"
+    ],
+    "capabilities": [
+      "stt"
+    ],
+    "script": "download-stt.sh",
+    "env": {},
+    "note": "可选组件：仅克隆类引擎（ZipVoice、LongCat、CosyVoice 零样本等）需要参考文字时有用；Kokoro 等预置音色引擎用不到。纯 ONNX，无需 Python。",
+    "note_en": "Optional: only useful when cloning engines (ZipVoice, LongCat, zero-shot CosyVoice) need a reference transcript; preset-voice engines like Kokoro do not use it. Pure ONNX, no Python needed."
+  },
+  {
     "id": "voxcpm2",
     "dir": "voxcpm2",
     "name": "VoxCPM2",

@@ -87,6 +87,7 @@ a one-time Gatekeeper/SmartScreen prompt.
 # 1. Download a model (idempotent)
 ./scripts/download-model.sh        # ZipVoice, ~160 MB, zh/en, ONNX
 ./scripts/download-kokoro.sh       # Kokoro-82M, ~135 MB, 8 langs, preset voices
+./scripts/download-stt.sh          # SenseVoice STT, ~234 MB, auto-transcribes reference clips
 ./scripts/download-voxcpm2.sh      # VoxCPM2, ~3.3 GB, 30 langs, GGUF
 ./scripts/download-qwen3tts.sh     # Qwen3-TTS, isolated venv + ~1.5 GB model
 ./scripts/download-longcat.sh      # LongCat-AudioDiT 1B, isolated venv + 5.7 GB weights
@@ -157,6 +158,11 @@ plus an accurate transcript, highest similarity), cross-lingual cloning
 instruction control (describe the delivery in words, e.g. "用温和的语气，
 语速稍慢"). Top-K and flow-decoder steps are tunable per request, and
 long text is chunked by the runtime.
+
+With the optional SenseVoice STT model installed (`download-stt.sh`), a
+recorded or uploaded clip is transcribed automatically and its transcript
+fills the reference-text field; the Transcribe button re-runs it by hand.
+It covers zh/en/ja/ko/yue and runs on device via ONNX.
 
 Pick or record 3–10 s of reference speech, type its exact transcript
 (required by ZipVoice for timbre/prosody alignment), type the text to
@@ -253,6 +259,7 @@ off and on again.
 | POST | `/api/profiles` | multipart `name`, `prompt_text`, `prompt` (WAV) → saved voice |
 | GET | `/api/profiles/:id/audio` | reference clip of a saved voice |
 | POST | `/api/audio/mp3` | body: WAV → MP3 (needs ffmpeg or lame) |
+| POST | `/api/transcribe` | multipart `audio` (WAV) → transcript text (needs the SenseVoice model) |
 | POST | `/api/profiles/:id` | multipart `name`, `prompt_text`, optional `prompt` → edit a saved voice |
 | DELETE | `/api/profiles/:id` | delete a saved voice |
 | GET | `/api/history` | generated audio, newest first |

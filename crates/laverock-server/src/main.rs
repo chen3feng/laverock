@@ -46,6 +46,7 @@ struct AppState {
     remote: Arc<RemoteState>,
     settings: Arc<SettingsStore>,
     models: Arc<ModelService>,
+    transcriber: Arc<laverock_core::Transcriber>,
     lan: tokio::sync::mpsc::Sender<LanCmd>,
     port: u16,
 }
@@ -133,6 +134,7 @@ async fn health(State(state): State<AppState>) -> impl IntoResponse {
         "version": env!("CARGO_PKG_VERSION"),
         "engines": state.manager.len(),
         "mp3": export::mp3_available(),
+        "transcribe": state.transcriber.available(),
     }))
 }
 
@@ -677,6 +679,47 @@ async fn history_audio(
         .into_response())
 }
 
+#[derive(Debug, serde::Serialize)]
+struct TranscribeResponse {
+    text: String,
+}
+
+/// Transcribe a reference WAV clip with the on-device STT model.
+async fn transcribe(
+    State(state): State<AppState>,
+    mut multipart: Multipart,
+) -> Result<Json<TranscribeResponse>, ApiError> {
+    let mut audio: Option<Vec<u8>> = None;
+    while let Some(mut field) = multipart
+        .next_field()
+        .await
+        .map_err(|e| ApiError::bad_request(format!("malformed multipart: {e}")))?
+    {
+        if field.name() == Some("audio") {
+            let mut bytes = Vec::new();
+            while let Some(chunk) = field
+                .chunk()
+                .await
+                .map_err(|e| ApiError::bad_request(format!("bad upload: {e}")))?
+            {
+                bytes.extend_from_slice(&chunk);
+            }
+            audio = Some(bytes);
+        }
+    }
+    let audio = audio.ok_or_else(|| ApiError::bad_request("missing required field: audio"))?;
+
+    // Loading and running the model is blocking; keep it off the runtime.
+    let transcriber = state.transcriber.clone();
+    let text = tokio::task::spawn_blocking(move || transcriber.transcribe(&audio))
+        .await
+        .map_err(|e| ApiError {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            message: format!("transcribe task panicked: {e}"),
+        })??;
+    Ok(Json(TranscribeResponse { text }))
+}
+
 async fn export_mp3(body: Bytes) -> Result<Response, ApiError> {
     let mp3 = tokio::task::spawn_blocking(move || export::wav_to_mp3(&body))
         .await
@@ -1084,6 +1127,7 @@ async fn main() {
         remote: remote.clone(),
         settings,
         models: model_service,
+        transcriber: Arc::new(laverock_core::Transcriber::new(&models_dir)),
         lan: lan_tx,
         port,
     };
@@ -1106,6 +1150,10 @@ async fn main() {
             "/api/audio/mp3",
             // A minute of 48 kHz WAV exceeds axum's 2 MB default.
             post(export_mp3).layer(DefaultBodyLimit::max(64 * 1024 * 1024)),
+        )
+        .route(
+            "/api/transcribe",
+            post(transcribe).layer(DefaultBodyLimit::max(64 * 1024 * 1024)),
         )
         .route("/api/session", get(session))
         .route("/api/pair/start", post(start_pairing))
