@@ -285,6 +285,32 @@ curl -X POST http://127.0.0.1:8787/api/engines/sherpa-onnx-zipvoice-distill-int8
   -o out.wav
 ```
 
+### OpenAI-compatible API
+
+Clients built against OpenAI's TTS API (the official SDKs, Open WebUI,
+Home Assistant, SillyTavern, scripts…) work by changing only the base
+URL. There are no API keys — `Authorization` is accepted and ignored.
+
+| Method | Path | Description |
+|---|---|---|
+| GET | `/v1/models` | installed engines plus the `tts-1` aliases |
+| GET | `/v1/models/{id}` | one model entry |
+| POST | `/v1/audio/speech` | JSON body → audio |
+
+`model` is an installed engine id, or `tts-1` / `tts-1-hd` /
+`gpt-4o-mini-tts` (which use the requested voice's engine). `voice` is
+either a preset id (`af_heart`, `zm_xiaoni`…) for Kokoro, or a saved
+voice name/id for cloning engines. `response_format` is `wav` (default),
+`mp3` or `pcm` (headerless 16-bit LE mono). Errors use OpenAI's
+`{"error": {"message", "type", "param", "code"}}` shape.
+
+```sh
+curl http://127.0.0.1:8787/v1/audio/speech \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"tts-1","input":"Hello world.","voice":"af_heart","response_format":"mp3"}' \
+  -o speech.mp3
+```
+
 ### Configuration
 
 | Env var | Default | Purpose |
