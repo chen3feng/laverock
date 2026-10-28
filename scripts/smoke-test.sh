@@ -15,6 +15,16 @@ fail=0
 ok()   { echo "  ok   $1"; pass=$((pass + 1)); }
 bad()  { echo "  FAIL $1"; fail=$((fail + 1)); }
 
+# An MP3 starts with an ID3v2 tag ("ID3") or an MPEG frame sync (0xFFE).
+# The built-in encoder writes a LAME-style Info tag frame, so there is no
+# ID3v2 header: accept either shape.
+mp3_valid() {
+  local f="$1" b1 b2
+  head -c 3 "$f" | grep -q ID3 && return 0
+  read -r b1 b2 <<<"$(head -c 2 "$f" | od -An -tu1)"
+  [ "${b1:-0}" = "255" ] && [ $(( ${b2:-0} & 224 )) -eq 224 ]
+}
+
 echo "health"
 curl -sf "$BASE/api/health" >/dev/null && ok "GET /api/health" || bad "GET /api/health"
 
@@ -94,20 +104,20 @@ synth mixed "人工智能 artificial intelligence 正在改变生活。" news-fe
   "本台消息, 中共中央国务院, 近日印发关于构建数据基础制度, 更好发挥数据要素作用的意见." \
   -F 'speed=1.1'
 
-echo "mp3 export"
+echo "mp3 export (built-in encoder)"
 if curl -s "$BASE/api/health" | grep -q '"mp3":true'; then
   code=$(curl -s -o "$OUT/zh.mp3" -w '%{http_code}' -X POST "$BASE/api/audio/mp3" \
     --data-binary @"$OUT/zh.wav")
-  [ "$code" = "200" ] && head -c 3 "$OUT/zh.mp3" | grep -q ID3 \
+  [ "$code" = "200" ] && mp3_valid "$OUT/zh.mp3" \
     && ok "wav -> mp3" || bad "wav -> mp3 (HTTP $code)"
 
   hid=$(curl -s "$BASE/api/history" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p' | head -1)
   code=$(curl -s -o "$OUT/hist.mp3" -w '%{http_code}' \
     "$BASE/api/history/$hid/audio?format=mp3")
-  [ "$code" = "200" ] && head -c 3 "$OUT/hist.mp3" | grep -q ID3 \
+  [ "$code" = "200" ] && mp3_valid "$OUT/hist.mp3" \
     && ok "history mp3" || bad "history mp3 (HTTP $code)"
 else
-  echo "  skip (no ffmpeg/lame)"
+  bad "health lacks mp3 support (built-in encoder should always be available)"
 fi
 
 echo "validation"

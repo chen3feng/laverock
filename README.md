@@ -263,7 +263,7 @@ off and on again.
 | GET | `/api/profiles` | saved voices with duration/size |
 | POST | `/api/profiles` | multipart `name`, `prompt_text`, `prompt` (WAV) → saved voice |
 | GET | `/api/profiles/:id/audio` | reference clip of a saved voice |
-| POST | `/api/audio/mp3` | body: WAV → MP3 (needs ffmpeg or lame) |
+| POST | `/api/audio/mp3` | body: WAV → MP3 (built-in pure-Rust encoder, no ffmpeg needed) |
 | POST | `/api/transcribe` | multipart `audio` (WAV) → transcript text (needs the SenseVoice model) |
 | POST | `/api/profiles/:id` | multipart `name`, `prompt_text`, optional `prompt` → edit a saved voice |
 | GET | `/api/profiles/:id/export` | portable `.lvvoice.zip` archive (manifest + WAV) |
@@ -327,8 +327,10 @@ curl http://127.0.0.1:8787/v1/audio/speech \
 | `LAVEROCK_MODELS_DIR` | `models` | directory scanned for `*/engine.json` |
 | `LAVEROCK_DATA_DIR` | `data` | profiles, settings, pairing state, TLS certs |
 | `LAVEROCK_SCRIPTS_DIR` | auto-detected | `scripts/` used by the model installer |
-| `LAVEROCK_FFMPEG` / `LAVEROCK_LAME` | auto-detected | explicit MP3 encoder path |
 | `LAVEROCK_TOOLS_DIR` | `<repo>/.tools` | build tools and Python venvs for engines |
+
+MP3 export is encoded in-process ([`rusty_mp3`](https://crates.io/crates/rusty_mp3),
+Apache-2.0); no system ffmpeg/lame install is required.
 
 Packaged desktop builds ship `scripts/` inside the app bundle (macOS
 `Contents/Resources/scripts`, Windows/Linux beside the executable) and
