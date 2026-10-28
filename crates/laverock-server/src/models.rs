@@ -147,10 +147,10 @@ impl ModelService {
         // Displaying an absolute path is friendlier than the default
         // relative "models"; the directory may not exist yet.
         let models_root = models_root.into();
-        let models_root = std::fs::canonicalize(&models_root).unwrap_or(models_root);
+        let models_root = clean_native(std::fs::canonicalize(&models_root).unwrap_or(models_root));
         // Paths handed in by the desktop shell can contain `..`; show
         // clean paths in the UI and hand scripts a stable one.
-        let scripts_dir = scripts_dir.map(|p| std::fs::canonicalize(&p).unwrap_or(p));
+        let scripts_dir = scripts_dir.map(|p| clean_native(std::fs::canonicalize(&p).unwrap_or(p)));
         Self {
             models_root,
             scripts_dir,
@@ -339,9 +339,12 @@ fn run_install(
 
     let shell = resolve_bash(&script_dir);
     let mut cmd = Command::new(&shell.program);
-    cmd.arg(&script)
-        .env("LAVEROCK_MODELS_DIR", &models_root)
-        .env("LAVEROCK_SCRIPTS_DIR", &script_dir)
+    // Script argv and the env vars the scripts consume must use the bash
+    // path form (forward slashes): a verbatim/backslash path reaches
+    // MSYS bash with its backslashes eaten as escapes.
+    cmd.arg(bash_path(&script))
+        .env("LAVEROCK_MODELS_DIR", bash_path(&models_root))
+        .env("LAVEROCK_SCRIPTS_DIR", bash_path(&script_dir))
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     // Bundled MinGit: make its bash/coreutils/curl visible to the script and
@@ -681,6 +684,46 @@ impl BashShell {
     }
 }
 
+/// `std::fs::canonicalize` returns verbatim paths on Windows
+/// (`\\?\C:\…`). Neither the Win32 PATH search nor MSYS bash accepts that
+/// prefix (bash's command-line parsing eats the backslashes as escapes and
+/// reports `\?C:…: No such file or directory`), so strip it back to the
+/// plain `C:\…` form. Verbatim UNC paths (`\\?\UNC\server\share`) become
+/// `\\server\share`.
+#[cfg(windows)]
+fn clean_native(path: PathBuf) -> PathBuf {
+    let Some(rest) = path.to_str() else {
+        return path;
+    };
+    if let Some(unc) = rest.strip_prefix(r"\\?\UNC\") {
+        return PathBuf::from(format!(r"\\{unc}"));
+    }
+    match rest.strip_prefix(r"\\?\") {
+        Some(rest) => PathBuf::from(rest),
+        None => path,
+    }
+}
+
+#[cfg(not(windows))]
+fn clean_native(path: PathBuf) -> PathBuf {
+    path
+}
+
+/// Path form handed to MSYS bash: drive letter with forward slashes
+/// (`E:/workspace/…`). Backslashes in argv or env values reach bash mangled
+/// (treated as escape characters), while forward slashes are accepted by
+/// both bash/coreutils and the native Windows python the scripts spawn.
+#[cfg(windows)]
+fn bash_path(path: &Path) -> std::ffi::OsString {
+    let cleaned = clean_native(path.to_path_buf());
+    std::ffi::OsString::from(cleaned.to_string_lossy().replace('\\', "/"))
+}
+
+#[cfg(not(windows))]
+fn bash_path(path: &Path) -> std::ffi::OsString {
+    path.as_os_str().to_os_string()
+}
+
 fn resolve_bash(scripts_dir: &Path) -> BashShell {
     if let Some(p) = std::env::var_os("LAVEROCK_BASH") {
         let p = PathBuf::from(p);
@@ -709,9 +752,13 @@ fn resolve_bash(scripts_dir: &Path) -> BashShell {
             let bash = root.join("bin/bash.exe");
             if bash.is_file() {
                 // Resolve ../ so the PATH entries we hand to children are real.
-                let root = std::fs::canonicalize(&root).unwrap_or(root);
+                // clean_native drops canonicalize's `\\?\` prefix, which
+                // neither the Win32 PATH search nor bash accepts.
+                let root = clean_native(std::fs::canonicalize(&root).unwrap_or(root));
                 return BashShell {
-                    program: std::fs::canonicalize(root.join("bin/bash.exe")).unwrap_or(bash),
+                    program: clean_native(
+                        std::fs::canonicalize(root.join("bin/bash.exe")).unwrap_or(bash),
+                    ),
                     // PortableGit 2.56 ships its mingw tools under ucrt64/,
                     // not the older mingw64/; curl/git live in ucrt64/bin.
                     prepend_path: vec![
@@ -872,6 +919,50 @@ mod tests {
         assert!(models.join("fake/engine.json").is_file());
 
         let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn clean_native_normalizes_canonicalized_paths() {
+        let input = if cfg!(windows) {
+            PathBuf::from(r"\\?\E:\workspace\laverock\scripts")
+        } else {
+            PathBuf::from("/home/laverock/scripts")
+        };
+        let expected = if cfg!(windows) {
+            PathBuf::from(r"E:\workspace\laverock\scripts")
+        } else {
+            PathBuf::from("/home/laverock/scripts")
+        };
+        assert_eq!(clean_native(input), expected);
+
+        #[cfg(windows)]
+        {
+            assert_eq!(
+                clean_native(PathBuf::from(r"\\?\UNC\server\share\dir")),
+                PathBuf::from(r"\\server\share\dir")
+            );
+            // Plain paths pass through untouched.
+            assert_eq!(
+                clean_native(PathBuf::from(r"E:\plain\path")),
+                PathBuf::from(r"E:\plain\path")
+            );
+        }
+    }
+
+    #[test]
+    fn bash_path_uses_forward_slashes() {
+        use std::ffi::OsString;
+        let native = if cfg!(windows) {
+            PathBuf::from(r"E:\workspace\laverock\models")
+        } else {
+            PathBuf::from("/home/laverock/models")
+        };
+        let expected = if cfg!(windows) {
+            OsString::from("E:/workspace/laverock/models")
+        } else {
+            OsString::from("/home/laverock/models")
+        };
+        assert_eq!(bash_path(&native), expected);
     }
 
     #[test]
