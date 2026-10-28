@@ -19,7 +19,7 @@
     "externalBin": ["binaries/laverock"],
     "resources": {
       "../../scripts/laverock-lib.sh": "scripts/laverock-lib.sh",
-      "../../scripts/download-model.sh": "scripts/download-model.sh",
+      "../../scripts/download-zipvoice.sh": "scripts/download-zipvoice.sh",
       "../../scripts/download-kokoro.sh": "scripts/download-kokoro.sh",
       "../../scripts/download-stt.sh": "scripts/download-stt.sh",
       "../../scripts/download-voxcpm2.sh": "scripts/download-voxcpm2.sh",

@@ -8,12 +8,10 @@
 # Disk: torch and friends ~2-3 GB, model 1.5-4 GB depending on the variant.
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck source=laverock-lib.sh
-. "$SCRIPT_DIR/laverock-lib.sh"
-MODELS_DIR="${LAVEROCK_MODELS_DIR:-$ROOT/models}"
-TOOLS="${LAVEROCK_TOOLS_DIR:-$ROOT/.tools}"
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/laverock-lib.sh"
+lv_init
+
 VENV="$TOOLS/qwen-tts-venv"
 VARIANT="${QWEN3TTS_VARIANT:-base}"
 # base keeps its historical directory/id; the other modes sit alongside.
@@ -45,45 +43,16 @@ case "$VARIANT" in
 esac
 
 # torch has no wheels for the newest Python, so pick a supported one.
-PYTHON="${QWEN3TTS_PYTHON:-}"
-if [ -z "$PYTHON" ]; then
-  candidates="python3.12 python3.11 python3.10 python3"
-  if lv_is_windows; then
-    # Git-Bash rarely ships python3; the python.org launcher and `python`
-    # are the usual finds on Windows.
-    candidates="python3.12 python3.11 python3.10 python python3 py"
-  fi
-  for candidate in $candidates; do
-    if command -v "$candidate" >/dev/null 2>&1; then
-      PYTHON="$candidate"
-      break
-    fi
-  done
-fi
-command -v "$PYTHON" >/dev/null 2>&1 || { echo "a Python 3.10-3.12 interpreter is required" >&2; exit 1; }
+PYTHON="$(lv_find_python "${QWEN3TTS_PYTHON:-}")" || {
+  echo "a Python 3.10-3.12 interpreter is required" >&2; exit 1; }
 echo "Using $("$PYTHON" --version 2>&1) ($PYTHON)"
-mkdir -p "$MODELS_DIR" "$DEST" "$TOOLS"
-
-# Windows venvs put the interpreter in Scripts/, POSIX in bin/.
-VPY="$(lv_venv_python "$VENV")"
+mkdir -p "$DEST" "$TOOLS"
 
 # 1. Isolated environment — Qwen's torch/transformers pins stay here.
-if [ ! -f "$VPY" ]; then
-  lv_stage "创建 Python 虚拟环境"
-  "$PYTHON" -m venv "$VENV"
-fi
-# Use the validated venv interpreter for the download helpers' JSON parsing.
-export LV_PY="$VPY"
-# Progress bars on even though pip sees a pipe, not a terminal.
-export PIP_PROGRESS_BAR=on
+#    lv_prepare_python_venv creates the venv, upgrades pip, and pre-installs
+#    CUDA torch on Windows+NVIDIA; VPY then points at its interpreter.
+lv_prepare_python_venv "$VENV" "$PYTHON"
 lv_stage "安装 qwen-tts 依赖（约 2 GB，首次较慢）"
-"$VPY" -m pip install --upgrade pip
-# The default PyPI torch wheel is CPU-only on Windows, so an NVIDIA machine
-# would silently fall back to CPU inference. Install a CUDA build first; the
-# qwen-tts install below then sees torch/torchaudio as already satisfied.
-if lv_is_windows && lv_has_nvidia; then
-  "$VPY" -m pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu130
-fi
 "$VPY" -m pip install --upgrade "qwen-tts"
 
 # 2. Weights. The model repo already bundles its speech tokenizer under

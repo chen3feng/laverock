@@ -85,7 +85,7 @@ a one-time Gatekeeper/SmartScreen prompt.
 
 ```sh
 # 1. Download a model (idempotent)
-./scripts/download-model.sh        # ZipVoice, ~160 MB, zh/en, ONNX
+./scripts/download-zipvoice.sh     # ZipVoice, ~160 MB, zh/en, ONNX
 ./scripts/download-kokoro.sh       # Kokoro-82M, ~135 MB, 8 langs, preset voices
 ./scripts/download-stt.sh          # SenseVoice STT, ~234 MB, auto-transcribes reference clips
 ./scripts/download-voxcpm2.sh      # VoxCPM2, ~3.3 GB, 30 langs, GGUF

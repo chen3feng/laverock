@@ -4,16 +4,12 @@
 # clips. We additionally write engine.json — the manifest the server scans.
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck source=laverock-lib.sh
-. "$SCRIPT_DIR/laverock-lib.sh"
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/laverock-lib.sh"
+lv_init
 
 MODEL="sherpa-onnx-zipvoice-distill-int8-zh-en-emilia"
 URL="https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/${MODEL}.tar.bz2"
-
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-MODELS_DIR="${LAVEROCK_MODELS_DIR:-$ROOT/models}"
-mkdir -p "$MODELS_DIR"
 
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
@@ -21,10 +17,9 @@ trap 'rm -rf "$TMP"' EXIT
 if [ -f "$MODELS_DIR/$MODEL/encoder.int8.onnx" ]; then
   echo "Model archive already extracted"
 else
-  lv_stage "下载主模型（1/3）· 约 104 MB"
-  lv_download "$URL" "$TMP/model.tar.bz2" 0
-  lv_stage "解压模型文件"
-  tar -xjf "$TMP/model.tar.bz2" -C "$MODELS_DIR"
+  # The tarball expands to the $MODEL directory under MODELS_DIR.
+  lv_extract_tarball "$URL" "$TMP/model.tar.bz2" "$MODELS_DIR" \
+    "下载主模型（1/3）· 约 104 MB"
 fi
 
 # The int8 archive omits the shared vocoder and the English lexicon;

@@ -15,13 +15,10 @@
 # Disk: GGUF 3.0 GB (Q8_0), plus a one-time ~35 MB runtime.
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck source=laverock-lib.sh
-. "$SCRIPT_DIR/laverock-lib.sh"
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/laverock-lib.sh"
+lv_init dots
 
-MODELS_DIR="${LAVEROCK_MODELS_DIR:-$ROOT/models}"
-DEST="$MODELS_DIR/dots"
 AC_VERSION="${DOTS_VERSION:-v0.9.2-drama3-base-small}"
 MODEL_KIND="${DOTS_MODEL:-dots.tts-soar}"
 
@@ -31,26 +28,13 @@ case "$MODEL_KIND" in
 esac
 GGUF="$DEST/$(basename "$PACKAGE")"
 
-mkdir -p "$DEST"
-
 # 1. Shared audio.cpp runtime (also used by the CosyVoice engine).
-TOOLS="${LAVEROCK_TOOLS_DIR:-$ROOT/.tools}"
 BIN="$(lv_audiocpp_bin "$TOOLS" "$AC_VERSION" "$MODELS_DIR")"
 BACKEND="$(lv_audiocpp_backend)"
 
 # 2. Weights (Q8_0 GGUF) from Hugging Face, in parallel ranged requests.
-if [ ! -f "$GGUF" ]; then
-  HF_BASE="${HF_ENDPOINT:-https://huggingface.co}"
-  HF_BASE="${HF_BASE%/}"
-  URL="$HF_BASE/audio-cpp/audio.cpp-gguf/resolve/main/$PACKAGE"
-  lv_stage "下载模型权重（Q8_0，约 3 GB）"
-  TOTAL=$(curl -sIL "$URL" | tr -d '\r' | awk 'tolower($1)=="content-length:" { v = $2 } END { print v + 0 }')
-  if [ "${TOTAL:-0}" -le 0 ]; then
-    echo "cannot determine the download size for $URL" >&2
-    exit 1
-  fi
-  lv_fetch_parallel "$URL" "$GGUF" "$TOTAL" 8
-fi
+lv_hf_download_file audio-cpp/audio.cpp-gguf "$PACKAGE" "$GGUF" 8 \
+  "下载模型权重（Q8_0，约 3 GB）"
 
 # 3. Manifest.
 case "$MODEL_KIND" in

@@ -10,102 +10,40 @@
 # (e.g. https://hf-mirror.com).
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck source=laverock-lib.sh
-. "$SCRIPT_DIR/laverock-lib.sh"
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/laverock-lib.sh"
 
 MODEL="kokoro-int8-multi-lang-v1_0"
 HF_REPO="csukuangfj/kokoro-int8-multi-lang-v1_0"
 GH_URL="https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/${MODEL}.tar.bz2"
 
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-MODELS_DIR="${LAVEROCK_MODELS_DIR:-$ROOT/models}"
-DEST="$MODELS_DIR/$MODEL"
-mkdir -p "$DEST"
+# The GitHub tarball expands to this $MODEL directory under MODELS_DIR.
+lv_init "$MODEL"
 
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
-# Files not needed for inference, skipped in the HuggingFace fallback.
-hf_skip() {
+# Files not needed for inference; lv_hf_download_repo honors this hook.
+lv_hf_skip() {
   case "$1" in
     .gitattributes|LICENSE|README.md|dict/README.md|dict/generate_user_dict.py|lexicon-gb-en.txt) return 0 ;;
     *) return 1 ;;
   esac
 }
 
-download_github() {
-  lv_stage "下载 Kokoro-82M INT8 打包文件 · 约 132 MB"
-  lv_download "$GH_URL" "$TMP/model.tar.bz2" 1
-  lv_stage "解压模型文件"
-  tar -xjf "$TMP/model.tar.bz2" -C "$MODELS_DIR"
-}
-
-# download_hf <outfile>: list the HF repo and write the files still
-# needed (one relative path per line) to <outfile>. Stage markers stay on
-# stdout for the desktop installer.
 download_hf() {
-  local outfile="$1"
-  local base="${HF_ENDPOINT:-https://huggingface.co}"
-  base="${base%/}"
-  lv_stage "从 HuggingFace 获取文件列表（${base}）"
-  local listing="$TMP/files.json"
-  curl -sSL --fail --retry 3 --retry-delay 2 \
-    "$base/api/models/$HF_REPO" -o "$listing"
-
-  # The API JSON is flat; pull every rfilename without a JSON dependency.
-  local files
-  files="$(grep -oE '"rfilename":[[:space:]]*"[^"]*"' "$listing" \
-    | sed 's/.*"rfilename":[[:space:]]*"//; s/"$//')"
-  if [ -z "$files" ]; then
-    echo "cannot list files of $HF_REPO" >&2
-    return 1
-  fi
-
-  : > "$outfile"
-  while IFS= read -r f; do
-    f="${f%$'\r'}"
-    [ -z "$f" ] && continue
-    hf_skip "$f" && continue
-    [ -s "$DEST/$f" ] && continue
-    printf '%s\n' "$f" >> "$outfile"
-  done <<EOF_LIST
-$files
-EOF_LIST
+  lv_stage "从 HuggingFace 镜像逐文件下载（$(lv_hf_base)）"
+  lv_hf_download_repo "$HF_REPO" "$DEST" 8
 }
 
+# Primary: one GitHub tarball. When it is unreachable (or KOKORO_SOURCE=hf),
+# files are fetched one by one from the HuggingFace mirror repo instead.
 if [ "${KOKORO_SOURCE:-}" = "hf" ]; then
-  download_hf "$TMP/todo.txt"
-elif ! download_github; then
+  download_hf
+elif ! lv_extract_tarball "$GH_URL" "$TMP/model.tar.bz2" "$MODELS_DIR" \
+      "下载 Kokoro-82M INT8 打包文件 · 约 132 MB"; then
   echo "GitHub 打包下载失败，改用 HuggingFace 镜像逐文件下载" >&2
-  download_hf "$TMP/todo.txt"
-fi
-
-# HF fallback: fetch the missing files, up to 8 transfers in parallel.
-if [ -f "$TMP/todo.txt" ]; then
-  base="${HF_ENDPOINT:-https://huggingface.co}"; base="${base%/}"
-  total_files=$(grep -vc '^$' "$TMP/todo.txt" || true)
-  n=0
-  while IFS= read -r f; do
-    f="${f%$'\r'}"
-    [ -z "$f" ] && continue
-    out="$DEST/$f"
-    mkdir -p "$(dirname "$out")"
-    # A handful of espeak data files contain spaces (e.g. "!v/Mr serious");
-    # the local name keeps the space, only the URL is percent-encoded.
-    url_f="${f// /%20}"
-    (
-      curl -sSL --fail --retry 5 --retry-delay 2 --retry-all-errors \
-        "$base/$HF_REPO/resolve/main/$url_f" -o "$out.tmp"
-      mv "$out.tmp" "$out"
-    ) &
-    n=$((n + 1))
-    if [ $((n % 8)) -eq 0 ]; then
-      lv_stage "下载 Kokoro 文件（${n}/${total_files}）"
-      wait || true
-    fi
-  done < "$TMP/todo.txt"
-  wait || true
+  download_hf
 fi
 
 # Fail loudly before writing a manifest that points at missing files

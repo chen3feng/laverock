@@ -14,7 +14,7 @@
       "tts",
       "clone"
     ],
-    "script": "download-model.sh",
+    "script": "download-zipvoice.sh",
     "env": {},
     "note": "克隆时必须提供参考音频对应的文字。",
     "note_en": "Cloning requires the transcript of the reference audio."
