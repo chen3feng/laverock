@@ -56,6 +56,12 @@ jobs:
           sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev \
             librsvg2-dev patchelf libgtk-3-dev
 
+      # macOS still ships bash 3.2, which misparses `$var` when a
+      # multibyte character follows; the install scripts are full of
+      # Chinese progress lines, so lint for it on every platform.
+      - name: Shell scripts
+        run: ./scripts/check-shell.sh
+
       - name: Format
         run: cargo fmt --all -- --check
 

@@ -492,9 +492,16 @@ lv_hf_repo_files() {
     echo "python3 is required to list $repo" >&2
     return 1
   fi
-  curl -fsSL --retry 5 --retry-delay 2 \
-    "$base/api/models/$repo/tree/main?recursive=true" \
-    | "$py" -c '
+  local listing err errfile
+  errfile="${TMPDIR:-/tmp}/lv-hf-list.$$.err"
+  listing="$(curl -fsSL --retry 3 --retry-delay 2 --connect-timeout 20 \
+    "$base/api/models/$repo/tree/main?recursive=true" 2>"$errfile")" || {
+    err="$(tr '\n' ' ' <"$errfile" 2>/dev/null | cut -c1-200)"
+    echo "无法连接模型仓库 ${base}（${err:-连接超时}）。" >&2
+    lv_hf_network_hint "$base" >&2
+    return 1
+  }
+  printf '%s' "$listing" | "$py" -c '
 import json, sys
 try:
     entries = json.load(sys.stdin)
@@ -506,6 +513,20 @@ for e in entries:
     if e.get("type") == "file" and e.get("path"):
         print("%s\t%s" % (e.get("size", 0), e["path"]))
 '
+}
+
+# Actionable guidance when the model host is unreachable: the official
+# endpoint is often blocked where hf-mirror.com works, and the user must
+# pick a mirror in the app's download settings.
+lv_hf_network_hint() {
+  local base="${1:-$(lv_hf_base)}"
+  case "$base" in
+    *hf-mirror.com*|*modelscope*)
+      echo "提示：请在应用「设置 → 下载网络」中确认镜像或代理可用，然后重试。" ;;
+    *)
+      echo "提示：如果无法访问 huggingface.co，请在应用「设置 → 下载网络」中把
+Hugging Face 镜像设为 https://hf-mirror.com（或配置代理），并在模型页重新安装。" ;;
+  esac
 }
 
 # lv_hf_download_repo <repo> <dest_dir> [workers] [file ...]
@@ -528,7 +549,8 @@ lv_hf_download_repo() {
   local listing
   listing="$(lv_hf_repo_files "$repo" "$base")" || return 1
   if [ -z "$listing" ]; then
-    echo "no files listed for $repo" >&2
+    echo "仓库 ${repo} 没有可下载的文件（${base}）" >&2
+    lv_hf_network_hint "$base" >&2
     return 1
   fi
   mkdir -p "$dest"
@@ -559,7 +581,7 @@ lv_hf_download_repo() {
     # A few espeak data files contain spaces (e.g. "!v/Mr serious"); the
     # local name keeps them, only the URL is percent-encoded.
     url="$base/$repo/resolve/main/${rel// /%20}"
-    lv_stage "下载 $rel（$(awk -v b="${size:-0}" 'BEGIN { printf "%.1f MB", b / 1048576 }')）"
+    lv_stage "下载 ${rel}（$(awk -v b="${size:-0}" 'BEGIN { printf "%.1f MB", b / 1048576 }')）"
     if [ "${size:-0}" -ge "$parallel_min" ]; then
       lv_fetch_parallel "$url" "$fdest" "$size" "$workers"
     else
