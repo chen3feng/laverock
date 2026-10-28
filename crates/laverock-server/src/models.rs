@@ -118,6 +118,9 @@ pub struct ModelView {
     pub capabilities: Vec<String>,
     pub note: Option<String>,
     pub installed: bool,
+    /// Set when the installed directory exists but cannot be used (old
+    /// runner layout, unparsable manifest): the UI offers a reinstall.
+    pub problem: Option<String>,
     pub engine_id: Option<String>,
     pub job: Option<JobView>,
 }
@@ -170,6 +173,11 @@ impl ModelService {
             let manifest = self.models_root.join(&entry.dir).join("engine.json");
             let engine_id = read_engine_id(&manifest);
             let installed = manifest.is_file();
+            let problem = if installed {
+                manifest_problem(&manifest)
+            } else {
+                None
+            };
             if let Some(id) = &engine_id {
                 known.push(id.clone());
             } else if installed {
@@ -186,6 +194,7 @@ impl ModelService {
                 capabilities: entry.capabilities.clone(),
                 note: note.map(str::to_string),
                 installed,
+                problem,
                 engine_id,
                 job: jobs.get(&entry.id).map(JobView::from),
             });
@@ -215,6 +224,7 @@ impl ModelService {
                 capabilities: engine.capabilities,
                 note: None,
                 installed: true,
+                problem: None,
                 engine_id: Some(engine.id.clone()),
                 job: None,
             });
@@ -236,12 +246,11 @@ impl ModelService {
             .cloned()
             .ok_or_else(|| CoreError::BadRequest(format!("未知的模型：{id}")))?;
 
-        if self
-            .models_root
-            .join(&entry.dir)
-            .join("engine.json")
-            .is_file()
-        {
+        // A healthy install is left alone; a broken/outdated one (e.g. the
+        // VoxCPM2 layout from the retired llama.cpp runner) may be
+        // reinstalled in place — the script rewrites engine.json.
+        let manifest_path = self.models_root.join(&entry.dir).join("engine.json");
+        if manifest_path.is_file() && manifest_problem(&manifest_path).is_none() {
             return Err(CoreError::BadRequest(format!("{} 已经安装", entry.name)));
         }
 
@@ -615,6 +624,20 @@ fn read_engine_id(manifest: &Path) -> Option<String> {
         .get("id")?
         .as_str()
         .map(std::string::ToString::to_string)
+}
+
+/// Why an installed directory is unusable, if it is. An unparsable
+/// manifest counts: the engine never registers in that case, so the
+/// model page must offer a reinstall rather than claiming it is fine.
+fn manifest_problem(manifest: &Path) -> Option<String> {
+    let raw = match std::fs::read_to_string(manifest) {
+        Ok(raw) => raw,
+        Err(e) => return Some(format!("读取 engine.json 失败：{e}")),
+    };
+    match serde_json::from_str::<laverock_core::Manifest>(&raw) {
+        Ok(m) => m.problem(),
+        Err(e) => Some(format!("engine.json 无法解析：{e}")),
+    }
 }
 
 fn catalog() -> &'static [CatalogEntry] {

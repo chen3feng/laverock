@@ -106,6 +106,7 @@
     border: 1px solid var(--line); border-radius: 999px; padding: 1px 8px;
   }
   .pill.ok { color: var(--ok); border-color: #2c4b3d; }
+  .pill.warn { color: #ffcf8f; border-color: #5c4626; }
   .chip { padding: 0 7px; margin: 0 4px 4px 0; }
   .hint { font-size: 12px; color: var(--muted); margin-top: 6px; }
   .hint.ok { color: var(--ok); }
@@ -2291,6 +2292,7 @@ function progressBarHtml(job) {
 function modelCard(model, installed) {
   const job = model.job;
   const running = !!job && job.status === 'running';
+  const stale = installed && !!model.problem;
   const failed = !!job && job.status === 'failed' && !installed;
   const engine = engineFor(model);
   const el = document.createElement('div');
@@ -2298,12 +2300,17 @@ function modelCard(model, installed) {
   el.innerHTML = `
     <div class="model-head">
       <b>${esc(model.name)}</b>
-      ${installed ? `<span class="pill ok">${t('models.installed')}</span>` : `<span class="pill">${esc(model.size || '')}</span>`}
+      ${installed
+        ? `<span class="pill ${stale ? 'warn' : 'ok'}">${stale
+          ? (lang === 'en' ? 'Needs update' : '需要更新')
+          : t('models.installed')}</span>`
+        : `<span class="pill">${esc(model.size || '')}</span>`}
     </div>
     <div class="model-desc">${esc(model.description)}</div>
     <div class="chips">${(model.languages || []).map((l) => `<span class="chip">${esc(l)}</span>`).join('')}</div>
     ${model.note ? `<div class="hint">${esc(model.note)}</div>` : ''}
-    ${installed && engine ? `<div class="hint">${esc(engine.kind)} · ${engine.loaded
+    ${stale ? `<div class="hint err">${esc(model.problem)}</div>` : ''}
+    ${installed && !stale && engine ? `<div class="hint">${esc(engine.kind)} · ${engine.loaded
       ? (lang === 'en' ? 'loaded in memory' : '已加载到内存')
       : (lang === 'en' ? 'loaded on first use' : '首次使用时加载')}</div>` : ''}
     ${running ? progressBarHtml(job) : ''}
@@ -2311,7 +2318,7 @@ function modelCard(model, installed) {
     <div class="model-actions"></div>`;
 
   const actions = el.querySelector('.model-actions');
-  if (installed) {
+  if (installed && !stale) {
     actions.innerHTML = `<span class="hint">${lang === 'en' ? 'Directory' : '目录'}: models/${esc(model.dir)}</span>`;
     return el;
   }
@@ -2320,12 +2327,20 @@ function modelCard(model, installed) {
   btn.type = 'button';
   btn.textContent = running
     ? (lang === 'en' ? 'Installing…' : '安装中…')
-    : failed
-      ? (lang === 'en' ? 'Retry install' : '重试安装')
-      : (lang === 'en' ? 'Download & install' : '下载安装');
+    : stale
+      ? (lang === 'en' ? 'Reinstall' : '重新安装')
+      : failed
+        ? (lang === 'en' ? 'Retry install' : '重试安装')
+        : (lang === 'en' ? 'Download & install' : '下载安装');
   btn.disabled = running || !modelsData.scripts_dir;
   btn.onclick = () => installModel(model.id);
   actions.appendChild(btn);
+  if (installed) {
+    const dir = document.createElement('span');
+    dir.className = 'hint';
+    dir.textContent = `${lang === 'en' ? 'Directory' : '目录'}: models/${model.dir}`;
+    actions.appendChild(dir);
+  }
   if (!modelsData.scripts_dir) {
     const hint = document.createElement('span');
     hint.className = 'hint err';

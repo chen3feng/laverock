@@ -109,6 +109,52 @@ pub struct Manifest {
 }
 
 impl Manifest {
+    /// Structural problems that make this install unusable, e.g. a
+    /// VoxCPM2 directory written by the retired llama.cpp-omni runner.
+    /// Cheap to compute (no model load), so the model manager can flag
+    /// an installed directory as "needs reinstall" before the user hits
+    /// a synthesis error.
+    pub fn problem(&self) -> Option<String> {
+        let empty_audio_cpp =
+            |cfg: &AudioCppManifest| cfg.binary.trim().is_empty() && cfg.model.trim().is_empty();
+        match self.kind {
+            EngineKind::Dots => match &self.dots {
+                None => Some("缺少 [dots] 配置段".into()),
+                Some(c) if empty_audio_cpp(c) => Some("安装来自旧的运行器，需要重新安装".into()),
+                Some(_) => None,
+            },
+            EngineKind::CosyVoice => match &self.cosyvoice {
+                None => Some("缺少 [cosyvoice] 配置段".into()),
+                Some(c) if empty_audio_cpp(c) => Some("安装来自旧的运行器，需要重新安装".into()),
+                Some(_) => None,
+            },
+            EngineKind::VoxCpm2 => match &self.voxcpm2 {
+                None => Some("缺少 [voxcpm2] 配置段".into()),
+                Some(c) if empty_audio_cpp(c) => {
+                    Some("该安装来自旧的 llama.cpp 运行器，需要重新安装".into())
+                }
+                Some(_) => None,
+            },
+            EngineKind::ZipVoice => self
+                .zipvoice
+                .is_none()
+                .then(|| "缺少 [zipvoice] 配置段".to_string()),
+            EngineKind::Qwen3Tts => self
+                .qwen3tts
+                .is_none()
+                .then(|| "缺少 [qwen3tts] 配置段".to_string()),
+            EngineKind::LongCat => self
+                .longcat
+                .is_none()
+                .then(|| "缺少 [longcat] 配置段".to_string()),
+            EngineKind::Kokoro => self
+                .kokoro
+                .is_none()
+                .then(|| "缺少 [kokoro] 配置段".to_string()),
+            EngineKind::Stt => self.stt.is_none().then(|| "缺少 [stt] 配置段".to_string()),
+        }
+    }
+
     /// Declared parameters, or the built-in set for this engine kind.
     pub fn parameters_or_defaults(&self) -> Vec<ParamSpec> {
         if self.parameters.is_empty() {
