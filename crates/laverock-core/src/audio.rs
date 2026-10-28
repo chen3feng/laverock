@@ -5,6 +5,7 @@
 
 use crate::{CoreError, Result};
 use hound::{SampleFormat, WavReader, WavSpec, WavWriter};
+use std::borrow::Cow;
 use std::io::Cursor;
 
 /// Read a WAV into interleaved normalized f32 samples plus its stream spec.
@@ -87,6 +88,45 @@ pub fn decode_wav_channels(bytes: &[u8]) -> Result<(Vec<f32>, u16, u32)> {
         stereo.push(right / nr.max(1) as f32);
     }
     Ok((stereo, 2, spec.sample_rate))
+}
+
+/// Upper bound (seconds) for a VoxCPM2 voice reference. Its AudioVAE
+/// encoder input is a fixed 240000-sample tensor at 16 kHz (= 15 s) and the
+/// reference is padded up to a patch multiple before the runtime checks its
+/// length, so 14 s leaves room for that padding and resampler tails.
+pub const VOXCPM2_MAX_REFERENCE_SECS: f32 = 14.0;
+
+/// Truncate mono samples to at most `max_seconds`, cutting at the
+/// lowest-energy 30 ms window found in the final 2 s before the hard cap so
+/// continuous speech is not sliced mid-word. The returned `Cow` borrows the
+/// input unchanged when it already fits.
+pub fn trim_reference(samples: &[f32], sample_rate: u32, max_seconds: f32) -> Cow<'_, [f32]> {
+    let sr = sample_rate.max(1) as usize;
+    let cap = (max_seconds.max(0.0) * sr as f32).round() as usize;
+    if cap == 0 || samples.len() <= cap {
+        return Cow::Borrowed(samples);
+    }
+
+    let window = (0.03 * sr as f32).round() as usize; // 30 ms
+    let window = window.clamp(1, cap);
+    let search_start = cap.saturating_sub(2 * sr); // look back up to 2 s
+    let mut best = cap - window.min(cap);
+    let mut best_energy = f32::INFINITY;
+    let mut pos = search_start;
+    while pos + window <= cap {
+        let energy = samples[pos..pos + window]
+            .iter()
+            .map(|s| s.abs())
+            .sum::<f32>()
+            / window as f32;
+        // `<=` keeps the latest window on a tie, maximizing retained length.
+        if energy <= best_energy {
+            best_energy = energy;
+            best = pos;
+        }
+        pos += window;
+    }
+    Cow::Owned(samples[..best].to_vec())
 }
 
 /// Encode mono f32 samples as 16-bit PCM WAV.
@@ -183,6 +223,45 @@ mod tests {
         assert_eq!(pcm.len(), 2);
         assert!((pcm[0] - 0.5).abs() < 0.001);
         assert!((pcm[1] + 0.5).abs() < 0.001);
+    }
+
+    #[test]
+    fn short_reference_is_untouched() {
+        let samples = vec![0.1f32; 16_000 * 5]; // 5 s
+        let out = trim_reference(&samples, 16_000, 14.0);
+        assert!(matches!(out, Cow::Borrowed(_)));
+        assert_eq!(out.len(), samples.len());
+    }
+
+    #[test]
+    fn long_reference_is_cut_within_cap() {
+        let sr = 16_000u32;
+        // 20 s: constant 0.4 tone (no quiet boundary anywhere).
+        let samples = vec![0.4f32; sr as usize * 20];
+        let out = trim_reference(&samples, sr, 14.0);
+        assert!(out.len() <= (14.0 * sr as f32) as usize);
+        // The cut stays in the final 2 s search window (>= 11.97 s kept).
+        assert!(
+            out.len() >= (11.9 * sr as f32) as usize,
+            "kept {}",
+            out.len()
+        );
+    }
+
+    #[test]
+    fn long_reference_cuts_at_silence() {
+        let sr = 16_000u32;
+        // Loud tone for the first 13 s, then silence through 20 s.
+        let mut samples = vec![0.4f32; sr as usize * 13];
+        samples.extend(vec![0.0f32; sr as usize * 7]);
+        let out = trim_reference(&samples, sr, 14.0);
+        // The cut must land in the silent tail (>= 13 s, <= 14 s).
+        assert!(out.len() >= 13 * sr as usize, "kept {}", out.len());
+        assert!(
+            out.len() <= (14.0 * sr as f32) as usize,
+            "kept {}",
+            out.len()
+        );
     }
 
     #[test]

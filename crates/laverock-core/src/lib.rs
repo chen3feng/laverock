@@ -14,7 +14,9 @@ mod qwen3tts;
 mod transcribe;
 mod zipvoice;
 
-pub use audio::{decode_wav, decode_wav_channels, encode_wav};
+pub use audio::{
+    decode_wav, decode_wav_channels, encode_wav, trim_reference, VOXCPM2_MAX_REFERENCE_SECS,
+};
 pub use manager::{
     EngineInfo, EngineManager, ProgressEvent, ProgressSink, SpeechEngine, SynthRequest,
 };

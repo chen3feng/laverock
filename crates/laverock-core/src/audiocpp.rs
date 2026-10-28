@@ -11,11 +11,12 @@
 //!   cross-lingual and instruction templates.
 
 use crate::{
-    decode_wav, encode_wav, Audio, CoreError, Manifest, ProgressEvent, Result, SpeechEngine,
-    SynthRequest,
+    decode_wav, encode_wav, trim_reference, Audio, CoreError, Manifest, ProgressEvent, Result,
+    SpeechEngine, SynthRequest, VOXCPM2_MAX_REFERENCE_SECS,
 };
 use serde_json::Value;
 use std::{
+    borrow::Cow,
     io::{BufRead, BufReader, Read},
     path::{Path, PathBuf},
     process::{Command, Stdio},
@@ -190,7 +191,28 @@ impl SpeechEngine for AudioCppEngine {
         let out_wav = tmp.join("out.wav");
         let ref_wav = if has_prompt {
             let path = tmp.join("reference.wav");
-            let bytes = encode_wav(&req.prompt_samples, req.prompt_sr)?;
+            // VoxCPM2's AudioVAE encoder tensor holds 240000 samples at 16 kHz
+            // (15 s, with patch padding) and the runtime ignores
+            // --reference-duration-seconds for this family, so an overlong
+            // voice reference must be trimmed on our side before encoding.
+            let reference = if self.family == Family::VoxCpm2 {
+                trim_reference(
+                    &req.prompt_samples,
+                    req.prompt_sr as u32,
+                    VOXCPM2_MAX_REFERENCE_SECS,
+                )
+            } else {
+                Cow::Borrowed(req.prompt_samples.as_slice())
+            };
+            if reference.len() < req.prompt_samples.len() {
+                if let Some(cb) = &req.progress {
+                    let kept = reference.len() as f32 / req.prompt_sr.max(1) as f32;
+                    cb(ProgressEvent::Stage(format!(
+                        "参考音频过长，VoxCPM2 已自动截取开头约 {kept:.0} 秒"
+                    )));
+                }
+            }
+            let bytes = encode_wav(&reference, req.prompt_sr)?;
             std::fs::write(&path, bytes).map_err(CoreError::from)?;
             Some(path)
         } else {
@@ -437,6 +459,7 @@ mod tests {
     fn manifest(kind: &str) -> Manifest {
         let (section, id) = match kind {
             "dots" => ("dots", "dots"),
+            "voxcpm2" => ("voxcpm2", "voxcpm2"),
             _ => ("cosyvoice", "cosyvoice"),
         };
         let json = serde_json::json!({
@@ -458,8 +481,10 @@ mod tests {
         std::fs::write(
             dir.join("fake_cli.sh"),
             "#!/usr/bin/env bash\nprintf '%s\\n' \"$@\" > \"$(dirname \"$0\")/args.txt\"\n\
-             out=\"\"\nwhile [ $# -gt 0 ]; do [ \"$1\" = \"--out\" ] && out=$2; shift; done\n\
-             cp \"$(dirname \"$0\")/fx.wav\" \"$out\"\n",
+             out=\"\"; ref=\"\"\nwhile [ $# -gt 0 ]; do [ \"$1\" = \"--out\" ] && out=$2; \
+             [ \"$1\" = \"--voice-ref\" ] && ref=$2; shift; done\n\
+             d=\"$(dirname \"$0\")\"; cp \"$d/fx.wav\" \"$out\"\n\
+             [ -n \"$ref\" ] && cp \"$ref\" \"$d/ref.wav\"\n",
         )
         .unwrap();
         #[cfg(unix)]
@@ -473,8 +498,12 @@ mod tests {
         let wav = crate::encode_wav(&vec![0.0; 2400], 24_000).unwrap();
         std::fs::write(dir.join("fx.wav"), wav).unwrap();
         let m = manifest(kind);
-        AudioCppEngine::build(dir, &m, super::Family::Dots)
-            .unwrap_or_else(|_| AudioCppEngine::build(dir, &m, super::Family::CosyVoice).unwrap())
+        let family = match kind {
+            "dots" => super::Family::Dots,
+            "voxcpm2" => super::Family::VoxCpm2,
+            _ => super::Family::CosyVoice,
+        };
+        AudioCppEngine::build(dir, &m, family).expect("engine")
     }
 
     fn request(params: &[(&str, serde_json::Value)]) -> SynthRequest {
@@ -593,6 +622,39 @@ mod tests {
         req.prompt_samples.clear();
         assert!(engine.synthesize(&req).is_err());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn voxcpm2_trims_overlong_reference() {
+        let dir = args_dir("vox-trim");
+        let engine = fixture(&dir, "voxcpm2");
+        let mut req = request(&[]);
+        // 25 s @ 24 kHz — well beyond the 14 s trim ceiling.
+        req.prompt_samples = vec![0.2f32; 24_000 * 25];
+        engine.synthesize(&req).expect("synthesis");
+        let ref_bytes = std::fs::read(dir.join("ref.wav")).expect("voice-ref copied out");
+        let (trimmed, rate) = crate::decode_wav(&ref_bytes).expect("ref is a wav");
+        assert_eq!(rate, 24_000);
+        // At most 14 s, and the cut landed within the final 2 s window
+        // (>= 11.9 s retained) even with no silence to target.
+        assert!(trimmed.len() <= 14 * 24_000, "kept {}", trimmed.len());
+        assert!(
+            trimmed.len() >= (11.9 * 24_000.0) as usize,
+            "kept {}",
+            trimmed.len()
+        );
+
+        // A short reference passes through untouched.
+        let dir2 = args_dir("vox-trim2");
+        let engine2 = fixture(&dir2, "voxcpm2");
+        let mut req2 = request(&[]);
+        req2.prompt_samples = vec![0.2f32; 24_000 * 5];
+        engine2.synthesize(&req2).expect("synthesis");
+        let ref_bytes2 = std::fs::read(dir2.join("ref.wav")).expect("voice-ref copied out");
+        let (short, _) = crate::decode_wav(&ref_bytes2).expect("ref is a wav");
+        assert_eq!(short.len(), 24_000 * 5);
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_dir_all(&dir2);
     }
 
     #[test]
