@@ -79,6 +79,16 @@ impl AudioCppEngine {
             ))
         })?;
 
+        // A manifest from an older runner (VoxCPM2 used llama.cpp-omni
+        // with `base_lm`/`acoustic`) has no audio.cpp fields at all.
+        if cfg.binary.is_empty() && cfg.model.is_empty() {
+            return Err(CoreError::Load(format!(
+                "{}: 该安装来自旧的运行器，请重新运行 scripts/download-voxcpm2.sh \
+                 （VoxCPM2 已改为 audio.cpp 运行时）",
+                manifest.id
+            )));
+        }
+
         let binary = resolve_path(dir, &cfg.binary);
         if !binary.is_file() {
             return Err(CoreError::Load(format!(

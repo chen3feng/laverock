@@ -658,8 +658,16 @@ fn default_longcat_seed() -> i64 {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AudioCppManifest {
     /// `audiocpp_cli` path, absolute or relative to the model directory.
+    ///
+    /// Defaulted so manifests written for a previous runner (VoxCPM2 used
+    /// llama.cpp-omni and carried `base_lm`/`acoustic` instead) still
+    /// parse: the engine then fails at load time with an actionable
+    /// "reinstall" message instead of silently disappearing from the
+    /// engine list.
+    #[serde(default)]
     pub binary: String,
     /// GGUF weights, absolute or relative to the model directory.
+    #[serde(default)]
     pub model: String,
     /// audio.cpp backend: `best`, `metal`, `cuda`, `vulkan`, `cpu`…
     #[serde(default = "default_dots_backend")]
@@ -804,6 +812,17 @@ mod tests {
             ["template", "instruct", "num_steps", "top_k", "seed"]
         );
         assert_eq!(params[1].kind, ParamKind::TextArea);
+
+        // A VoxCPM2 install from the llama.cpp-omni era must still parse
+        // so the engine stays visible and reports "reinstall"; dropping it
+        // from the scan would look like the model vanished.
+        let legacy: Manifest = serde_json::from_str(
+            r#"{"id":"voxcpm2","kind":"voxcpm2","name":"v",
+                "voxcpm2":{"base_lm":"a.gguf","acoustic":"b.gguf","cfg":2.0}}"#,
+        )
+        .expect("legacy voxcpm2 manifest still parses");
+        let cfg = legacy.voxcpm2.as_ref().expect("voxcpm2 section");
+        assert!(cfg.binary.is_empty() && cfg.model.is_empty());
         assert_eq!(params[4].default, serde_json::json!(1986));
     }
 
