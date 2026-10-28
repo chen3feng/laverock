@@ -12,14 +12,10 @@
 # Disk: Q8_0 2.3 GB (the runtime is downloaded once, ~35 MB).
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck source=laverock-lib.sh
-. "$SCRIPT_DIR/laverock-lib.sh"
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/laverock-lib.sh"
+lv_init cosyvoice
 
-MODELS_DIR="${LAVEROCK_MODELS_DIR:-$ROOT/models}"
-TOOLS="${LAVEROCK_TOOLS_DIR:-$ROOT/.tools}"
-DEST="$MODELS_DIR/cosyvoice"
 AC_VERSION="${DOTS_VERSION:-v0.9.2-drama3-base-small}"
 PRECISION="${COSYVOICE_PRECISION:-q8_0}"
 
@@ -29,25 +25,14 @@ case "$PRECISION" in
 esac
 GGUF="$DEST/$GGUF_NAME"
 
-mkdir -p "$DEST"
-
 # 1. Shared audio.cpp runtime.
 BIN="$(lv_audiocpp_bin "$TOOLS" "$AC_VERSION" "$MODELS_DIR")"
 BACKEND="$(lv_audiocpp_backend)"
 
 # 2. Weights.
-if [ ! -f "$GGUF" ]; then
-  HF_BASE="${HF_ENDPOINT:-https://huggingface.co}"
-  HF_BASE="${HF_BASE%/}"
-  URL="$HF_BASE/audio-cpp/audio.cpp-gguf/resolve/main/CosyVoice3-GGUF/$GGUF_NAME"
-  lv_stage "下载 CosyVoice3 权重（${SIZE_NOTE}）"
-  TOTAL=$(curl -sIL "$URL" | tr -d '\r' | awk 'tolower($1)=="content-length:" { v = $2 } END { print v + 0 }')
-  if [ "${TOTAL:-0}" -le 0 ]; then
-    echo "cannot determine the download size for $URL" >&2
-    exit 1
-  fi
-  lv_fetch_parallel "$URL" "$GGUF" "$TOTAL" 8
-fi
+lv_hf_download_file audio-cpp/audio.cpp-gguf \
+  "CosyVoice3-GGUF/$GGUF_NAME" "$GGUF" 8 \
+  "下载 CosyVoice3 权重（${SIZE_NOTE}）"
 
 # 3. Manifest.
 cat > "$DEST/engine.json" <<EOF

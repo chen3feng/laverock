@@ -72,7 +72,7 @@ Windows 包未签名——首次打开会有一次 Gatekeeper/SmartScreen 提示
 
 ```sh
 # 1. 下载模型（可重复执行）
-./scripts/download-model.sh        # ZipVoice，约 160 MB，中英，ONNX
+./scripts/download-zipvoice.sh     # ZipVoice，约 160 MB，中英，ONNX
 ./scripts/download-kokoro.sh       # Kokoro-82M，约 135 MB，8 种语言，预置音色
 ./scripts/download-stt.sh          # SenseVoice 语音识别，约 234 MB，录音自动转写
 ./scripts/download-voxcpm2.sh      # VoxCPM2，约 3.3 GB，30 种语言，GGUF

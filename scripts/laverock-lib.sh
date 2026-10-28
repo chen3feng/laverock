@@ -14,6 +14,26 @@
 # Windows; force UTF-8 stdout so cp1252 never raises UnicodeEncodeError.
 export PYTHONIOENCODING=utf-8
 
+# lv_init [model_dir]
+#
+# Standard download-script preamble. Call right after sourcing this file.
+# Sets SCRIPT_DIR/ROOT/MODELS_DIR/TOOLS from the calling script's location
+# (scripts/ sits one level below the repo root); with a model_dir argument
+# also sets DEST=$MODELS_DIR/<model_dir> and creates it.
+lv_init() {
+  local caller="${BASH_SOURCE[1]:-${0:-}}"
+  SCRIPT_DIR="$(cd "$(dirname "$caller")" && pwd)"
+  ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+  MODELS_DIR="${LAVEROCK_MODELS_DIR:-$ROOT/models}"
+  TOOLS="${LAVEROCK_TOOLS_DIR:-$ROOT/.tools}"
+  if [ -n "${1:-}" ]; then
+    DEST="$MODELS_DIR/$1"
+    mkdir -p "$DEST"
+  else
+    mkdir -p "$MODELS_DIR"
+  fi
+}
+
 # lv_stage <label>
 lv_stage() {
   printf '@@LV stage %s\n' "$*"
@@ -77,14 +97,58 @@ lv_venv_python() {
   fi
 }
 
-# lv_venv_cli <venv_dir> <command>: console-script executable in a venv.
-# e.g. lv_venv_cli "$venv" huggingface-cli
-lv_venv_cli() {
-  local venv="$1" name="$2"
+# lv_find_python [explicit]: echo a usable Python 3.10-3.12 interpreter.
+# Prefers the explicit override, then versioned names (newest first); on
+# Windows plain `python` comes before the often-broken `python3` alias.
+lv_find_python() {
+  local explicit="${1:-}" candidate
+  if [ -n "$explicit" ] && command -v "$explicit" >/dev/null 2>&1; then
+    printf '%s\n' "$explicit"
+    return 0
+  fi
+  local candidates="python3.12 python3.11 python3.10"
   if lv_is_windows; then
-    printf '%s/Scripts/%s.exe' "$venv" "$name"
+    candidates="$candidates python python3 py"
   else
-    printf '%s/bin/%s' "$venv" "$name"
+    candidates="$candidates python3"
+  fi
+  for candidate in $candidates; do
+    if command -v "$candidate" >/dev/null 2>&1; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+  return 1
+}
+
+# lv_prepare_python_venv <venv_dir> <python>
+#
+# Create the isolated venv if needed, export LV_PY to its interpreter (the
+# download helpers parse JSON with it), upgrade pip, and on Windows with an
+# NVIDIA GPU pre-install the CUDA torch build so the default CPU-only PyPI
+# wheel is never silently used. Sets VPY in the caller for its own pip calls.
+lv_prepare_python_venv() {
+  local venv="$1" python="$2"
+  VPY="$(lv_venv_python "$venv")"
+  if [ ! -f "$VPY" ]; then
+    lv_stage "创建 Python 虚拟环境"
+    "$python" -m venv "$venv"
+  fi
+  export LV_PY="$VPY"
+  # Progress bars on even though pip sees a pipe, not a terminal.
+  export PIP_PROGRESS_BAR=on
+  lv_stage "升级 pip"
+  "$VPY" -m pip install --upgrade pip
+  if lv_is_windows && lv_has_nvidia \
+     && ! "$VPY" -c 'import torch, torchaudio, sys; sys.exit(0 if torch.version.cuda else 1)' 2>/dev/null
+  then
+    # The default PyPI torch wheel is CPU-only on Windows (version.cuda is
+    # None); install a CUDA build first so the engine's own requirements
+    # leave torch satisfied. A CUDA-enabled torch already present is left
+    # alone, so reruns do not re-resolve the multi-GB package.
+    lv_stage "安装 CUDA 版 PyTorch（首次约 1–2 GB）"
+    "$VPY" -m pip install torch torchaudio \
+      --index-url https://download.pytorch.org/whl/cu130
   fi
 }
 
@@ -407,6 +471,13 @@ lv_pybin() {
   fi
 }
 
+# lv_hf_base: HuggingFace base URL honoring HF_ENDPOINT (e.g. an
+# hf-mirror.com override), trailing slash removed.
+lv_hf_base() {
+  local base="${HF_ENDPOINT:-https://huggingface.co}"
+  printf '%s' "${base%/}"
+}
+
 # lv_hf_repo_files <repo> [hf_base]
 #
 # Print `size<TAB>path` for every regular file on a repo's main branch via
@@ -415,8 +486,7 @@ lv_pybin() {
 # HEAD negotiation rejects their redirects (the X-Repo-Commit header is
 # dropped -> FileMetadataError).
 lv_hf_repo_files() {
-  local repo="$1" base="${2:-${HF_ENDPOINT:-https://huggingface.co}}"
-  base="${base%/}"
+  local repo="$1" base="${2:-$(lv_hf_base)}"
   local py; py="$(lv_pybin)"
   if [ -z "$py" ]; then
     echo "python3 is required to list $repo" >&2
@@ -446,13 +516,13 @@ for e in entries:
 # Files >= 8 MiB go through lv_fetch_parallel (resumable ranged slices);
 # smaller files use a single curl. A file already present with the exact
 # expected size is skipped, so re-runs resume cheaply. With extra `file`
-# arguments only those repo paths are fetched.
+# arguments only those repo paths are fetched; a caller-defined
+# `lv_hf_skip <path>` function (returning 0) excludes paths otherwise.
 lv_hf_download_repo() {
   local repo="$1" dest="$2" workers="${3:-8}"
   shift 3 2>/dev/null || true
   local wants=("$@")
-  local base="${HF_ENDPOINT:-https://huggingface.co}"
-  base="${base%/}"
+  local base; base="$(lv_hf_base)"
   local parallel_min=$((8 * 1024 * 1024))
 
   local listing
@@ -471,6 +541,9 @@ lv_hf_download_repo() {
     # so the allowlist string compare matches on every line.
     rel="${rel%$'\r'}"
     [ -n "${rel:-}" ] || continue
+    if declare -F lv_hf_skip >/dev/null 2>&1 && lv_hf_skip "$rel"; then
+      continue
+    fi
     if [ "${#wants[@]}" -gt 0 ]; then
       ok=0
       for w in "${wants[@]}"; do
@@ -483,7 +556,9 @@ lv_hf_download_repo() {
     if [ -f "$fdest" ] && [ "$(lv_filesize "$fdest")" = "${size:-0}" ]; then
       continue
     fi
-    url="$base/$repo/resolve/main/$rel"
+    # A few espeak data files contain spaces (e.g. "!v/Mr serious"); the
+    # local name keeps them, only the URL is percent-encoded.
+    url="$base/$repo/resolve/main/${rel// /%20}"
     lv_stage "下载 $rel（$(awk -v b="${size:-0}" 'BEGIN { printf "%.1f MB", b / 1048576 }')）"
     if [ "${size:-0}" -ge "$parallel_min" ]; then
       lv_fetch_parallel "$url" "$fdest" "$size" "$workers"
@@ -509,26 +584,39 @@ lv_hf_download_repo() {
   fi
 }
 
-# lv_track <dir> <total_bytes> <command...>
+# lv_hf_download_file <repo> <repo_path> <dest> [workers] [label]
 #
-# Run a command that fills <dir> (e.g. `hf download --local-dir`) and
-# report growth against the expected total. Tools like huggingface-cli
-# only draw progress bars on a TTY, so the UI would otherwise sit on a
-# stage label for the whole multi-GB download.
-lv_track() {
-  local dir="$1" total="$2"
-  shift 2
-  "$@" &
-  local pid=$!
-  while kill -0 "$pid" 2>/dev/null; do
-    sleep 2
-    local have_kb
-    have_kb=$(du -sk "$dir" 2>/dev/null | awk '{print $1}')
-    if [ "${total:-0}" -gt 0 ]; then
-      lv_progress "$(awk -v s="${have_kb:-0}" -v t="$((total / 1024))" 'BEGIN { if (t > 0) printf "%.1f", s * 100 / t }')"
-    fi
-  done
-  wait "$pid"
+# Download one LFS file from <repo>'s main branch via a resolve URL, using
+# lv_fetch_parallel with the server-advertised size (resumable ranged
+# slices). A non-empty existing <dest> is left untouched.
+lv_hf_download_file() {
+  local repo="$1" rel="$2" dest="$3" workers="${4:-8}" label="${5:-下载 $rel}"
+  if [ -s "$dest" ]; then
+    return 0
+  fi
+  local url; url="$(lv_hf_base)/$repo/resolve/main/${rel// /%20}"
+  local total; total="$(lv_content_length "$url")"
+  if [ "${total:-0}" -le 0 ]; then
+    echo "cannot determine the download size for $url" >&2
+    return 1
+  fi
+  lv_stage "$label"
+  mkdir -p "$(dirname "$dest")"
+  lv_fetch_parallel "$url" "$dest" "$total" "$workers"
+}
+
+# lv_extract_tarball <url> <tar_path> <extract_dir> [label]
+#
+# Download a .tar.bz2 release asset to <tar_path> and extract it into
+# <extract_dir> (created). Non-zero on a failed/empty download.
+lv_extract_tarball() {
+  local url="$1" tar_path="$2" extract_dir="$3" label="${4:-下载打包文件}"
+  lv_stage "$label"
+  lv_download "$url" "$tar_path" || return 1
+  [ -s "$tar_path" ] || { echo "downloaded archive is empty: $url" >&2; return 1; }
+  lv_stage "解压模型文件"
+  mkdir -p "$extract_dir"
+  tar -xjf "$tar_path" -C "$extract_dir"
 }
 
 # lv_download <url> <dest> [resume]

@@ -9,21 +9,17 @@
 # Disk: torch and friends ~1-2 GB, weights 5.7 GB (1B) or 15.3 GB (3.5B).
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck source=laverock-lib.sh
-. "$SCRIPT_DIR/laverock-lib.sh"
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/laverock-lib.sh"
+lv_init longcat
 
-MODELS_DIR="${LAVEROCK_MODELS_DIR:-$ROOT/models}"
-TOOLS="${LAVEROCK_TOOLS_DIR:-$ROOT/.tools}"
 MODEL="${LONGCAT_MODEL:-meituan-longcat/LongCat-AudioDiT-1B}"
-DEST="$MODELS_DIR/longcat"
 SRC="$TOOLS/LongCat-AudioDiT"
 VENV="$TOOLS/longcat-venv"
 WEIGHTS="$DEST/weights"
 TOKENIZER="$DEST/tokenizer"
 # Native (E:/..) forms for the Windows python child and the manifest; the
-# POSIX vars above stay for bash-side mkdir/find/lv_track.
+# POSIX vars above stay for bash-side mkdir/find/cp.
 WEIGHTS_N="$(lv_native_path "$WEIGHTS")"
 TOKENIZER_N="$(lv_native_path "$TOKENIZER")"
 
@@ -33,24 +29,12 @@ case "$MODEL" in
 esac
 
 # transformers 5.x needs Python 3.10+; prefer the newest supported one.
-PYTHON="${LONGCAT_PYTHON:-}"
-if [ -z "$PYTHON" ]; then
-  candidates="python3.12 python3.11 python3.10 python3"
-  if lv_is_windows; then
-    candidates="python3.12 python3.11 python3.10 python python3 py"
-  fi
-  for candidate in $candidates; do
-    if command -v "$candidate" >/dev/null 2>&1; then
-      PYTHON="$candidate"
-      break
-    fi
-  done
-fi
-command -v "$PYTHON" >/dev/null 2>&1 || { echo "a Python 3.10+ interpreter is required" >&2; exit 1; }
+PYTHON="$(lv_find_python "${LONGCAT_PYTHON:-}")" || {
+  echo "a Python 3.10+ interpreter is required" >&2; exit 1; }
 command -v git >/dev/null 2>&1 || { echo "git is required to fetch the audiodit package" >&2; exit 1; }
 echo "Using $("$PYTHON" --version 2>&1) ($PYTHON)"
 
-mkdir -p "$MODELS_DIR" "$DEST" "$TOOLS"
+mkdir -p "$TOOLS"
 
 # 1. Official implementation (contains the `audiodit` package).
 if [ ! -d "$SRC/.git" ]; then
@@ -58,23 +42,11 @@ if [ ! -d "$SRC/.git" ]; then
   git clone --depth 1 --progress https://github.com/meituan-longcat/LongCat-AudioDiT.git "$SRC"
 fi
 
-# 2. Isolated environment. Windows venvs use Scripts/ instead of bin/.
-VPY="$(lv_venv_python "$VENV")"
-if [ ! -f "$VPY" ]; then
-  lv_stage "创建 Python 虚拟环境"
-  "$PYTHON" -m venv "$VENV"
-fi
-# Use the validated venv interpreter for the download helpers' JSON parsing.
-export LV_PY="$VPY"
-export PIP_PROGRESS_BAR=on
+# 2. Isolated environment. lv_prepare_python_venv creates the venv, upgrades
+#    pip, and pre-installs CUDA torch on Windows+NVIDIA; VPY points at its
+#    interpreter (also used by the HF helpers for JSON parsing via LV_PY).
+lv_prepare_python_venv "$VENV" "$PYTHON"
 lv_stage "安装依赖（PyTorch 与 transformers 5，约 1–2 GB）"
-"$VPY" -m pip install --upgrade pip
-# The default PyPI torch wheel is CPU-only on Windows; install a CUDA build
-# first so an NVIDIA machine does not silently fall back to CPU inference.
-# The requirements.txt install below then leaves torch/torchaudio alone.
-if lv_is_windows && lv_has_nvidia; then
-  "$VPY" -m pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu130
-fi
 "$VPY" -m pip install -r "$SRC/requirements.txt"
 # The UMT5 tokenizer ships a SentencePiece model; transformers can fall
 # back to it when converting, so keep the library available.

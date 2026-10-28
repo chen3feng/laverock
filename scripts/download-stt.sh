@@ -9,33 +9,27 @@
 # (e.g. https://hf-mirror.com).
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck source=laverock-lib.sh
-. "$SCRIPT_DIR/laverock-lib.sh"
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/laverock-lib.sh"
 
-# Canonical model id/dir matches the HuggingFace repo naming; the GitHub
-# release asset and its extracted directory spell it differently.
+# Canonical model id/dir matches the GitHub asset naming; the HuggingFace
+# repo spells it differently again: it omits the -int8 suffix and holds
+# model.int8.onnx (239 MB) next to the full-precision weights.
 MODEL="sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17-int8"
 ASSET="sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17"
-HF_REPO="csukuangfj/$MODEL"
+HF_REPO="csukuangfj/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17"
 GH_URL="https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/${ASSET}.tar.bz2"
 
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-MODELS_DIR="${LAVEROCK_MODELS_DIR:-$ROOT/models}"
-DEST="$MODELS_DIR/$MODEL"
-mkdir -p "$DEST"
+lv_init "$MODEL"
 
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
 download_github() {
-  lv_stage "Downloading SenseVoice INT8 tarball (~234 MB)"
-  lv_download "$GH_URL" "$TMP/model.tar.bz2" 1
-  [ -s "$TMP/model.tar.bz2" ] || return 1
-  lv_stage "Extracting"
-  mkdir -p "$TMP/extract"
-  tar -xjf "$TMP/model.tar.bz2" -C "$TMP/extract"
-  # The archive's top-level directory is named $ASSET, not $MODEL.
+  # Extract into TMP: the archive's top-level directory is named $ASSET,
+  # not $MODEL, so locate the model dir and move it into place.
+  lv_extract_tarball "$GH_URL" "$TMP/model.tar.bz2" "$TMP/extract" \
+    "Downloading SenseVoice INT8 tarball (~234 MB)" || return 1
   local src
   src="$(find "$TMP/extract" -maxdepth 2 -type f -name model.int8.onnx -print -quit | xargs -r dirname)"
   [ -n "$src" ] || return 1
@@ -43,68 +37,20 @@ download_github() {
   mv "$src" "$DEST"
 }
 
-# The API JSON is flat; pull every rfilename without a JSON dependency.
+# HF fallback: only the two inference files; the repo's docs and test
+# clips are skipped. lv_hf_download_repo lists via the tree API, resumes
+# per file, and never uses --retry-all-errors (which double-appends a
+# fixed curl range after a mid-transfer reset).
 download_hf() {
-  local outfile="$1"
-  local base="${HF_ENDPOINT:-https://huggingface.co}"
-  base="${base%/}"
-  lv_stage "Fetching file list from HuggingFace (${base})"
-  local listing="$TMP/files.json"
-  curl -sSL --fail --retry 3 --retry-delay 2 \
-    "$base/api/models/$HF_REPO" -o "$listing"
-
-  local files
-  files="$(grep -oE '"rfilename":[[:space:]]*"[^"]*"' "$listing" \
-    | sed 's/.*"rfilename":[[:space:]]*"//; s/"$//')"
-  if [ -z "$files" ]; then
-    echo "cannot list files of $HF_REPO" >&2
-    return 1
-  fi
-
-  : > "$outfile"
-  while IFS= read -r f; do
-    f="${f%$'\r'}"
-    [ -z "$f" ] && continue
-    case "$f" in
-      model.int8.onnx|tokens.txt) printf '%s\n' "$f" >> "$outfile" ;;
-      *) continue ;;
-    esac
-  done <<EOF_LIST
-$files
-EOF_LIST
+  lv_stage "Fetching files from HuggingFace ($(lv_hf_base))"
+  lv_hf_download_repo "$HF_REPO" "$DEST" 8 model.int8.onnx tokens.txt
 }
 
 if [ "${STT_SOURCE:-}" = "hf" ]; then
-  download_hf "$TMP/todo.txt"
+  download_hf
 elif ! download_github; then
   echo "GitHub tarball unavailable, falling back to per-file HuggingFace download" >&2
-  download_hf "$TMP/todo.txt"
-fi
-
-# HF fallback: fetch needed files, up to 8 in parallel.
-if [ -f "$TMP/todo.txt" ]; then
-  base="${HF_ENDPOINT:-https://huggingface.co}"; base="${base%/}"
-  total_files=$(grep -vc '^$' "$TMP/todo.txt" || true)
-  n=0
-  while IFS= read -r f; do
-    f="${f%$'\r'}"
-    [ -z "$f" ] && continue
-    [ -s "$DEST/$f" ] && continue
-    out="$DEST/$f"
-    mkdir -p "$(dirname "$out")"
-    url_f="${f// /%20}"
-    (
-      curl -sSL --fail --retry 5 --retry-delay 2 --retry-all-errors \
-        "$base/$HF_REPO/resolve/main/$url_f" -o "$out.tmp"
-      mv "$out.tmp" "$out"
-    ) &
-    n=$((n + 1))
-    if [ $((n % 8)) -eq 0 ]; then
-      lv_stage "Downloading STT model (${n}/${total_files})"
-      wait || true
-    fi
-  done < "$TMP/todo.txt"
-  wait || true
+  download_hf
 fi
 
 # Fail loudly before writing a manifest pointing at missing files.

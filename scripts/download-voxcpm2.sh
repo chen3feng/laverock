@@ -14,38 +14,22 @@
 # Disk: ~2.8 GB Q8_0 weights, plus the one-time shared audio.cpp runtime.
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck source=laverock-lib.sh
-. "$SCRIPT_DIR/laverock-lib.sh"
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/laverock-lib.sh"
+lv_init voxcpm2
 
-MODELS_DIR="${LAVEROCK_MODELS_DIR:-$ROOT/models}"
-TOOLS="${LAVEROCK_TOOLS_DIR:-$ROOT/.tools}"
-DEST="$MODELS_DIR/voxcpm2"
 AC_VERSION="${DOTS_VERSION:-v0.9.2-drama3-base-small}"
 PRECISION="${VOXCPM2_PRECISION:-q8_0}"
 PACKAGE="VoxCPM2-GGUF/voxcpm2-${PRECISION}.gguf"
 GGUF="$DEST/$(basename "$PACKAGE")"
-
-mkdir -p "$DEST"
 
 # 1. Shared audio.cpp runtime (CUDA on Windows machines with an NVIDIA GPU).
 BIN="$(lv_audiocpp_bin "$TOOLS" "$AC_VERSION" "$MODELS_DIR")"
 BACKEND="$(lv_audiocpp_backend)"
 
 # 2. Weights from the audio.cpp GGUF repo, in parallel ranged requests.
-if [ ! -f "$GGUF" ]; then
-  HF_BASE="${HF_ENDPOINT:-https://huggingface.co}"
-  HF_BASE="${HF_BASE%/}"
-  URL="$HF_BASE/audio-cpp/audio.cpp-gguf/resolve/main/$PACKAGE"
-  lv_stage "下载 VoxCPM2 权重（${PRECISION}，约 2.8 GB）"
-  TOTAL=$(curl -sIL "$URL" | tr -d '\r' | awk 'tolower($1)=="content-length:" { v = $2 } END { print v + 0 }')
-  if [ "${TOTAL:-0}" -le 0 ]; then
-    echo "cannot determine the download size for $URL" >&2
-    exit 1
-  fi
-  lv_fetch_parallel "$URL" "$GGUF" "$TOTAL" 8
-fi
+lv_hf_download_file audio-cpp/audio.cpp-gguf "$PACKAGE" "$GGUF" 8 \
+  "下载 VoxCPM2 权重（${PRECISION}，约 2.8 GB）"
 
 # 3. Manifest. VoxCPM2 supports prompt-less TTS as well as zero-shot cloning;
 #    the runner adds --voice-ref only when the request carries a prompt.

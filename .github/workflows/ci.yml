@@ -84,10 +84,10 @@ jobs:
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: models/sherpa-onnx-zipvoice-distill-int8-zh-en-emilia
-          key: zipvoice-int8-${{ hashFiles('scripts/download-model.sh') }}
+          key: zipvoice-int8-${{ hashFiles('scripts/download-zipvoice.sh') }}
 
       - name: Download model
-        run: ./scripts/download-model.sh
+        run: ./scripts/download-zipvoice.sh
 
       - name: Build server
         run: |
