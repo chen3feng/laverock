@@ -216,7 +216,8 @@ macOS 会弹窗请求权限，之后会被记住。
 | POST | `/api/transcribe` | multipart：`audio`（WAV）→ 转写文字（需下载 SenseVoice 模型） |
 | POST | `/api/profiles/:id` | multipart：`name`、`prompt_text`、可选 `prompt` → 编辑声音 |
 | GET | `/api/profiles/:id/export` | 导出便携 `.lvvoice.zip`（清单 + WAV） |
-| POST | `/api/profiles/import` | multipart：`file` 为 `.lvvoice.zip` → 导入声音 |
+| POST | `/api/profiles/export` | JSON `{ids:[...]}` → 打包为单个 `.lvvoices.zip` |
+| POST | `/api/profiles/import` | multipart：`file` 为单个/批量 `.lvvoice(s).zip`；`strategy=skip`（默认跳过重复）/`copy`（副本）/`overwrite`（覆盖） |
 | DELETE | `/api/profiles/:id` | 删除已保存声音 |
 | GET | `/api/history` | 已生成音频，最新在前 |
 | GET | `/api/history/:id/audio` | 生成的音频（`?format=mp3` 导出 MP3） |

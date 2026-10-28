@@ -665,45 +665,143 @@ fn percent_encode(bytes: &[u8]) -> String {
     out
 }
 
-/// Import an exported voice archive (multipart field `file` or `voice`).
+#[derive(serde::Deserialize)]
+struct ExportBatch {
+    ids: Vec<String>,
+}
+
+/// Pack several selected voices into one `.lvvoices.zip` archive.
+async fn export_profiles_batch(
+    State(state): State<AppState>,
+    Json(body): Json<ExportBatch>,
+) -> Result<Response, ApiError> {
+    if body.ids.is_empty() {
+        return Err(ApiError::bad_request("no voices selected"));
+    }
+    // Validate ids before the blocking pack.
+    let known: std::collections::HashSet<String> = state
+        .profiles
+        .list()?
+        .into_iter()
+        .map(|p| p.meta.id)
+        .collect();
+    for id in &body.ids {
+        if !known.contains(id) {
+            return Err(ApiError {
+                status: StatusCode::NOT_FOUND,
+                message: format!("voice {id} not found"),
+            });
+        }
+    }
+    let profiles = state.profiles.clone();
+    let zip = tokio::task::spawn_blocking(move || profiles.export_zip_batch(&body.ids))
+        .await
+        .map_err(|e| ApiError {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            message: format!("export task panicked: {e}"),
+        })??;
+    let stamp = chrono_stamp();
+    Ok((
+        StatusCode::OK,
+        [
+            (header::CONTENT_TYPE, "application/zip".to_string()),
+            (
+                header::CONTENT_DISPOSITION,
+                format!("attachment; filename=\"voices-{stamp}.lvvoices.zip\""),
+            ),
+        ],
+        zip,
+    )
+        .into_response())
+}
+
+/// `YYYYMMDD-HHMMSS` for archive filenames.
+fn chrono_stamp() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let secs = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    // Convert unix seconds to UTC calendar fields without a dependency.
+    let days = (secs / 86_400) as i64;
+    let rem = secs % 86_400;
+    let (y, m, d) = civil_from_days(days);
+    format!(
+        "{y:04}{m:02}{d:02}-{:02}{:02}{:02}",
+        rem / 3600,
+        rem % 3600 / 60,
+        rem % 60
+    )
+}
+
+/// Howard Hinnant's days-from-civil inverse (proleptic Gregorian).
+fn civil_from_days(z: i64) -> (i64, u32, u32) {
+    let z = z + 719_468;
+    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = (doy - (153 * mp + 2) / 5 + 1) as u32;
+    // Civil months start in March: mp 0..=9 -> 3..=12, 10..=11 -> 1..=2.
+    let m = if mp < 10 { mp + 3 } else { mp - 9 } as u32;
+    (y + if m <= 2 { 1 } else { 0 }, m, d)
+}
+
+/// Import a single- or multi-voice archive. `strategy` is
+/// `skip` (default), `copy`, or `overwrite`.
 async fn import_profile(
     State(state): State<AppState>,
     mut multipart: Multipart,
-) -> Result<Json<profiles::ProfileView>, ApiError> {
+) -> Result<Json<profiles::ImportReport>, ApiError> {
     let mut bytes: Option<Vec<u8>> = None;
+    let mut strategy = profiles::ImportStrategy::Skip;
     while let Some(mut field) = multipart
         .next_field()
         .await
         .map_err(|e| ApiError::bad_request(format!("malformed multipart: {e}")))?
     {
-        if matches!(field.name(), Some("file") | Some("voice")) {
-            let mut buf = Vec::new();
-            while let Some(chunk) = field
-                .chunk()
-                .await
-                .map_err(|e| ApiError::bad_request(format!("bad upload: {e}")))?
-            {
-                buf.extend_from_slice(&chunk);
+        match field.name() {
+            Some("file") | Some("voice") => {
+                let mut buf = Vec::new();
+                while let Some(chunk) = field
+                    .chunk()
+                    .await
+                    .map_err(|e| ApiError::bad_request(format!("bad upload: {e}")))?
+                {
+                    buf.extend_from_slice(&chunk);
+                }
+                bytes = Some(buf);
             }
-            bytes = Some(buf);
+            Some("strategy") => {
+                let mut buf = String::new();
+                while let Some(chunk) = field
+                    .chunk()
+                    .await
+                    .map_err(|e| ApiError::bad_request(format!("bad upload: {e}")))?
+                {
+                    buf.push_str(&String::from_utf8_lossy(&chunk));
+                }
+                strategy = match buf.trim() {
+                    "copy" => profiles::ImportStrategy::Copy,
+                    "overwrite" => profiles::ImportStrategy::Overwrite,
+                    _ => profiles::ImportStrategy::Skip,
+                };
+            }
+            _ => {}
         }
     }
     let bytes =
         bytes.ok_or_else(|| ApiError::bad_request("missing voice archive (field: file)"))?;
     let profiles = state.profiles.clone();
-    let meta = tokio::task::spawn_blocking(move || profiles.import_zip(&bytes))
+    let report = tokio::task::spawn_blocking(move || profiles.import_archive(&bytes, strategy))
         .await
         .map_err(|e| ApiError {
             status: StatusCode::INTERNAL_SERVER_ERROR,
             message: format!("import task panicked: {e}"),
         })??;
-    let view = state
-        .profiles
-        .list()?
-        .into_iter()
-        .find(|p| p.meta.id == meta.id)
-        .ok_or_else(|| ApiError::internal("imported profile disappeared"))?;
-    Ok(Json(view))
+    Ok(Json(report))
 }
 
 // ---------------------------------------------------------------- history
@@ -1276,6 +1374,7 @@ async fn main() {
         )
         .route("/api/profiles/{id}/audio", get(profile_audio))
         .route("/api/profiles/{id}/export", get(export_profile))
+        .route("/api/profiles/export", post(export_profiles_batch))
         .route("/api/history", get(list_history).delete(clear_history))
         .route("/api/history/{id}", delete(delete_history))
         .route("/api/history/{id}/audio", get(history_audio))
@@ -1352,4 +1451,19 @@ async fn main() {
     .expect("server error");
 
     lan_supervisor.abort();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::civil_from_days;
+
+    #[test]
+    fn civil_dates() {
+        // 1970-01-01 and a handful of known unix day boundaries.
+        assert_eq!(civil_from_days(0), (1970, 1, 1));
+        assert_eq!(civil_from_days(20_454), (2026, 1, 1));
+        assert_eq!(civil_from_days(20_753), (2026, 10, 27));
+        assert_eq!(civil_from_days(20_818), (2026, 12, 31));
+        assert_eq!(civil_from_days(20_819), (2027, 1, 1));
+    }
 }
