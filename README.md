@@ -267,7 +267,8 @@ off and on again.
 | POST | `/api/transcribe` | multipart `audio` (WAV) → transcript text (needs the SenseVoice model) |
 | POST | `/api/profiles/:id` | multipart `name`, `prompt_text`, optional `prompt` → edit a saved voice |
 | GET | `/api/profiles/:id/export` | portable `.lvvoice.zip` archive (manifest + WAV) |
-| POST | `/api/profiles/import` | multipart `file`: `.lvvoice.zip` → imported saved voice |
+| POST | `/api/profiles/export` | JSON `{ids: [...]}` → one `.lvvoices.zip` batch archive |
+| POST | `/api/profiles/import` | multipart `file`: single/batch `.lvvoice(s).zip`; `strategy=skip` (default)/`copy`/`overwrite` |
 | DELETE | `/api/profiles/:id` | delete a saved voice |
 | GET | `/api/history` | generated audio, newest first |
 | GET | `/api/history/:id/audio` | generated audio (`?format=mp3` to export) |

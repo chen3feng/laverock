@@ -333,9 +333,10 @@
       <div class="page-head" style="display:flex;align-items:flex-end;justify-content:space-between;gap:12px;flex-wrap:wrap">
         <div><h1 data-i18n="voices.title">语音素材</h1><p class="sub" data-i18n="voices.sub">保存的参考声音可以复用到任何克隆引擎。</p></div>
         <div style="display:flex;gap:8px">
+          <button id="exportVoicesBtn" class="ghost" type="button" data-i18n="voice.exportBatch">⬇ 批量导出</button>
           <button id="importVoiceBtn" class="ghost" type="button" data-i18n="voice.import">⬆ 导入声音</button>
           <button id="newVoiceBtn" type="button" data-i18n="voice.new">＋ 新建声音</button>
-          <input id="importVoiceFile" type="file" accept=".zip,.lvvoice.zip" hidden />
+          <input id="importVoiceFile" type="file" accept=".zip" hidden />
         </div>
       </div>
 
@@ -501,6 +502,39 @@
   </div>
 </div>
 
+<div class="overlay" id="exportDialog">
+  <div class="card" style="width:min(520px,100%)">
+    <h1 id="exportTitle" style="font-size:18px;margin:0 0 8px"></h1>
+    <input id="exportSearch" type="search" style="width:100%;box-sizing:border-box;margin-bottom:10px" />
+    <label style="display:flex;align-items:center;gap:8px;font-size:13px;margin-bottom:6px">
+      <input type="checkbox" id="exportSelectAll" /> <span id="exportSelectAllLabel"></span>
+    </label>
+    <div id="exportList" style="max-height:46vh;overflow:auto;display:flex;flex-direction:column;gap:4px;margin-bottom:14px"></div>
+    <div class="actions" style="justify-content:space-between">
+      <span class="hint" id="exportCount"></span>
+      <span style="display:flex;gap:8px">
+        <button class="ghost" id="exportCancel" type="button" data-i18n="dialog.cancel">取消</button>
+        <button id="exportOk" type="button" data-i18n="voice.exportSelected">导出所选</button>
+      </span>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="importDialog">
+  <div class="card" style="width:min(460px,100%)">
+    <h1 id="importTitle" style="font-size:18px;margin:0 0 8px"></h1>
+    <p class="hint" id="importMessage" style="margin:0 0 14px"></p>
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <button id="importSkip" type="button" data-default="true"></button>
+      <button class="ghost" id="importCopy" type="button"></button>
+      <button class="ghost danger" id="importOverwrite" type="button"></button>
+    </div>
+    <div class="actions" style="margin-top:14px;justify-content:flex-end">
+      <button class="ghost" id="importCancel" type="button" data-i18n="dialog.cancel">取消</button>
+    </div>
+  </div>
+</div>
+
 <div class="toast" id="toast" hidden></div>
 
 <template id="captureTpl">
@@ -561,6 +595,16 @@ const I18N = {
     'voice.import': '⬆ 导入声音', 'voice.exported': '已导出声音',
     'voice.imported': '已导入声音「{name}」', 'voice.import.fail': '导入失败',
     'voice.export.fail': '导出失败',
+    'voice.exportBatch': '⬇ 批量导出', 'voice.exportSelected': '导出所选',
+    'voice.search': '搜索声音…', 'voice.selectAll': '全选',
+    'voice.importStrategy': '检测到存档中有与本机重复的声音，如何处理？',
+    'voice.strategySkip': '跳过已存在（推荐）',
+    'voice.strategyCopy': '全部创建副本（重名加序号）',
+    'voice.strategyOverwrite': '用存档覆盖同名声音',
+    'voice.importReport': '导入 {n} · 跳过 {s} · 覆盖 {o}',
+    'voice.importSomeFailed': '部分声音导入失败：',
+    'voice.noSelection': '请先选择至少一个声音',
+    'voice.exportCount': '已选 {n} 个',
     'voices.empty': '还没有保存的声音。点击「新建声音」录音或上传一段 3–10 秒的参考音频。',
 
     'models.title': '模型',
@@ -640,6 +684,16 @@ const I18N = {
     'voice.import': '⬆ Import voice', 'voice.exported': 'Voice exported',
     'voice.imported': 'Imported voice "{name}"', 'voice.import.fail': 'Import failed',
     'voice.export.fail': 'Export failed',
+    'voice.exportBatch': '⬇ Export batch', 'voice.exportSelected': 'Export selected',
+    'voice.search': 'Search voices…', 'voice.selectAll': 'Select all',
+    'voice.importStrategy': 'The archive contains voices already on this machine. How should duplicates be handled?',
+    'voice.strategySkip': 'Skip existing (recommended)',
+    'voice.strategyCopy': 'Create copies (suffix name clashes)',
+    'voice.strategyOverwrite': 'Overwrite matching voices with archive',
+    'voice.importReport': 'Imported {n} · skipped {s} · overwritten {o}',
+    'voice.importSomeFailed': 'Some voices failed to import: ',
+    'voice.noSelection': 'Select at least one voice first',
+    'voice.exportCount': '{n} selected',
     'voices.empty': 'No saved voices yet. Click "New voice" to record or upload a 3–10 s reference clip.',
 
     'models.title': 'Models',
@@ -1550,14 +1604,23 @@ async function exportProfile(p) {
   }
 }
 
-async function importProfile(file) {
+async function importProfile(file, strategy) {
   const fd = new FormData();
-  fd.append('file', file, file.name || 'voice.lvvoice.zip');
+  fd.append('file', file, file.name || 'voices.lvvoices.zip');
+  if (strategy) fd.append('strategy', strategy);
   try {
-    const p = await api('/api/profiles/import', { method: 'POST', body: fd });
+    const r = await api('/api/profiles/import', { method: 'POST', body: fd });
     await loadProfiles();
-    toast((lang === 'en' ? 'Imported voice "{name}"' : '已导入声音「{name}」').replace('{name}', p.name));
-    return p;
+    const summary = (lang === 'en'
+      ? 'Imported {n} · skipped {s} · overwritten {o}'
+      : '导入 {n} · 跳过 {s} · 覆盖 {o}')
+      .replace('{n}', r.imported).replace('{s}', r.skipped).replace('{o}', r.overwritten);
+    if (r.failed && r.failed.length) {
+      toast((lang === 'en' ? 'Some voices failed: ' : '部分声音导入失败：') + r.failed.join('；'), true);
+    } else {
+      toast(summary);
+    }
+    return r;
   } catch (e) {
     toast((lang === 'en' ? 'Import failed: ' : '导入失败：') + localizeError(e.message), true);
     return null;
@@ -1615,8 +1678,124 @@ $('importVoiceBtn').onclick = () => $('importVoiceFile').click();
 $('importVoiceFile').onchange = async function () {
   const file = this.files[0];
   this.value = '';
-  if (file) await importProfile(file);
+  if (!file) return;
+  const strategy = await chooseImportStrategy();
+  if (!strategy) return; // cancelled
+  await importProfile(file, strategy);
 };
+
+// ---------------------------------------------------------------- batch export
+
+function openExportDialog() {
+  if (!profiles.length) {
+    toast(lang === 'en' ? 'No voices to export' : '没有可导出的声音', true);
+    return;
+  }
+  const list = $('exportList');
+  list.innerHTML = '';
+  // All checked by default.
+  const rows = profiles.map((p) => {
+    const label = document.createElement('label');
+    label.style.cssText = 'display:flex;gap:8px;align-items:center;padding:6px 8px;border-radius:8px';
+    label.dataset.name = p.name.toLowerCase();
+    label.innerHTML = `<input type="checkbox" data-id="${esc(p.id)}" checked />
+      <span style="flex:1">${esc(p.name)}</span>
+      <span class="hint">${fmtDur(p.duration_secs)} · ${fmtBytes(p.bytes)}</span>`;
+    return label;
+  });
+  rows.forEach((r) => list.appendChild(r));
+
+  $('exportSearch').value = '';
+  $('exportTitle').textContent = lang === 'en' ? 'Export voices' : '导出声音';
+  $('exportSearch').placeholder = t('voice.search');
+  $('exportSelectAllLabel').textContent = t('voice.selectAll');
+  $('exportCancel').textContent = t('dialog.cancel');
+  $('exportOk').textContent = t('voice.exportSelected');
+  const updateCount = () => {
+    const n = list.querySelectorAll('input:checked').length;
+    $('exportCount').textContent = t('voice.exportCount').replace('{n}', n);
+    $('exportOk').disabled = n === 0;
+    $('exportSelectAll').checked = n === rows.length && rows.length > 0;
+    $('exportSelectAll').indeterminate = n > 0 && n < rows.length;
+  };
+  list.onchange = updateCount;
+  $('exportSearch').oninput = () => {
+    const q = $('exportSearch').value.trim().toLowerCase();
+    list.querySelectorAll('label').forEach((l) => {
+      l.style.display = !q || l.dataset.name.includes(q) ? '' : 'none';
+    });
+  };
+  $('exportSelectAll').onchange = () => {
+    const on = $('exportSelectAll').checked;
+    list.querySelectorAll('label:not([style*="none"]) input').forEach((cb) => { cb.checked = on; });
+    updateCount();
+  };
+  updateCount();
+  $('exportDialog').classList.add('show');
+}
+
+function closeExportDialog() {
+  $('exportDialog').classList.remove('show');
+}
+
+$('exportVoicesBtn').onclick = openExportDialog;
+$('exportCancel').onclick = closeExportDialog;
+$('exportDialog').addEventListener('click', (e) => {
+  if (e.target.id === 'exportDialog') closeExportDialog();
+});
+$('exportOk').onclick = async () => {
+  const ids = [...$('exportList').querySelectorAll('input:checked')].map((cb) => cb.dataset.id);
+  if (!ids.length) return;
+  const btn = $('exportOk');
+  btn.disabled = true;
+  try {
+    const res = await fetch('/api/profiles/export', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ids }),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.error || res.statusText);
+    }
+    const blob = await res.blob();
+    const stamp = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+    await saveBlob(blob, `voices-${stamp}.lvvoices.zip`);
+    closeExportDialog();
+    toast(lang === 'en' ? 'Voices exported' : '已导出声音');
+  } catch (e) {
+    toast((lang === 'en' ? 'Export failed: ' : '导出失败：') + localizeError(e.message), true);
+    btn.disabled = false;
+  }
+};
+
+// ---------------------------------------------------------------- import strategy
+
+function chooseImportStrategy() {
+  return new Promise((resolve) => {
+    $('importTitle').textContent = lang === 'en' ? 'Import voices' : '导入声音';
+    $('importMessage').textContent = t('voice.importStrategy');
+    const set = (id, key, danger) => {
+      const b = $(id);
+      b.textContent = t(key);
+      b.className = danger ? 'danger' : (id === 'importSkip' ? '' : 'ghost');
+    };
+    set('importSkip', 'voice.strategySkip', false);
+    set('importCopy', 'voice.strategyCopy', false);
+    set('importOverwrite', 'voice.strategyOverwrite', true);
+    $('importCancel').textContent = t('dialog.cancel');
+    const overlay = $('importDialog');
+    overlay.classList.add('show');
+    const done = (v) => {
+      overlay.classList.remove('show');
+      resolve(v);
+    };
+    $('importSkip').onclick = () => done('skip');
+    $('importCopy').onclick = () => done('copy');
+    $('importOverwrite').onclick = () => done('overwrite');
+    $('importCancel').onclick = () => done(null);
+  });
+}
 $('newVoiceBtn').onclick = () => {
   const card = $('newVoiceCard');
   card.hidden = !card.hidden;
