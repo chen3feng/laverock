@@ -91,8 +91,8 @@
     ],
     "script": "download-voxcpm2.sh",
     "env": {},
-    "note": "runner 二进制（约几十 MB）优先从本项目 GitHub Release 的 voxcpm2-runner 下载预编译版本；下载失败且本机有 git/cmake/C++ 工具链时才回退到源码编译。另需下载约 3.3 GB 权重。",
-    "note_en": "The runner binary (tens of MB) is downloaded prebuilt from this project's voxcpm2-runner GitHub Release first; it falls back to building from source only if that fails and git/cmake/a C++ toolchain are available. The ~3.3 GB weights are downloaded separately."
+    "note": "通过 audio.cpp 原生运行时推理（Windows 带 NVIDIA 显卡时使用 CUDA），与 dots.tts、CosyVoice3 共享同一个运行时，只下载一次；另需下载约 3 GB GGUF 权重。参考音频超过 14 秒时会自动截取开头并在静音点切分，建议直接使用 3–10 秒的干净人声。",
+    "note_en": "Runs on the audio.cpp native runtime (CUDA on Windows with an NVIDIA GPU), shared with dots.tts and CosyVoice3 so it downloads once; the ~3 GB GGUF weights are fetched separately. A voice reference longer than 14 s is trimmed from the start at a silence point; 3-10 s of clean speech works best."
   },
   {
     "id": "longcat",
