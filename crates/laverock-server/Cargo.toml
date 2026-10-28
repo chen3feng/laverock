@@ -25,8 +25,14 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 serde.workspace = true
 serde_json.workspace = true
 base64 = "0.22"
+# Pure-Rust MPEG-1/2/2.5 Layer III encoder (Apache-2.0, zero dependencies):
+# MP3 export works out of the box, with no system ffmpeg/lame install.
+rusty_mp3 = "1.0.5"
 tokio-stream = "0.1"
 zip = { version = "2", default-features = false, features = ["deflate"] }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = ["Win32_System_Console"] }
+
+[dev-dependencies]
+hound = "3.5"

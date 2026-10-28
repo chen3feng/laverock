@@ -212,7 +212,7 @@ macOS 会弹窗请求权限，之后会被记住。
 | GET | `/api/profiles` | 已保存声音及时长/大小 |
 | POST | `/api/profiles` | multipart：`name`、`prompt_text`、`prompt`（WAV）→ 保存声音 |
 | GET | `/api/profiles/:id/audio` | 某条已保存声音的参考音频 |
-| POST | `/api/audio/mp3` | 请求体：WAV → MP3（需要 ffmpeg 或 lame） |
+| POST | `/api/audio/mp3` | 请求体：WAV → MP3（内置纯 Rust 编码器，无需 ffmpeg） |
 | POST | `/api/transcribe` | multipart：`audio`（WAV）→ 转写文字（需下载 SenseVoice 模型） |
 | POST | `/api/profiles/:id` | multipart：`name`、`prompt_text`、可选 `prompt` → 编辑声音 |
 | GET | `/api/profiles/:id/export` | 导出便携 `.lvvoice.zip`（清单 + WAV） |
@@ -275,8 +275,10 @@ curl http://127.0.0.1:8787/v1/audio/speech \
 | `LAVEROCK_MODELS_DIR` | `models` | 扫描 `*/engine.json` 的目录 |
 | `LAVEROCK_DATA_DIR` | `data` | 声音、设置、配对状态、TLS 证书 |
 | `LAVEROCK_SCRIPTS_DIR` | 自动检测 | 模型安装器使用的 `scripts/` |
-| `LAVEROCK_FFMPEG` / `LAVEROCK_LAME` | 自动检测 | 显式指定 MP3 编码器路径 |
 | `LAVEROCK_TOOLS_DIR` | `<repo>/.tools` | 引擎的构建工具与 Python venv |
+
+MP3 导出由进程内编码器完成（[`rusty_mp3`](https://crates.io/crates/rusty_mp3)，
+Apache-2.0），无需在系统安装 ffmpeg/lame。
 
 打包后的桌面版在应用包内附带 `scripts/`（macOS 为
 `Contents/Resources/scripts`，Windows/Linux 在可执行文件旁），下载内容、构建

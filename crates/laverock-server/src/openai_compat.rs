@@ -9,8 +9,8 @@
 //!   `tts-1`, `tts-1-hd`, `gpt-4o-mini-tts` pick the only/default engine).
 //! - `voice` is either a preset-voice id (`af_heart` for Kokoro) or a
 //!   saved profile name/id for cloning engines.
-//! - `response_format` is `wav` (default), `mp3` (needs ffmpeg/lame) or
-//!   `pcm` (headerless signed 16-bit little-endian mono).
+//! - `response_format` is `wav` (default), `mp3` (built-in encoder, no
+//!   external tools) or `pcm` (headerless signed 16-bit little-endian mono).
 
 use axum::{
     extract::State,
@@ -401,7 +401,7 @@ pub async fn create_speech(
             Ok(bytes) => audio_response(bytes, "audio/mpeg", "speech.mp3"),
             Err(e) => oai_error(
                 StatusCode::BAD_REQUEST,
-                &format!("MP3 encoding unavailable: {e}. Install ffmpeg or lame, or use response_format=wav."),
+                &format!("MP3 encoding failed: {e}. Use response_format=wav if the input is not a valid WAV."),
                 "response_format",
                 "unsupported_format",
             ),
