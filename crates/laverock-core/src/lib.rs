@@ -13,20 +13,22 @@ mod longcat;
 mod manager;
 mod manifest;
 mod ming3tts;
+mod mosstts;
 mod qwen3tts;
 mod transcribe;
 mod zipvoice;
 
 pub use audio::{
-    decode_wav, decode_wav_channels, encode_wav, trim_reference, VOXCPM2_MAX_REFERENCE_SECS,
+    decode_wav, decode_wav_channels, encode_wav, resample_mono, trim_reference,
+    VOXCPM2_MAX_REFERENCE_SECS,
 };
 pub use manager::{
     EngineInfo, EngineManager, ProgressEvent, ProgressSink, SpeechEngine, SynthRequest,
 };
 pub use manifest::{
     AudioCppManifest, ChatterboxManifest, EngineKind, KokoroManifest, Localized, LongCatManifest,
-    Manifest, Ming3TtsManifest, ParamKind, ParamOption, ParamSpec, Qwen3TtsManifest, SttManifest,
-    SynthDefaults, ZipVoiceManifest,
+    Manifest, Ming3TtsManifest, MossTtsManifest, ParamKind, ParamOption, ParamSpec,
+    Qwen3TtsManifest, SttManifest, SynthDefaults, ZipVoiceManifest,
 };
 pub use transcribe::Transcriber;
 
