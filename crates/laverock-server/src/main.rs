@@ -17,6 +17,10 @@
 // Debug builds keep the console so the tracing logs stay visible.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+/// Upper bound on how many variant takes one streaming request may ask
+/// for. Kept small because each take is a full inference run.
+pub(crate) const MAX_SAMPLES: u32 = 4;
+
 mod export;
 mod history;
 mod models;
@@ -999,6 +1003,7 @@ async fn synthesize(
     let mut prompt_bytes: Option<Vec<u8>> = None;
     let mut prompt_text: Option<String> = None;
     let mut profile_id: Option<String> = None;
+    let mut samples: u32 = 1;
     // Raw values for manifest-declared synthesis parameters.
     let mut raw_params: std::collections::BTreeMap<String, String> =
         std::collections::BTreeMap::new();
@@ -1043,6 +1048,18 @@ async fn synthesize(
                 if !raw.trim().is_empty() {
                     profile_id = Some(raw.trim().to_string());
                 }
+            }
+            Some("samples") => {
+                // Not an engine parameter: how many variant takes a single
+                // streaming request should produce. Clamped to a sane cap.
+                let raw = field
+                    .text()
+                    .await
+                    .map_err(|e| ApiError::bad_request(format!("bad samples field: {e}")))?;
+                samples = match raw.trim().parse::<u32>() {
+                    Ok(n) => n.clamp(1, MAX_SAMPLES),
+                    Err(_) => 1,
+                };
             }
             Some(other) => {
                 // Anything else is a candidate engine parameter; validated
@@ -1118,6 +1135,11 @@ async fn synthesize(
         .get("x-laverock-stream")
         .and_then(|v| v.to_str().ok())
         == Some("1");
+    // The `samples` field only has meaning over the streaming/SSE path
+    // (multiple WAV frames in one response). A blocking request keeps its
+    // single `audio/wav` contract for OpenAI/curl-style callers, so the
+    // extra takes are silently dropped here.
+    let _ = samples;
     if !wants_stream {
         // Blocking inference off the async runtime.
         let request = SynthRequest {
@@ -1182,36 +1204,62 @@ async fn synthesize(
             // wait for buffer space (it errors immediately if closed).
             let _ = tx2.try_send(Ok(frame));
         });
-        let request = SynthRequest {
-            text,
-            prompt_text,
-            prompt_samples,
-            prompt_sr,
-            speed,
-            num_steps,
-            params,
-            progress: Some(sink),
-        };
-        match manager.synthesize(&engine_id, &request) {
-            Ok(Audio {
-                samples,
-                sample_rate,
-            }) => match encode_wav(&samples, sample_rate) {
-                Ok(wav) => {
-                    if let Err(e) =
-                        history.add(&engine_id, &engine_name, &history_text, &wav, sample_rate)
-                    {
-                        tracing::warn!("history add failed: {e}");
-                    }
-                    let b64 = base64::engine::general_purpose::STANDARD.encode(&wav);
-                    let _ = tx.blocking_send(Ok(sse("wav", &b64)));
+        let mut params = params;
+        // One shared group id ties all takes of this request together in
+        // history, so the UI can show them as variants of a single try.
+        let generation = history.new_generation_id();
+        for index in 0..samples {
+            // Deterministic engines expose a `seed` parameter; bump it so
+            // each additional take actually differs. Engines that sample
+            // internally already vary between runs without this.
+            if index > 0 {
+                if let Some(seed) = params.get("seed").and_then(|v| v.as_i64()) {
+                    params.insert("seed".to_string(), serde_json::json!(seed + index as i64));
                 }
+            }
+            let request = SynthRequest {
+                text: text.clone(),
+                prompt_text: prompt_text.clone(),
+                prompt_samples: prompt_samples.clone(),
+                prompt_sr,
+                speed,
+                num_steps,
+                params: params.clone(),
+                progress: Some(sink.clone()),
+            };
+            match manager.synthesize(&engine_id, &request) {
+                Ok(Audio {
+                    samples: audio,
+                    sample_rate,
+                }) => match encode_wav(&audio, sample_rate) {
+                    Ok(wav) => {
+                        // Best-effort: a prune failure must not drop the
+                        // audio the client just generated.
+                        if let Err(e) = history.add_variant(
+                            &engine_id,
+                            &engine_name,
+                            &history_text,
+                            &wav,
+                            sample_rate,
+                            Some((generation.clone(), index)),
+                        ) {
+                            tracing::warn!("history add failed: {e}");
+                        }
+                        let b64 = base64::engine::general_purpose::STANDARD.encode(&wav);
+                        // Envelope carries index/total so the UI lays out a
+                        // variant gallery without an extra batch-end marker.
+                        let payload = serde_json::json!({ "i": index, "n": samples, "wav": b64 });
+                        let _ = tx.blocking_send(Ok(sse("wav", &payload.to_string())));
+                    }
+                    Err(e) => {
+                        let _ = tx.blocking_send(Ok(error_frame(&sse, &e.to_string())));
+                        break;
+                    }
+                },
                 Err(e) => {
                     let _ = tx.blocking_send(Ok(error_frame(&sse, &e.to_string())));
+                    break;
                 }
-            },
-            Err(e) => {
-                let _ = tx.blocking_send(Ok(error_frame(&sse, &e.to_string())));
             }
         }
     });

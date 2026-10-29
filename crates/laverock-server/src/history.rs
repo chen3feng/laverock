@@ -29,6 +29,13 @@ pub struct HistoryMeta {
     pub text: String,
     pub duration_secs: f32,
     pub bytes: u64,
+    /// Shared id for a batch of variants produced by one request.
+    /// `None` for a single standalone entry.
+    #[serde(default)]
+    pub generation: Option<String>,
+    /// Position within the generation batch (0-based). `None` for single.
+    #[serde(default)]
+    pub index: Option<u32>,
 }
 
 pub struct HistoryStore {
@@ -73,6 +80,12 @@ impl HistoryStore {
         self.entries.lock().expect("history lock").clone()
     }
 
+    /// A fresh group id so several `add_variant` calls from one request can
+    /// be tied together as a single multi-sample generation.
+    pub fn new_generation_id(&self) -> String {
+        format!("g{}-{:04x}", now_secs(), random_suffix())
+    }
+
     pub fn add(
         &self,
         engine_id: &str,
@@ -80,6 +93,20 @@ impl HistoryStore {
         text: &str,
         wav: &[u8],
         sample_rate: i32,
+    ) -> Result<HistoryMeta> {
+        self.add_variant(engine_id, engine_name, text, wav, sample_rate, None)
+    }
+
+    /// Add one entry. `batch` marks the entry as the Nth take of a
+    /// multi-sample generation; single standalone entries pass `None`.
+    pub fn add_variant(
+        &self,
+        engine_id: &str,
+        engine_name: &str,
+        text: &str,
+        wav: &[u8],
+        sample_rate: i32,
+        batch: Option<(String, u32)>,
     ) -> Result<HistoryMeta> {
         let duration_secs = match decode_wav_bytes(wav, sample_rate) {
             Ok(secs) => secs,
@@ -102,6 +129,8 @@ impl HistoryStore {
             text: text.chars().take(2000).collect(),
             duration_secs,
             bytes: wav.len() as u64,
+            generation: batch.as_ref().map(|(g, _)| g.clone()),
+            index: batch.map(|(_, i)| i),
         };
 
         fs::write(dir.join("audio.wav"), wav)?;
@@ -219,4 +248,95 @@ fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
     fs::write(&tmp, bytes)?;
     fs::rename(&tmp, path)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn wav_bytes() -> Vec<u8> {
+        // A tiny valid 16-bit mono 24kHz WAV (~1 s of silence).
+        let sr = 24_000u32;
+        let frames = 1_000u32;
+        let data_len = frames * 2;
+        let mut v = Vec::new();
+        v.extend_from_slice(b"RIFF");
+        v.extend_from_slice(&(36u32 + data_len).to_le_bytes());
+        v.extend_from_slice(b"WAVEfmt ");
+        v.extend_from_slice(&16u32.to_le_bytes());
+        v.extend_from_slice(&1u16.to_le_bytes());
+        v.extend_from_slice(&1u16.to_le_bytes());
+        v.extend_from_slice(&sr.to_le_bytes());
+        v.extend_from_slice(&(sr * 2).to_le_bytes());
+        v.extend_from_slice(&2u16.to_le_bytes());
+        v.extend_from_slice(&16u16.to_le_bytes());
+        v.extend_from_slice(b"data");
+        v.extend_from_slice(&data_len.to_le_bytes());
+        v.extend(vec![0u8; data_len as usize]);
+        v
+    }
+
+    fn temp_dir() -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "laverock-hist-test-{}-{:x}",
+            std::process::id(),
+            random_suffix()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn variant_batch_shares_a_generation() {
+        let dir = temp_dir();
+        let store = HistoryStore::open(&dir).unwrap();
+        let gen = store.new_generation_id();
+
+        let a = store
+            .add_variant(
+                "zipvoice",
+                "ZipVoice",
+                "你好",
+                &wav_bytes(),
+                24_000,
+                Some((gen.clone(), 0)),
+            )
+            .unwrap();
+        let b = store
+            .add_variant(
+                "zipvoice",
+                "ZipVoice",
+                "你好",
+                &wav_bytes(),
+                24_000,
+                Some((gen.clone(), 1)),
+            )
+            .unwrap();
+
+        assert_eq!(a.generation.as_deref(), Some(gen.as_str()));
+        assert_eq!(a.index, Some(0));
+        assert_eq!(b.generation, a.generation);
+        assert_eq!(b.index, Some(1));
+        assert_ne!(a.id, b.id);
+
+        // A standalone entry is not part of the batch.
+        let single = store
+            .add("zipvoice", "ZipVoice", "再见", &wav_bytes(), 24_000)
+            .unwrap();
+        assert_eq!(single.generation, None);
+        assert_eq!(single.index, None);
+
+        // Reload from disk preserves the grouping fields.
+        let reopened = HistoryStore::open(&dir).unwrap();
+        let metas = reopened.list();
+        assert!(metas
+            .iter()
+            .any(|m| m.id == a.id && m.generation.as_deref() == Some(gen.as_str())));
+        assert!(metas
+            .iter()
+            .any(|m| m.id == single.id && m.generation.is_none()));
+
+        let _ = fs::remove_dir_all(&dir);
+    }
 }
