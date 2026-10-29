@@ -445,8 +445,10 @@ async fn get_settings(
         "system_proxy": system_proxy,
         "hf_endpoint": settings.hf_endpoint,
         "pip_index": settings.pip_index,
+        "workspace_dir": settings.workspace_dir,
         "language": settings.language,
         "models_dir": state.models.models_dir().display().to_string(),
+        "tools_dir": state.models.tools_dir().map(|p| p.display().to_string()),
         "scripts_dir": state.models.scripts_dir().map(|p| p.display().to_string()),
     })))
 }
@@ -1412,25 +1414,43 @@ async fn main() {
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(8787);
-    let models_dir = std::env::var("LAVEROCK_MODELS_DIR").unwrap_or_else(|_| "models".to_string());
     let data_dir = std::env::var("LAVEROCK_DATA_DIR").unwrap_or_else(|_| "data".to_string());
+
+    // Settings are read from the data directory (which stays put, so it can
+    // never chase its own tail). An explicit workspace root wins over the
+    // launcher's `LAVEROCK_MODELS_DIR`/`LAVEROCK_TOOLS_DIR`: one switch to
+    // move the multi-GB models and venvs to a bigger drive, shared by the
+    // desktop app and the standalone server alike.
+    let settings = Arc::new(SettingsStore::open(&data_dir).expect("open settings"));
+    let stored = settings.get();
+    let workspace = stored.workspace_paths();
+    let models_dir = match &workspace {
+        Some((models, _)) => models.to_string_lossy().into_owned(),
+        None => std::env::var("LAVEROCK_MODELS_DIR").unwrap_or_else(|_| "models".to_string()),
+    };
+    let tools_dir: Option<std::path::PathBuf> = match workspace {
+        Some((_, tools)) => Some(tools),
+        None => std::env::var_os("LAVEROCK_TOOLS_DIR").map(std::path::PathBuf::from),
+    };
 
     let manager = Arc::new(EngineManager::open(&models_dir).expect("scan models dir"));
     let profiles = Arc::new(ProfileStore::open(&data_dir).expect("open data dir"));
     let history = Arc::new(history::HistoryStore::open(&data_dir).expect("open history"));
     let remote = Arc::new(RemoteState::open(&data_dir).expect("open remote state"));
-    let settings = Arc::new(SettingsStore::open(&data_dir).expect("open settings"));
     let scripts_dir = models::resolve_scripts_dir();
     let model_service = Arc::new(ModelService::new(
         &models_dir,
+        tools_dir.clone(),
         scripts_dir.clone(),
         settings.clone(),
         manager.clone(),
     ));
     tracing::info!(
         dir = %models_dir,
+        tools = ?tools_dir,
         engines = manager.len(),
         data = %data_dir,
+        workspace = %stored.workspace_dir,
         scripts = ?scripts_dir,
         "engine registry ready"
     );

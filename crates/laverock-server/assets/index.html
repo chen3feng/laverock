@@ -448,7 +448,10 @@
             <input type="text" id="pipCustom" placeholder="https://…/simple" hidden style="margin-top:8px" />
           </div>
         </div>
-        <div class="hint"><span data-i18n="settings.modelsdir">当前模型目录：</span><code id="pathModels">…</code> · <span data-i18n="settings.scriptsdir">脚本目录：</span><code id="pathScripts">…</code></div>
+        <label for="workspaceDir" data-i18n="settings.workspace">工作区目录（可选）</label>
+        <input type="text" id="workspaceDir" placeholder="~/Library/Application Support/sh.laverock.desktop" />
+        <div class="hint" data-i18n="settings.workspace.hint">留空使用默认位置。设置后模型下载到「目录/models」、虚拟环境装到「目录/tools」，方便把大文件放到更大的磁盘；重启后生效。</div>
+        <div class="hint"><span data-i18n="settings.modelsdir">当前模型目录：</span><code id="pathModels">…</code> · <span data-i18n="settings.toolsdir">虚拟环境目录：</span><code id="pathTools">…</code> · <span data-i18n="settings.scriptsdir">脚本目录：</span><code id="pathScripts">…</code></div>
         <div class="actions" style="margin-top:14px">
           <button id="saveSettings" type="button" data-i18n="settings.save">保存设置</button>
           <span class="hint" id="settingsHint"></span>
@@ -654,6 +657,9 @@ const I18N = {
     'proxy.direct': '不使用代理（直连）',
     'hf.mirror': 'Hugging Face 镜像', 'pip.mirror': 'PyPI 镜像（Qwen3-TTS 安装）',
     'settings.modelsdir': '当前模型目录：', 'settings.scriptsdir': '脚本目录：',
+    'settings.toolsdir': '虚拟环境目录：',
+    'settings.workspace': '工作区目录（可选）',
+    'settings.workspace.hint': '留空使用默认位置。设置后模型下载到「目录/models」、虚拟环境装到「目录/tools」，方便把大文件放到更大的磁盘；重启后生效。',
     'settings.save': '保存设置',
     'settings.remote': '手机遥控',
     'lan.hint.default': '开启后，同一 Wi-Fi 下的手机经配对即可访问同一套界面',
@@ -869,6 +875,9 @@ const I18N = {
     'proxy.direct': 'No proxy (direct connection)',
     'hf.mirror': 'Hugging Face mirror', 'pip.mirror': 'PyPI mirror (Qwen3-TTS install)',
     'settings.modelsdir': 'Models directory: ', 'settings.scriptsdir': 'Scripts directory: ',
+    'settings.toolsdir': 'Virtual environments: ',
+    'settings.workspace': 'Workspace directory (optional)',
+    'settings.workspace.hint': 'Leave empty to use the default. When set, models download to "<dir>/models" and virtual environments install to "<dir>/tools" — handy for keeping the multi-GB files on a larger drive. Takes effect after a restart.',
     'settings.save': 'Save settings',
     'settings.remote': 'Phone remote',
     'lan.hint.default': 'When enabled, a phone on the same Wi-Fi can pair and use the same interface',
@@ -2873,7 +2882,9 @@ async function loadSettingsPage() {
     syncProxyMode();
     setPreset('hf', s.hf_endpoint || '', HF_PRESETS);
     setPreset('pip', s.pip_index || '', PIP_PRESETS);
+    $('workspaceDir').value = s.workspace_dir || '';
     $('pathModels').textContent = s.models_dir || '—';
+    $('pathTools').textContent = s.tools_dir || (t("ui.not_found"));
     $('pathScripts').textContent = s.scripts_dir || (t("ui.not_found"));
     serverSettings = s;
     $('settingsHint').className = 'hint';
@@ -2891,6 +2902,7 @@ $('saveSettings').onclick = async () => {
     proxy: $('proxy').value.trim(),
     hf_endpoint: getPreset('hf'),
     pip_index: getPreset('pip'),
+    workspace_dir: $('workspaceDir').value.trim(),
     language: localStorage.getItem('laverock.lang') || '',
   };
   try {
