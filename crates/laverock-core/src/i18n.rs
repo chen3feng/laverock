@@ -101,6 +101,9 @@ messages! {
     QwenReferenceRequired = "qwen_reference_required"
         { en: "Qwen3-TTS clone mode needs a reference clip (3 s or longer works best).",
           zh: "Qwen3-TTS 克隆模式需要一段参考音频（3 秒以上效果更好）。" },
+    MingReferenceRequired = "ming_reference_required"
+        { en: "Ming-3.0-tts clone/multilingual mode needs a reference clip.",
+          zh: "Ming-3.0-tts 克隆 / 多语模式需要一段参考音频。" },
     EmptyClip = "empty_clip"
         { en: "The audio clip is empty.", zh: "音频为空。" },
     SttModelMissing = "stt_model_missing"
@@ -235,6 +238,10 @@ messages! {
         { en: "Incomplete download; resuming (attempt {attempt})", zh: "下载不完整，正在续传（第 {attempt} 次）" },
     StageQwenDeps = "stage_qwen_deps"
         { en: "Installing qwen-tts dependencies (~2 GB the first time)", zh: "安装 qwen-tts 依赖（约 2 GB，首次较慢）" },
+    StageInstallPipDeps = "stage_install_pip_deps"
+        { en: "Installing Python dependencies (torch 2.6 + transformers, ~2 GB the first time)", zh: "安装 Python 依赖（torch 2.6 + transformers，首次约 2 GB）" },
+    StageFetchRuntime = "stage_fetch_runtime"
+        { en: "Fetching the engine Python runtime", zh: "拉取引擎 Python 运行库" },
     StageDownloadModelTokenizer = "stage_download_model_tokenizer"
         { en: "Downloading model and tokenizer (~2.5 GB the first time)", zh: "下载模型与分词器（首次约 2.5 GB）" },
     StageFetchListing = "stage_fetch_listing"

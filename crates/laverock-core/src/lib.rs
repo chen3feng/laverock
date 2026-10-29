@@ -11,6 +11,7 @@ mod kokoro;
 mod longcat;
 mod manager;
 mod manifest;
+mod ming3tts;
 mod qwen3tts;
 mod transcribe;
 mod zipvoice;
@@ -22,8 +23,9 @@ pub use manager::{
     EngineInfo, EngineManager, ProgressEvent, ProgressSink, SpeechEngine, SynthRequest,
 };
 pub use manifest::{
-    AudioCppManifest, EngineKind, KokoroManifest, Localized, LongCatManifest, Manifest, ParamKind,
-    ParamOption, ParamSpec, Qwen3TtsManifest, SttManifest, SynthDefaults, ZipVoiceManifest,
+    AudioCppManifest, EngineKind, KokoroManifest, Localized, LongCatManifest, Manifest,
+    Ming3TtsManifest, ParamKind, ParamOption, ParamSpec, Qwen3TtsManifest, SttManifest,
+    SynthDefaults, ZipVoiceManifest,
 };
 pub use transcribe::Transcriber;
 
