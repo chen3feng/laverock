@@ -392,16 +392,17 @@ mod tests {
             };
             assert!(s.normalize().is_err(), "{bad} should be rejected");
         }
+        let root = std::env::temp_dir().join("laverock-workspace-test");
         let s = Settings {
-            workspace_dir: "  /data/laverock  ".into(),
+            workspace_dir: format!("  {}  ", root.display()),
             ..Settings::default()
         }
         .normalize()
         .expect("absolute path is valid");
-        assert_eq!(s.workspace_dir, "/data/laverock");
+        assert_eq!(Path::new(&s.workspace_dir), root.as_path());
         let (models, tools) = s.workspace_paths().expect("paths derived");
-        assert_eq!(models, PathBuf::from("/data/laverock/models"));
-        assert_eq!(tools, PathBuf::from("/data/laverock/tools"));
+        assert_eq!(models, root.join("models"));
+        assert_eq!(tools, root.join("tools"));
     }
 
     #[test]
