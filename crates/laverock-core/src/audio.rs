@@ -90,6 +90,33 @@ pub fn decode_wav_channels(bytes: &[u8]) -> Result<(Vec<f32>, u16, u32)> {
     Ok((stereo, 2, spec.sample_rate))
 }
 
+/// Resample mono f32 audio to `to` Hz with linear interpolation.
+///
+/// MOSS-TTS's native runtime only accepts 24 kHz references, while browser
+/// uploads and mic recordings arrive at 44.1/48 kHz; linear interpolation
+/// is plenty for a conditioning clip and keeps the engine torch-free.
+/// Returns the input unchanged when the rate already matches.
+pub fn resample_mono(samples: &[f32], from: u32, to: u32) -> Vec<f32> {
+    if from == to || from == 0 || to == 0 || samples.is_empty() {
+        return samples.to_vec();
+    }
+    let ratio = to as f64 / from as f64;
+    let out_len = ((samples.len() as f64) * ratio).round() as usize;
+    let last = samples.len() - 1;
+    (0..out_len)
+        .map(|i| {
+            let pos = i as f64 / ratio;
+            let idx = pos.floor() as usize;
+            if idx >= last {
+                samples[last]
+            } else {
+                let frac = (pos - idx as f64) as f32;
+                samples[idx] * (1.0 - frac) + samples[idx + 1] * frac
+            }
+        })
+        .collect()
+}
+
 /// Upper bound (seconds) for a VoxCPM2 voice reference. Its AudioVAE
 /// encoder input is a fixed 240000-sample tensor at 16 kHz (= 15 s) and the
 /// reference is padded up to a patch multiple before the runtime checks its
@@ -290,5 +317,14 @@ mod tests {
         // Even-indexed channels (0, 2) -> left, odd (1, 3) -> right.
         assert!((pcm[0] - 0.3).abs() < 0.001, "left = (0.4 + 0.2) / 2");
         assert!((pcm[1] + 0.3).abs() < 0.001, "right = (-0.4 + -0.2) / 2");
+    }
+
+    #[test]
+    fn resamples_mono_by_length_ratio() {
+        let samples: Vec<f32> = (0..48_000).map(|i| i as f32 / 48_000.0).collect();
+        assert_eq!(resample_mono(&samples, 48_000, 24_000).len(), 24_000);
+        assert_eq!(resample_mono(&samples, 48_000, 16_000).len(), 16_000);
+        // Same rate is a passthrough copy.
+        assert_eq!(resample_mono(&samples, 48_000, 48_000), samples);
     }
 }

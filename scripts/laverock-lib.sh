@@ -494,6 +494,39 @@ lv_hf_base() {
   printf '%s' "${base%/}"
 }
 
+# lv_ms_base: ModelScope base URL (override with MODELSCOPE_ENDPOINT).
+lv_ms_base() {
+  local base="${MODELSCOPE_ENDPOINT:-https://modelscope.cn}"
+  printf '%s' "${base%/}"
+}
+
+# lv_ms_download_file <repo> <rel> <dest> [workers] [label]
+#
+# Download one file from a ModelScope model repo via its API endpoint,
+# which redirects to a CDN that supports ranged requests. Used for the
+# MOSS-TTS weights, whose Hugging Face mirror is gated but ModelScope is
+# open. Skips the download when <dest> already exists non-empty.
+lv_ms_download_file() {
+  local repo="$1" rel="$2" dest="$3" workers="${4:-8}" label="${5:-Download $rel}"
+  if [ -s "$dest" ]; then
+    return 0
+  fi
+  local enc="${rel//\//%2F}"
+  enc="${enc// /%20}"
+  local url; url="$(lv_ms_base)/api/v1/models/$repo/repo?Revision=master&FilePath=$enc"
+  local total; total="$(lv_content_length "$url")"
+  if [ "${total:-0}" -le 0 ]; then
+    echo "cannot determine the download size for $url" >&2
+    return 1
+  fi
+  # Small files (tokenizer JSON) do not benefit from slicing and the
+  # per-worker range math degenerates below `workers` bytes.
+  [ "$total" -lt 1048576 ] && workers=1
+  lv_stage "$label"
+  mkdir -p "$(dirname "$dest")"
+  lv_fetch_parallel "$url" "$dest" "$total" "$workers"
+}
+
 # lv_hf_repo_files <repo> [hf_base]
 #
 # Print `size<TAB>path` for every regular file on a repo's main branch via

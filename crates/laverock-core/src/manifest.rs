@@ -28,6 +28,9 @@ pub enum EngineKind {
     Ming3Tts,
     #[serde(rename = "chatterbox")]
     Chatterbox,
+    /// MOSS-TTS-Delay (OpenMOSS) run by a native llama.cpp binary.
+    #[serde(rename = "mosstts")]
+    MossTts,
     /// Speech-to-text models (SenseVoice via sherpa-onnx). Not a
     /// synthesis engine; discovered by the transcriber instead.
     #[serde(rename = "stt")]
@@ -74,6 +77,7 @@ impl EngineKind {
             EngineKind::Kokoro => "kokoro",
             EngineKind::Ming3Tts => "ming3tts",
             EngineKind::Chatterbox => "chatterbox",
+            EngineKind::MossTts => "mosstts",
             EngineKind::Stt => "stt",
         }
     }
@@ -107,6 +111,8 @@ pub struct Manifest {
     pub ming3tts: Option<Ming3TtsManifest>,
     #[serde(default)]
     pub chatterbox: Option<ChatterboxManifest>,
+    #[serde(default)]
+    pub mosstts: Option<MossTtsManifest>,
     /// STT configuration when `kind == "stt"`.
     #[serde(default)]
     pub stt: Option<SttManifest>,
@@ -184,6 +190,7 @@ impl Manifest {
                 .is_none()
                 .then(|| missing("chatterbox"))
                 .flatten(),
+            EngineKind::MossTts => self.mosstts.is_none().then(|| missing("mosstts")).flatten(),
             EngineKind::Stt => self.stt.is_none().then(|| missing("stt")).flatten(),
         }
     }
@@ -281,6 +288,8 @@ impl Manifest {
             // Every mode ships its own parameter lists via the manifest.
             EngineKind::Ming3Tts => Vec::new(),
             EngineKind::Chatterbox => Vec::new(),
+            // MOSS-TTS ships a language choice via the manifest.
+            EngineKind::MossTts => Vec::new(),
             // Flow-matching ODE: NFE steps, guidance strength/method, seed.
             EngineKind::LongCat => vec![
                 ParamSpec::int_slider(
@@ -934,6 +943,47 @@ pub struct ChatterboxManifest {
 
 fn default_chatterbox_t3() -> String {
     "v3".to_string()
+}
+
+/// MOSS-TTS-Delay (OpenMOSS) run by the native `llama-moss-tts` binary.
+///
+/// The installer builds that binary from the OpenMOSS llama.cpp fork and
+/// converts the audio tokenizer to GGUF, so synthesis needs no Python at
+/// run time: one executable drives the Qwen3 backbone plus the audio
+/// encoder/decoder GGUFs. A reference clip is optional (text-only TTS
+/// works too); when present it must be 24 kHz mono, which the engine
+/// guarantees before invoking the binary.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MossTtsManifest {
+    /// `llama-moss-tts` path, absolute or relative to the model directory.
+    pub binary: String,
+    /// First-class MOSS-TTS-Delay backbone GGUF.
+    pub backbone: String,
+    /// Native audio-tokenizer encoder GGUF.
+    pub audio_encoder: String,
+    /// Native audio-tokenizer decoder GGUF.
+    pub audio_decoder: String,
+    /// Default language tag passed to the prompt builder (`zh`, `en`, …).
+    #[serde(default = "default_mosstts_language")]
+    pub language: String,
+    /// GPU layers to offload; `-1` all, `0` CPU only.
+    #[serde(default = "default_mosstts_ngl")]
+    pub n_gpu_layers: i64,
+    /// Upper bound on generated tokens; guards against runaway generation.
+    #[serde(default = "default_mosstts_max_tokens")]
+    pub max_new_tokens: i64,
+    #[serde(default)]
+    pub env: std::collections::BTreeMap<String, String>,
+}
+
+fn default_mosstts_language() -> String {
+    "zh".to_string()
+}
+fn default_mosstts_ngl() -> i64 {
+    -1
+}
+fn default_mosstts_max_tokens() -> i64 {
+    3072
 }
 
 /// LongCat-AudioDiT (Meituan): a waveform-latent diffusion TTS model with
