@@ -128,6 +128,9 @@ messages! {
         { en: "The reference transcript cannot be empty.", zh: "参考音频对应的文字不能为空。" },
     ReferenceTooLarge = "reference_too_large"
         { en: "The reference audio exceeds 20 MB.", zh: "参考音频超过 20 MB。" },
+    ReferenceSilent = "reference_silent"
+        { en: "The reference audio is silent; record or upload a clip with speech.",
+          zh: "参考音频几乎全是静音，请重新录制或上传一段有人声的音频。" },
     ArchiveNotZip = "archive_not_zip"
         { en: "Not a valid voice archive (not a ZIP): {error}", zh: "无效的音色文件（不是 ZIP）：{error}" },
     ArchiveUnreadable = "archive_unreadable"

@@ -135,6 +135,7 @@
     overflow: hidden; text-overflow: ellipsis;
   }
   .voice-meta { font-size: 11.5px; color: var(--muted); }
+  .voice-warn { margin-top: 6px; font-size: 12px; line-height: 1.45; color: #ffcf8f; }
   .voice-text {
     font-size: 13px; color: #b9bfd2; line-height: 1.45;
     display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
@@ -631,6 +632,11 @@ const I18N = {
     'voice.importSomeFailed': '部分声音导入失败：',
     'voice.noSelection': '请先选择至少一个声音',
     'voice.exportCount': '已选 {n} 个',
+    'voice.warn.clipped': '参考音有削波（音量过大），克隆效果可能变差',
+    'voice.warn.pause': '参考音中间有 {secs} 秒停顿，部分引擎可能把停顿带进结果',
+    'voice.warn.short': '参考音偏短（建议 3–10 秒）',
+    'voice.warn.long': '参考音偏长（建议 3–10 秒），合成会更慢',
+    'voice.warn.quiet': '参考音音量偏低',
     'voices.empty': '还没有保存的声音。点击「新建声音」录音或上传一段 3–10 秒的参考音频。',
 
     'models.title': '模型',
@@ -849,6 +855,11 @@ const I18N = {
     'voice.importSomeFailed': 'Some voices failed to import: ',
     'voice.noSelection': 'Select at least one voice first',
     'voice.exportCount': '{n} selected',
+    'voice.warn.clipped': 'The reference is clipped (too loud); cloning quality may suffer',
+    'voice.warn.pause': 'The reference has a {secs}s pause; some engines may copy it into the result',
+    'voice.warn.short': 'Reference is short (3–10 s works best)',
+    'voice.warn.long': 'Reference is long (3–10 s works best); synthesis will be slower',
+    'voice.warn.quiet': 'Reference volume is low',
     'voices.empty': 'No saved voices yet. Click "New voice" to record or upload a 3–10 s reference clip.',
 
     'models.title': 'Models',
@@ -1650,6 +1661,20 @@ async function loadProfiles() {
   renderVoices();
 }
 
+function voiceWarnings(p) {
+  const r = p.reference;
+  if (!r) return [];
+  const out = [];
+  if (r.clipped_fraction > 0.001) out.push(t('voice.warn.clipped'));
+  if (r.longest_pause_secs >= 0.8) {
+    out.push(t('voice.warn.pause').replace('{secs}', r.longest_pause_secs.toFixed(1)));
+  }
+  if (r.duration_secs > 0 && r.duration_secs < 1.5) out.push(t('voice.warn.short'));
+  else if (r.duration_secs > 15) out.push(t('voice.warn.long'));
+  if (r.peak > 0 && r.peak < 0.05 && r.clipped_fraction <= 0.001) out.push(t('voice.warn.quiet'));
+  return out;
+}
+
 function renderVoices() {
   const grid = $('voicesGrid');
   grid.innerHTML = '';
@@ -1657,9 +1682,11 @@ function renderVoices() {
   for (const p of profiles) {
     const el = document.createElement('div');
     el.className = 'voice-card';
+    const warns = voiceWarnings(p);
     el.innerHTML = `
       <div class="voice-top"><b>${esc(p.name)}</b>${p.engine_id ? `<span class="chip">${esc(p.engine_id)}</span>` : ''}</div>
       <div class="voice-meta">${fmtDur(p.duration_secs)} · ${fmtBytes(p.bytes)} · ${fmtDate(p.created_at)}</div>
+      ${warns.map((w) => `<div class="voice-warn">⚠ ${esc(w)}</div>`).join('')}
       <div class="voice-text">${esc(p.prompt_text)}</div>
       <div class="voice-actions">
         <button class="ghost small play" type="button">${previewId === p.id ? t('stop') : t('preview')}</button>

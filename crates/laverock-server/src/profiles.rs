@@ -8,15 +8,44 @@
 //! works with any cloning engine that accepts a prompt clip.
 
 use laverock_core::i18n::{self, Key};
-use laverock_core::{decode_wav, CoreError, Result};
+use laverock_core::{decode_wav, encode_wav, silence_profile, trim_silence, CoreError, Result};
 use serde::{Deserialize, Serialize};
 use std::{
+    borrow::Cow,
     fs,
     path::{Path, PathBuf},
     time::{SystemTime, UNIX_EPOCH},
 };
 
 pub const MAX_REFERENCE_BYTES: usize = 20 * 1024 * 1024;
+
+/// Untouched upload kept alongside a trimmed `reference.wav`, so the
+/// original can be restored or reprocessed later.
+const ORIGINAL_REFERENCE_FILE: &str = "reference.original.wav";
+
+/// Silence kept at each end when a recording is trimmed at ingest. Dead
+/// air carries no timbre and conditioning models (MOSS-TTS in particular)
+/// pick up the rhythm of their prompt, so the margins are kept small.
+const REFERENCE_EDGE_KEEP_SECS: f32 = 0.10;
+
+/// What ingest measured on the reference clip. Stored in `profile.json`
+/// so the voice library can warn about clips that will condition
+/// synthesis badly.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ReferenceFacts {
+    /// Duration of the stored (possibly trimmed) clip.
+    pub duration_secs: f32,
+    /// Length of the clip as originally recorded/uploaded.
+    pub original_duration_secs: f32,
+    /// Dead air removed from the start and end at ingest.
+    pub trimmed_secs: f32,
+    /// Longest pause between words, measured on the original clip.
+    pub longest_pause_secs: f32,
+    /// Peak amplitude of the original clip (1.0 = full scale).
+    pub peak: f32,
+    /// Fraction of original samples at or near full scale.
+    pub clipped_fraction: f32,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProfileMeta {
@@ -27,6 +56,9 @@ pub struct ProfileMeta {
     pub engine_id: Option<String>,
     /// Unix seconds.
     pub created_at: u64,
+    /// Missing on profiles created before ingest analysis existed.
+    #[serde(default)]
+    pub reference: Option<ReferenceFacts>,
 }
 
 /// A saved voice plus facts the library view needs without downloading
@@ -65,8 +97,20 @@ impl ProfileStore {
                 .map_err(CoreError::from)
                 .and_then(|raw| serde_json::from_str::<ProfileMeta>(&raw).map_err(CoreError::from))
             {
-                Ok(meta) => {
-                    let (duration_secs, bytes) = clip_facts(&entry.path().join("reference.wav"));
+                Ok(mut meta) => {
+                    let clip = entry.path().join("reference.wav");
+                    let (duration_secs, bytes) = clip_facts(&clip);
+                    // Profiles saved before ingest analysis existed get
+                    // their facts computed on the fly so the library can
+                    // still flag problematic clips.
+                    if meta.reference.is_none() {
+                        if let Ok(raw) = fs::read(&clip) {
+                            if let Ok((samples, rate)) = decode_wav(&raw) {
+                                let rate = rate.max(1) as u32;
+                                meta.reference = Some(facts_for(&samples, rate, samples.len()));
+                            }
+                        }
+                    }
                     out.push(ProfileView {
                         meta,
                         duration_secs,
@@ -109,6 +153,20 @@ impl ProfileStore {
         engine_id: Option<String>,
         wav: &[u8],
     ) -> Result<ProfileMeta> {
+        self.create_impl(name, prompt_text, engine_id, wav, true)
+    }
+
+    /// `clean` is false for archive imports: those clips were already
+    /// processed (or curated) elsewhere, and leaving them byte-identical
+    /// keeps the content fingerprints used for duplicate detection valid.
+    fn create_impl(
+        &self,
+        name: &str,
+        prompt_text: &str,
+        engine_id: Option<String>,
+        wav: &[u8],
+        clean: bool,
+    ) -> Result<ProfileMeta> {
         let name = name.trim();
         let prompt_text = prompt_text.trim();
         if name.is_empty() {
@@ -126,14 +184,9 @@ impl ProfileStore {
                 Key::TranscriptMissing,
             )));
         }
-        if wav.len() > MAX_REFERENCE_BYTES {
-            return Err(CoreError::UserError(i18n::Message::new(
-                Key::ReferenceTooLarge,
-            )));
-        }
-        // Reject clips that do not decode, so the library cannot fill up
-        // with unusable references.
-        decode_wav(wav)?;
+        check_reference_size(wav)?;
+        // Decoding here also rejects clips the library could never use.
+        let reference = prepare_reference(wav, clean)?;
 
         let created_at = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -149,11 +202,15 @@ impl ProfileStore {
             prompt_text: prompt_text.to_string(),
             engine_id,
             created_at,
+            reference: Some(reference.facts),
         };
 
         // Write the manifest last and atomically: a profile directory
         // without profile.json is ignored by list().
-        fs::write(dir.join("reference.wav"), wav)?;
+        fs::write(dir.join("reference.wav"), &reference.wav)?;
+        if let Some(original) = &reference.original {
+            fs::write(dir.join(ORIGINAL_REFERENCE_FILE), original)?;
+        }
         write_atomic(
             &dir.join("profile.json"),
             &serde_json::to_vec_pretty(&meta)?,
@@ -170,6 +227,18 @@ impl ProfileStore {
         name: &str,
         prompt_text: &str,
         wav: Option<&[u8]>,
+    ) -> Result<ProfileMeta> {
+        self.update_impl(id, name, prompt_text, wav, true)
+    }
+
+    /// See [`ProfileStore::create_impl`] for `clean`.
+    fn update_impl(
+        &self,
+        id: &str,
+        name: &str,
+        prompt_text: &str,
+        wav: Option<&[u8]>,
+        clean: bool,
     ) -> Result<ProfileMeta> {
         let dir = self.dir(id)?;
         let raw = fs::read_to_string(dir.join("profile.json"))?;
@@ -188,13 +257,18 @@ impl ProfileStore {
         }
 
         if let Some(wav) = wav {
-            if wav.len() > MAX_REFERENCE_BYTES {
-                return Err(CoreError::UserError(i18n::Message::new(
-                    Key::ReferenceTooLarge,
-                )));
+            check_reference_size(wav)?;
+            let reference = prepare_reference(wav, clean)?;
+            fs::write(dir.join("reference.wav"), &reference.wav)?;
+            match &reference.original {
+                Some(original) => fs::write(dir.join(ORIGINAL_REFERENCE_FILE), original)?,
+                // The previous clip may have needed trimming; the new one
+                // does not, so no stale "original" should linger.
+                None => {
+                    let _ = fs::remove_file(dir.join(ORIGINAL_REFERENCE_FILE));
+                }
             }
-            decode_wav(wav)?;
-            fs::write(dir.join("reference.wav"), wav)?;
+            meta.reference = Some(reference.facts);
         }
 
         meta.name = name.to_string();
@@ -286,14 +360,20 @@ impl ProfileStore {
         let id = format!("p{created_at}-{:04x}", random_suffix());
         let dir = self.root.join(&id);
         fs::create_dir_all(&dir)?;
+        // Imported archives keep their bytes untouched; see create_impl.
+        let reference = prepare_reference(wav, false)?;
         let meta = ProfileMeta {
             id: id.clone(),
             name: name.to_string(),
             prompt_text: String::new(),
             engine_id,
             created_at,
+            reference: Some(reference.facts),
         };
-        fs::write(dir.join("reference.wav"), wav)?;
+        fs::write(dir.join("reference.wav"), &reference.wav)?;
+        if let Some(original) = &reference.original {
+            fs::write(dir.join(ORIGINAL_REFERENCE_FILE), original)?;
+        }
         write_atomic(
             &dir.join("profile.json"),
             &serde_json::to_vec_pretty(&meta)?,
@@ -424,7 +504,13 @@ impl ProfileStore {
             match (strategy, existing) {
                 (ImportStrategy::Skip, Some(_)) => report.skipped += 1,
                 (ImportStrategy::Overwrite, Some(fp)) => {
-                    self.update(&fp.id, &entry.name, &entry.prompt_text, Some(&entry.wav))?;
+                    self.update_impl(
+                        &fp.id,
+                        &entry.name,
+                        &entry.prompt_text,
+                        Some(&entry.wav),
+                        false,
+                    )?;
                     report.overwritten += 1;
                 }
                 _ => {
@@ -436,11 +522,12 @@ impl ProfileStore {
                     if entry.prompt_text.is_empty() {
                         self.create_without_transcript(&name, entry.engine_id.clone(), &entry.wav)?;
                     } else {
-                        self.create(
+                        self.create_impl(
                             &name,
                             &entry.prompt_text,
                             entry.engine_id.clone(),
                             &entry.wav,
+                            false,
                         )?;
                     }
                     report.imported += 1;
@@ -467,6 +554,77 @@ pub struct ImportReport {
     pub skipped: usize,
     pub overwritten: usize,
     pub failed: Vec<String>,
+}
+
+fn check_reference_size(wav: &[u8]) -> Result<()> {
+    if wav.len() > MAX_REFERENCE_BYTES {
+        return Err(CoreError::UserError(i18n::Message::new(
+            Key::ReferenceTooLarge,
+        )));
+    }
+    Ok(())
+}
+
+/// A reference clip after validation and ingest processing.
+struct PreparedReference {
+    /// Bytes to store as `reference.wav`.
+    wav: Vec<u8>,
+    /// The untouched upload, kept alongside when the clip was trimmed.
+    original: Option<Vec<u8>>,
+    facts: ReferenceFacts,
+}
+
+/// Measure a clip. `stored_len` is the length of the clip actually kept
+/// (equal to `samples.len()` when nothing was trimmed).
+fn facts_for(samples: &[f32], sample_rate: u32, stored_len: usize) -> ReferenceFacts {
+    let rate = sample_rate.max(1) as f32;
+    let silence = silence_profile(samples, sample_rate.max(1));
+    let peak = samples.iter().fold(0.0f32, |m, s| m.max(s.abs()));
+    let clipped = samples.iter().filter(|s| s.abs() >= 0.999).count() as f32;
+    ReferenceFacts {
+        duration_secs: stored_len as f32 / rate,
+        original_duration_secs: samples.len() as f32 / rate,
+        trimmed_secs: samples.len().saturating_sub(stored_len) as f32 / rate,
+        longest_pause_secs: silence.longest_internal_pause_secs,
+        peak,
+        clipped_fraction: clipped / samples.len().max(1) as f32,
+    }
+}
+
+/// Validate a reference clip, measure it, and — when `clean` is set —
+/// trim the dead air at its ends. Internal pauses are left alone: they
+/// are part of the recording's rhythm and engines that cannot cope with
+/// them clean their own prompt (see the MOSS-TTS engine).
+fn prepare_reference(wav: &[u8], clean: bool) -> Result<PreparedReference> {
+    let (samples, sample_rate) = decode_wav(wav)?;
+    let rate = sample_rate.max(1) as u32;
+
+    let trimmed = if clean {
+        trim_silence(&samples, rate, REFERENCE_EDGE_KEEP_SECS)
+    } else {
+        Cow::Borrowed(samples.as_slice())
+    };
+    if trimmed.is_empty() {
+        return Err(CoreError::UserError(i18n::Message::new(
+            Key::ReferenceSilent,
+        )));
+    }
+
+    let removed = samples.len().saturating_sub(trimmed.len());
+    // Re-encode only when a meaningful amount of dead air was removed:
+    // untouched clips stay byte-identical, which keeps the content
+    // fingerprints used for import de-duplication stable.
+    let (stored, original) = if clean && removed > (rate / 50) as usize {
+        (encode_wav(&trimmed, sample_rate)?, Some(wav.to_vec()))
+    } else {
+        (wav.to_vec(), None)
+    };
+
+    Ok(PreparedReference {
+        wav: stored,
+        original,
+        facts: facts_for(&samples, rate, trimmed.len()),
+    })
 }
 
 struct ArchiveVoice {
@@ -665,4 +823,115 @@ fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
     fs::write(&tmp, bytes)?;
     fs::rename(&tmp, path)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicU32, Ordering};
+
+    fn temp_store() -> (ProfileStore, PathBuf) {
+        static SEQ: AtomicU32 = AtomicU32::new(0);
+        let n = SEQ.fetch_add(1, Ordering::Relaxed);
+        let dir = std::env::temp_dir().join(format!(
+            "laverock-profiles-{}-{n}-{}",
+            std::process::id(),
+            random_suffix()
+        ));
+        let store = ProfileStore::open(&dir).expect("open store");
+        (store, dir)
+    }
+
+    /// 0.3 amplitude tone preceded by `leading` seconds of digital silence
+    /// and followed by 0.5 s of it.
+    fn wav_with_silence(leading: f32, speech: f32) -> Vec<u8> {
+        let sr = 24_000u32;
+        let mut samples = vec![0.0f32; (sr as f32 * leading) as usize];
+        samples.extend(
+            (0..(sr as f32 * speech) as usize)
+                .map(|i| 0.3 * (i as f32 * 220.0 * std::f32::consts::TAU / sr as f32).sin()),
+        );
+        samples.extend(vec![0.0f32; (sr as f32 * 0.5) as usize]);
+        encode_wav(&samples, sr as i32).expect("encode")
+    }
+
+    #[test]
+    fn create_trims_dead_air_and_keeps_the_original() {
+        let (store, dir) = temp_store();
+        let wav = wav_with_silence(0.6, 1.0);
+        let meta = store.create("Test", "text", None, &wav).expect("create");
+
+        let facts = meta.reference.clone().expect("facts");
+        assert!(facts.trimmed_secs > 0.5, "{facts:?}");
+        assert!(
+            facts.duration_secs < facts.original_duration_secs,
+            "{facts:?}"
+        );
+
+        let (_, stored) = store.get(&meta.id).expect("get");
+        assert!(stored.len() < wav.len(), "stored clip should be trimmed");
+        let original = fs::read(
+            dir.join("profiles")
+                .join(&meta.id)
+                .join(ORIGINAL_REFERENCE_FILE),
+        )
+        .expect("original kept");
+        assert_eq!(original, wav);
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn silent_reference_is_rejected() {
+        let (store, dir) = temp_store();
+        let wav = encode_wav(&vec![0.0f32; 24_000], 24_000).expect("encode");
+        let err = store
+            .create("Test", "text", None, &wav)
+            .expect_err("silent");
+        assert!(matches!(err, CoreError::UserError(_)), "{err}");
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn import_path_leaves_bytes_untouched() {
+        let (store, dir) = temp_store();
+        let wav = wav_with_silence(0.6, 1.0);
+        // clean = false is what archive import uses.
+        let meta = store
+            .create_impl("Imported", "text", None, &wav, false)
+            .expect("create");
+        let (_, stored) = store.get(&meta.id).expect("get");
+        assert_eq!(stored, wav);
+        assert_eq!(meta.reference.expect("facts").trimmed_secs, 0.0);
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn update_replaces_clip_and_drops_stale_original() {
+        let (store, dir) = temp_store();
+        let meta = store
+            .create("Test", "text", None, &wav_with_silence(0.6, 1.0))
+            .expect("create");
+        let original = dir
+            .join("profiles")
+            .join(&meta.id)
+            .join(ORIGINAL_REFERENCE_FILE);
+        assert!(original.is_file());
+
+        // A clip without dead air needs no trimming, so no original remains.
+        let tight = ws_tight_clip();
+        let meta = store
+            .update(&meta.id, "Test", "text", Some(&tight))
+            .expect("update");
+        assert!(!original.exists(), "stale original should be removed");
+        assert_eq!(meta.reference.expect("facts").trimmed_secs, 0.0);
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    fn ws_tight_clip() -> Vec<u8> {
+        let sr = 24_000u32;
+        let samples: Vec<f32> = (0..24_000)
+            .map(|i| 0.3 * (i as f32 * 220.0 * std::f32::consts::TAU / sr as f32).sin())
+            .collect();
+        encode_wav(&samples, sr as i32).expect("encode")
+    }
 }
