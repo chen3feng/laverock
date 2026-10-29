@@ -197,8 +197,8 @@
     "script": "download-cosyvoice.sh",
     "env": {},
     "note": {
-      "en": "Shares the audio.cpp runtime with dots.tts (downloaded once). Three templates: zero-shot (needs a transcript), cross-lingual (voice only) and instruct (describe the tone in words).",
-      "zh": "与 dots.tts 共用 audio.cpp 运行时（只下载一次）。三种模板：零样本（需文字稿）、跨语种（只凭声音）、指令（用文字描述语气）。"
+      "en": "Shares the audio.cpp runtime with dots.tts (downloaded once). Three templates: zero-shot (needs a transcript), cross-lingual (voice only) and instruct (describe the tone in words). Long text is split into chunks automatically so long inputs do not drop or repeat words.",
+      "zh": "与 dots.tts 共用 audio.cpp 运行时（只下载一次）。三种模板：零样本（需文字稿）、跨语种（只凭声音）、指令（用文字描述语气）。长文本会自动分段合成，避免长输入时漏字或重复。"
     }
   },
   {

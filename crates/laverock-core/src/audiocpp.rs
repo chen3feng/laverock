@@ -24,6 +24,14 @@ use std::{
     sync::Mutex,
 };
 
+/// Characters per CosyVoice3 long-form chunk. Its 0.5B LLM starts
+/// dropping and repeating words once a single request carries much more
+/// than ~150 characters (a 158-character request already repeated its
+/// final clause, a 551-character one lost half the text), while
+/// audio.cpp's long-form chunker defaults to 600 — far above that cliff.
+/// 100 keeps every chunk inside the model's stable range.
+const COSYVOICE_TEXT_CHUNK_CHARS: i64 = 100;
+
 /// Which audio.cpp model family an engine wraps.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Family {
@@ -422,6 +430,10 @@ impl AudioCppEngine {
                     .arg(format!("template_name={template}"));
                 let top_k = self.param_i64(req, "top_k", 25);
                 cmd.arg("--request-option").arg(format!("top_k={top_k}"));
+                // Long text must be split before the LLM degenerates;
+                // audio.cpp then stitches the chunks into one take.
+                cmd.arg("--text-chunk-size")
+                    .arg(COSYVOICE_TEXT_CHUNK_CHARS.to_string());
                 if template == "zero_shot" {
                     if let Some(text) = self.prompt_text(req) {
                         cmd.arg("--reference-text").arg(text);
@@ -592,6 +604,7 @@ mod tests {
         assert!(args
             .windows(2)
             .any(|w| w == ["--reference-text", "ref words"]));
+        assert!(args.windows(2).any(|w| w == ["--text-chunk-size", "100"]));
 
         let args = run(
             &dir,
