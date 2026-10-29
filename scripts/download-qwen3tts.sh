@@ -52,7 +52,7 @@ mkdir -p "$DEST" "$TOOLS"
 #    lv_prepare_python_venv creates the venv, upgrades pip, and pre-installs
 #    CUDA torch on Windows+NVIDIA; VPY then points at its interpreter.
 lv_prepare_python_venv "$VENV" "$PYTHON"
-lv_stage "安装 qwen-tts 依赖（约 2 GB，首次较慢）"
+lv_stage "Installing qwen-tts dependencies (~2 GB the first time)"
 "$VPY" -m pip install --upgrade "qwen-tts"
 
 # 2. Weights. The model repo already bundles its speech tokenizer under
@@ -61,7 +61,7 @@ lv_stage "安装 qwen-tts 依赖（约 2 GB，首次较慢）"
 #    resolve-URL GET/range requests (not `hf download`) keep this working
 #    through hf-mirror.com, whose redirects huggingface_hub 0.36 rejects.
 WEIGHTS="$DEST/weights"
-lv_stage "下载模型与分词器（首次约 2.5 GB）"
+lv_stage "Downloading model and tokenizer (~2.5 GB the first time)"
 lv_hf_download_repo "$MODEL" "$WEIGHTS" 8
 
 # 3. Runner script.
@@ -75,30 +75,30 @@ PARAMETERS=""
 if [ "$MODE" = "custom_voice" ]; then
   PARAMETERS='"parameters": [
     {
-      "name": "speaker", "label": "预置音色 / Preset speaker", "type": "choice",
+      "name": "speaker", "label": {"en": "Preset speaker", "zh": "预置音色"}, "type": "choice",
       "options": [
-        { "value": "Vivian",   "label": "Vivian · 中文女声（明亮年轻） / bright young female" },
-        { "value": "Serena",   "label": "Serena · 中文女声（温柔） / warm gentle female" },
-        { "value": "Uncle_Fu", "label": "Uncle Fu · 中文男声（低沉醇厚） / low mellow male" },
-        { "value": "Dylan",    "label": "Dylan · 北京男声（清透自然） / clear Beijing male" },
-        { "value": "Eric",     "label": "Eric · 成都男声（微哑活力） / lively husky male" },
+        { "value": "Vivian",   "label": {"en": "Vivian · bright young female", "zh": "中文女声（明亮年轻）"} },
+        { "value": "Serena",   "label": {"en": "Serena · warm gentle female", "zh": "中文女声（温柔）"} },
+        { "value": "Uncle_Fu", "label": {"en": "Uncle Fu · low mellow male", "zh": "中文男声（低沉醇厚）"} },
+        { "value": "Dylan",    "label": {"en": "Dylan · clear Beijing male", "zh": "北京男声（清透自然）"} },
+        { "value": "Eric",     "label": {"en": "Eric · lively husky male", "zh": "成都男声（微哑活力）"} },
         { "value": "Ryan",     "label": "Ryan · English male (dynamic rhythm)" },
         { "value": "Aiden",    "label": "Aiden · English male (sunny American)" },
-        { "value": "Ono_Anna", "label": "Ono Anna · 日本語女性（轻盈灵动） / playful Japanese female" },
-        { "value": "Sohee",    "label": "Sohee · 한국어 여성（温暖感性） / warm Korean female" }
+        { "value": "Ono_Anna", "label": {"en": "Ono Anna · playful Japanese female", "zh": "日本語女性（轻盈灵动）"} },
+        { "value": "Sohee",    "label": {"en": "Sohee · warm Korean female", "zh": "한국어 여성（温暖感性）"} }
       ],
-      "default": "Vivian", "hint": "九个内置预置音色，无需参考音频。"
+      "default": "Vivian", "hint": {"en": "Nine built-in preset speakers; no reference clip needed.", "zh": "九个内置预置音色，无需参考音频。"}
     },
     {
-      "name": "instruct", "label": "语气指令 / Instruct", "type": "text_area",
-      "default": "", "hint": "可选，用自然语言调整语气，如「用兴奋的语气」。"
+      "name": "instruct", "label": {"en": "Instruct", "zh": "语气指令"}, "type": "text_area",
+      "default": "", "hint": {"en": "Optional natural-language tone, e.g. \"speak excitedly\".", "zh": "可选，用自然语言调整语气，如「用兴奋的语气」。"}
     }
   ],'
 elif [ "$MODE" = "voice_design" ]; then
   PARAMETERS='"parameters": [
     {
-      "name": "instruct", "label": "音色描述 / Voice description", "type": "text_area",
-      "default": "", "hint": "必填：用自然语言描述想要的音色，如「一位温柔的年轻女性，语速稍慢」。"
+      "name": "instruct", "label": {"en": "Voice description", "zh": "音色描述"}, "type": "text_area",
+      "default": "", "hint": {"en": "Required: describe the voice in words, e.g. \"a gentle young woman speaking slowly\".", "zh": "必填：用自然语言描述想要的音色，如「一位温柔的年轻女性，语速稍慢」。"}
     }
   ],'
 fi

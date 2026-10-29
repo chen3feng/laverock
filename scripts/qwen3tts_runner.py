@@ -151,7 +151,7 @@ def main() -> int:
     args = parse_args()
 
     speed_up_cached_loading()
-    emit("stage", "正在加载模型到内存")
+    emit("stage", "Loading model into memory")
     import torch
     from qwen_tts import Qwen3TTSModel
 
@@ -170,7 +170,7 @@ def main() -> int:
         model = Qwen3TTSModel.from_pretrained(args.model, **load_kwargs)
 
     attach_step_counter(model)
-    emit("stage", "正在合成语音")
+    emit("stage", "Generating speech")
     gen_limit = {"max_new_tokens": step_cap(args.text)}
     if args.mode == "clone":
         if not args.ref_audio:

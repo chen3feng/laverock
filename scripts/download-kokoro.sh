@@ -32,7 +32,7 @@ lv_hf_skip() {
 }
 
 download_hf() {
-  lv_stage "从 HuggingFace 镜像逐文件下载（$(lv_hf_base)）"
+  lv_stage "Fetching file list from HuggingFace ($(lv_hf_base))"
   lv_hf_download_repo "$HF_REPO" "$DEST" 8
 }
 
@@ -41,8 +41,8 @@ download_hf() {
 if [ "${KOKORO_SOURCE:-}" = "hf" ]; then
   download_hf
 elif ! lv_extract_tarball "$GH_URL" "$TMP/model.tar.bz2" "$MODELS_DIR" \
-      "下载 Kokoro-82M INT8 打包文件 · 约 132 MB"; then
-  echo "GitHub 打包下载失败，改用 HuggingFace 镜像逐文件下载" >&2
+      "Downloading Kokoro-82M INT8 tarball (~132 MB)"; then
+  echo "GitHub tarball unavailable, falling back to per-file HuggingFace download" >&2
   download_hf
 fi
 
@@ -60,7 +60,7 @@ done
 # Speaker ids follow the order baked into the ONNX metadata
 # (`speaker_names`), not alphabetic order — em_santa is sid 53.
 # af_* 美式英语 | bf_*/bm_* 英式英语 | zf_*/zm_* 中文（普通话）
-lv_stage "写入引擎清单"
+lv_stage "Writing engine manifest"
 cat > "$DEST/engine.json" <<EOF
 {
   "id": "$MODEL",
@@ -84,76 +84,76 @@ cat > "$DEST/engine.json" <<EOF
   "parameters": [
     {
       "name": "voice",
-      "label": "音色",
+      "label": {"en": "Voice", "zh": "音色"},
       "type": "choice",
       "options": [
-        { "label": "Alloy · 美式英语女声 (af_alloy)", "value": "0" },
-        { "label": "Aoede · 美式英语女声 (af_aoede)", "value": "1" },
-        { "label": "Bella · 美式英语女声 (af_bella)", "value": "2" },
-        { "label": "Heart · 美式英语女声 (af_heart)", "value": "3" },
-        { "label": "Jessica · 美式英语女声 (af_jessica)", "value": "4" },
-        { "label": "Kore · 美式英语女声 (af_kore)", "value": "5" },
-        { "label": "Nicole · 美式英语女声 (af_nicole)", "value": "6" },
-        { "label": "Nova · 美式英语女声 (af_nova)", "value": "7" },
-        { "label": "River · 美式英语女声 (af_river)", "value": "8" },
-        { "label": "Sarah · 美式英语女声 (af_sarah)", "value": "9" },
-        { "label": "Sky · 美式英语女声 (af_sky)", "value": "10" },
-        { "label": "Adam · 美式英语男声 (am_adam)", "value": "11" },
-        { "label": "Echo · 美式英语男声 (am_echo)", "value": "12" },
-        { "label": "Eric · 美式英语男声 (am_eric)", "value": "13" },
-        { "label": "Fenrir · 美式英语男声 (am_fenrir)", "value": "14" },
-        { "label": "Liam · 美式英语男声 (am_liam)", "value": "15" },
-        { "label": "Michael · 美式英语男声 (am_michael)", "value": "16" },
-        { "label": "Onyx · 美式英语男声 (am_onyx)", "value": "17" },
-        { "label": "Puck · 美式英语男声 (am_puck)", "value": "18" },
-        { "label": "Santa · 美式英语男声 (am_santa)", "value": "19" },
-        { "label": "Alice · 英式英语女声 (bf_alice)", "value": "20" },
-        { "label": "Emma · 英式英语女声 (bf_emma)", "value": "21" },
-        { "label": "Isabella · 英式英语女声 (bf_isabella)", "value": "22" },
-        { "label": "Lily · 英式英语女声 (bf_lily)", "value": "23" },
-        { "label": "Daniel · 英式英语男声 (bm_daniel)", "value": "24" },
-        { "label": "Fable · 英式英语男声 (bm_fable)", "value": "25" },
-        { "label": "George · 英式英语男声 (bm_george)", "value": "26" },
-        { "label": "Lewis · 英式英语男声 (bm_lewis)", "value": "27" },
-        { "label": "Dora · 西班牙语女声 (ef_dora)", "value": "28" },
-        { "label": "Alex · 西班牙语男声 (em_alex)", "value": "29" },
-        { "label": "Siwis · 法语女声 (ff_siwis)", "value": "30" },
-        { "label": "Alpha · 印地语女声 (hf_alpha)", "value": "31" },
-        { "label": "Beta · 印地语女声 (hf_beta)", "value": "32" },
-        { "label": "Omega · 印地语男声 (hm_omega)", "value": "33" },
-        { "label": "Psi · 印地语男声 (hm_psi)", "value": "34" },
-        { "label": "Sara · 意大利语女声 (if_sara)", "value": "35" },
-        { "label": "Nicola · 意大利语男声 (im_nicola)", "value": "36" },
-        { "label": "Alpha · 日语女声 (jf_alpha)", "value": "37" },
-        { "label": "Gongitsune · 日语女声 (jf_gongitsune)", "value": "38" },
-        { "label": "Nezumi · 日语女声 (jf_nezumi)", "value": "39" },
-        { "label": "Tebukuro · 日语女声 (jf_tebukuro)", "value": "40" },
-        { "label": "Kumo · 日语男声 (jm_kumo)", "value": "41" },
-        { "label": "Dora · 葡萄牙语女声 (pf_dora)", "value": "42" },
-        { "label": "Alex · 葡萄牙语男声 (pm_alex)", "value": "43" },
-        { "label": "Santa · 葡萄牙语男声 (pm_santa)", "value": "44" },
-        { "label": "小贝 · 普通话女声 (zf_xiaobei)", "value": "45" },
-        { "label": "小妮 · 普通话女声 (zf_xiaoni)", "value": "46" },
-        { "label": "晓晓 · 普通话女声 (zf_xiaoxiao)", "value": "47" },
-        { "label": "小伊 · 普通话女声 (zf_xiaoyi)", "value": "48" },
-        { "label": "云健 · 普通话男声 (zm_yunjian)", "value": "49" },
-        { "label": "云希 · 普通话男声 (zm_yunxi)", "value": "50" },
-        { "label": "云夏 · 普通话男声 (zm_yunxia)", "value": "51" },
-        { "label": "云扬 · 普通话男声 (zm_yunyang)", "value": "52" },
-        { "label": "Santa · 西班牙语男声 (em_santa)", "value": "53" }
+        { "label": {"en": "Alloy · American English (female) (af_alloy)", "zh": "Alloy · 美式英语女声 (af_alloy)"}, "value": "0" },
+        { "label": {"en": "Aoede · American English (female) (af_aoede)", "zh": "Aoede · 美式英语女声 (af_aoede)"}, "value": "1" },
+        { "label": {"en": "Bella · American English (female) (af_bella)", "zh": "Bella · 美式英语女声 (af_bella)"}, "value": "2" },
+        { "label": {"en": "Heart · American English (female) (af_heart)", "zh": "Heart · 美式英语女声 (af_heart)"}, "value": "3" },
+        { "label": {"en": "Jessica · American English (female) (af_jessica)", "zh": "Jessica · 美式英语女声 (af_jessica)"}, "value": "4" },
+        { "label": {"en": "Kore · American English (female) (af_kore)", "zh": "Kore · 美式英语女声 (af_kore)"}, "value": "5" },
+        { "label": {"en": "Nicole · American English (female) (af_nicole)", "zh": "Nicole · 美式英语女声 (af_nicole)"}, "value": "6" },
+        { "label": {"en": "Nova · American English (female) (af_nova)", "zh": "Nova · 美式英语女声 (af_nova)"}, "value": "7" },
+        { "label": {"en": "River · American English (female) (af_river)", "zh": "River · 美式英语女声 (af_river)"}, "value": "8" },
+        { "label": {"en": "Sarah · American English (female) (af_sarah)", "zh": "Sarah · 美式英语女声 (af_sarah)"}, "value": "9" },
+        { "label": {"en": "Sky · American English (female) (af_sky)", "zh": "Sky · 美式英语女声 (af_sky)"}, "value": "10" },
+        { "label": {"en": "Adam · American English (male) (am_adam)", "zh": "Adam · 美式英语男声 (am_adam)"}, "value": "11" },
+        { "label": {"en": "Echo · American English (male) (am_echo)", "zh": "Echo · 美式英语男声 (am_echo)"}, "value": "12" },
+        { "label": {"en": "Eric · American English (male) (am_eric)", "zh": "Eric · 美式英语男声 (am_eric)"}, "value": "13" },
+        { "label": {"en": "Fenrir · American English (male) (am_fenrir)", "zh": "Fenrir · 美式英语男声 (am_fenrir)"}, "value": "14" },
+        { "label": {"en": "Liam · American English (male) (am_liam)", "zh": "Liam · 美式英语男声 (am_liam)"}, "value": "15" },
+        { "label": {"en": "Michael · American English (male) (am_michael)", "zh": "Michael · 美式英语男声 (am_michael)"}, "value": "16" },
+        { "label": {"en": "Onyx · American English (male) (am_onyx)", "zh": "Onyx · 美式英语男声 (am_onyx)"}, "value": "17" },
+        { "label": {"en": "Puck · American English (male) (am_puck)", "zh": "Puck · 美式英语男声 (am_puck)"}, "value": "18" },
+        { "label": {"en": "Santa · American English (male) (am_santa)", "zh": "Santa · 美式英语男声 (am_santa)"}, "value": "19" },
+        { "label": {"en": "Alice · British English (female) (bf_alice)", "zh": "Alice · 英式英语女声 (bf_alice)"}, "value": "20" },
+        { "label": {"en": "Emma · British English (female) (bf_emma)", "zh": "Emma · 英式英语女声 (bf_emma)"}, "value": "21" },
+        { "label": {"en": "Isabella · British English (female) (bf_isabella)", "zh": "Isabella · 英式英语女声 (bf_isabella)"}, "value": "22" },
+        { "label": {"en": "Lily · British English (female) (bf_lily)", "zh": "Lily · 英式英语女声 (bf_lily)"}, "value": "23" },
+        { "label": {"en": "Daniel · British English (male) (bm_daniel)", "zh": "Daniel · 英式英语男声 (bm_daniel)"}, "value": "24" },
+        { "label": {"en": "Fable · British English (male) (bm_fable)", "zh": "Fable · 英式英语男声 (bm_fable)"}, "value": "25" },
+        { "label": {"en": "George · British English (male) (bm_george)", "zh": "George · 英式英语男声 (bm_george)"}, "value": "26" },
+        { "label": {"en": "Lewis · British English (male) (bm_lewis)", "zh": "Lewis · 英式英语男声 (bm_lewis)"}, "value": "27" },
+        { "label": {"en": "Dora · Spanish (female) (ef_dora)", "zh": "Dora · 西班牙语女声 (ef_dora)"}, "value": "28" },
+        { "label": {"en": "Alex · Spanish (male) (em_alex)", "zh": "Alex · 西班牙语男声 (em_alex)"}, "value": "29" },
+        { "label": {"en": "Siwis · French (female) (ff_siwis)", "zh": "Siwis · 法语女声 (ff_siwis)"}, "value": "30" },
+        { "label": {"en": "Alpha · Hindi (female) (hf_alpha)", "zh": "Alpha · 印地语女声 (hf_alpha)"}, "value": "31" },
+        { "label": {"en": "Beta · Hindi (female) (hf_beta)", "zh": "Beta · 印地语女声 (hf_beta)"}, "value": "32" },
+        { "label": {"en": "Omega · Hindi (male) (hm_omega)", "zh": "Omega · 印地语男声 (hm_omega)"}, "value": "33" },
+        { "label": {"en": "Psi · Hindi (male) (hm_psi)", "zh": "Psi · 印地语男声 (hm_psi)"}, "value": "34" },
+        { "label": {"en": "Sara · Italian (female) (if_sara)", "zh": "Sara · 意大利语女声 (if_sara)"}, "value": "35" },
+        { "label": {"en": "Nicola · Italian (male) (im_nicola)", "zh": "Nicola · 意大利语男声 (im_nicola)"}, "value": "36" },
+        { "label": {"en": "Alpha · Japanese (female) (jf_alpha)", "zh": "Alpha · 日语女声 (jf_alpha)"}, "value": "37" },
+        { "label": {"en": "Gongitsune · Japanese (female) (jf_gongitsune)", "zh": "Gongitsune · 日语女声 (jf_gongitsune)"}, "value": "38" },
+        { "label": {"en": "Nezumi · Japanese (female) (jf_nezumi)", "zh": "Nezumi · 日语女声 (jf_nezumi)"}, "value": "39" },
+        { "label": {"en": "Tebukuro · Japanese (female) (jf_tebukuro)", "zh": "Tebukuro · 日语女声 (jf_tebukuro)"}, "value": "40" },
+        { "label": {"en": "Kumo · Japanese (male) (jm_kumo)", "zh": "Kumo · 日语男声 (jm_kumo)"}, "value": "41" },
+        { "label": {"en": "Dora · Portuguese (female) (pf_dora)", "zh": "Dora · 葡萄牙语女声 (pf_dora)"}, "value": "42" },
+        { "label": {"en": "Alex · Portuguese (male) (pm_alex)", "zh": "Alex · 葡萄牙语男声 (pm_alex)"}, "value": "43" },
+        { "label": {"en": "Santa · Portuguese (male) (pm_santa)", "zh": "Santa · 葡萄牙语男声 (pm_santa)"}, "value": "44" },
+        { "label": {"en": "Xiaobei · Mandarin (female) (zf_xiaobei)", "zh": "小贝 · 普通话女声 (zf_xiaobei)"}, "value": "45" },
+        { "label": {"en": "Xiaoni · Mandarin (female) (zf_xiaoni)", "zh": "小妮 · 普通话女声 (zf_xiaoni)"}, "value": "46" },
+        { "label": {"en": "Xiaoxiao · Mandarin (female) (zf_xiaoxiao)", "zh": "晓晓 · 普通话女声 (zf_xiaoxiao)"}, "value": "47" },
+        { "label": {"en": "Xiaoyi · Mandarin (female) (zf_xiaoyi)", "zh": "小伊 · 普通话女声 (zf_xiaoyi)"}, "value": "48" },
+        { "label": {"en": "Yunjian · Mandarin (male) (zm_yunjian)", "zh": "云健 · 普通话男声 (zm_yunjian)"}, "value": "49" },
+        { "label": {"en": "Yunxi · Mandarin (male) (zm_yunxi)", "zh": "云希 · 普通话男声 (zm_yunxi)"}, "value": "50" },
+        { "label": {"en": "Yunxia · Mandarin (male) (zm_yunxia)", "zh": "云夏 · 普通话男声 (zm_yunxia)"}, "value": "51" },
+        { "label": {"en": "Yunyang · Mandarin (male) (zm_yunyang)", "zh": "云扬 · 普通话男声 (zm_yunyang)"}, "value": "52" },
+        { "label": {"en": "Santa · Spanish (male) (em_santa)", "zh": "Santa · 西班牙语男声 (em_santa)"}, "value": "53" }
       ],
       "default": "3",
-      "hint": "Kokoro 只提供预置音色，不支持用自己的音频克隆。"
+      "hint": {"en": "Kokoro offers preset voices only; it cannot clone your own audio.", "zh": "Kokoro 只提供预置音色，不支持用自己的音频克隆。"}
     },
     {
       "name": "speed",
-      "label": "语速",
+      "label": {"en": "Speed", "zh": "语速"},
       "type": "float",
       "min": 0.5,
       "max": 2.0,
       "step": 0.1,
       "default": 1.0,
-      "hint": "越大语速越快，不改变音色"
+      "hint": {"en": "Higher is faster; the voice itself is unchanged.", "zh": "越大语速越快，不改变音色"}
     }
   ]
 }

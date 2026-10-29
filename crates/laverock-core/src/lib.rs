@@ -21,7 +21,7 @@ pub use manager::{
     EngineInfo, EngineManager, ProgressEvent, ProgressSink, SpeechEngine, SynthRequest,
 };
 pub use manifest::{
-    AudioCppManifest, EngineKind, KokoroManifest, LongCatManifest, Manifest, ParamKind,
+    AudioCppManifest, EngineKind, KokoroManifest, Localized, LongCatManifest, Manifest, ParamKind,
     ParamOption, ParamSpec, Qwen3TtsManifest, SttManifest, SynthDefaults, ZipVoiceManifest,
 };
 pub use transcribe::Transcriber;

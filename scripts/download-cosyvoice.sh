@@ -20,8 +20,8 @@ AC_VERSION="${DOTS_VERSION:-v0.9.2-drama3-base-small}"
 PRECISION="${COSYVOICE_PRECISION:-q8_0}"
 
 case "$PRECISION" in
-  f32) GGUF_NAME="cosyvoice3-f32.gguf"; SIZE_NOTE="约 7 GB" ;;
-  *)   GGUF_NAME="cosyvoice3-q8_0.gguf"; SIZE_NOTE="约 2.3 GB" ;;
+  f32) GGUF_NAME="cosyvoice3-f32.gguf"; SIZE_NOTE="~7 GB" ;;
+  *)   GGUF_NAME="cosyvoice3-q8_0.gguf"; SIZE_NOTE="~2.3 GB" ;;
 esac
 GGUF="$DEST/$GGUF_NAME"
 
@@ -32,7 +32,7 @@ BACKEND="$(lv_audiocpp_backend)"
 # 2. Weights.
 lv_hf_download_file audio-cpp/audio.cpp-gguf \
   "CosyVoice3-GGUF/$GGUF_NAME" "$GGUF" 8 \
-  "下载 CosyVoice3 权重（${SIZE_NOTE}）"
+  "Downloading CosyVoice3 weights (${SIZE_NOTE})"
 
 # 3. Manifest.
 cat > "$DEST/engine.json" <<EOF
@@ -54,4 +54,4 @@ EOF
 
 echo
 echo "CosyVoice3 installed at $DEST"
-echo "Reload the 模型 page (or restart the server) to pick it up."
+echo "Reload the Models page (or restart the server) to pick it up."

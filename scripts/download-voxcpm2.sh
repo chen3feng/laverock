@@ -29,7 +29,7 @@ BACKEND="$(lv_audiocpp_backend)"
 
 # 2. Weights from the audio.cpp GGUF repo, in parallel ranged requests.
 lv_hf_download_file audio-cpp/audio.cpp-gguf "$PACKAGE" "$GGUF" 8 \
-  "下载 VoxCPM2 权重（${PRECISION}，约 2.8 GB）"
+  "Downloading VoxCPM2 weights (${PRECISION}, ~2.8 GB)"
 
 # 3. Manifest. VoxCPM2 supports prompt-less TTS as well as zero-shot cloning;
 #    the runner adds --voice-ref only when the request carries a prompt.

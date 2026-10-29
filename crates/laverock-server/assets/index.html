@@ -805,90 +805,13 @@ $('langSelect').onchange = async () => {
   }
 };
 
-// Localized labels/hints/options for manifest-declared engine parameters.
-// Keyed `${kind}:${name}`, falling back to the name alone.
-const PARAM_I18N = {
-  speed: { label: { zh: '语速', en: 'Speed' }, hint: { zh: '越大语速越快，不改变音色', en: 'Higher is faster; the voice itself is unchanged.' } },
-  num_steps: { label: { zh: '扩散步数', en: 'Sampling steps' }, hint: { zh: '越多越稳但越慢', en: 'More steps are steadier but slower.' } },
-  cfg: { label: { zh: '提示词强度 (CFG)', en: 'Prompt strength (CFG)' }, hint: { zh: '过高会失真', en: 'Too high causes distortion.' } },
-  temperature: { label: { zh: '随机性', en: 'Randomness' }, hint: { zh: '越高变化越大，越低越确定', en: 'Higher adds variation; lower is more deterministic.' } },
-  seed: { label: { zh: '随机种子', en: 'Random seed' }, hint: { zh: '相同种子 + 文本得到可复现的声音；-1 每次随机', en: 'Same seed + text gives reproducible speech; -1 randomizes each run.' } },
-  'longcat:num_steps': { label: { zh: '采样步数 (NFE)', en: 'Sampling steps (NFE)' }, hint: { zh: '扩散 ODE 步数；16 已足够，越多越慢', en: 'Diffusion ODE steps; 16 is enough, more is slower.' } },
-  'longcat:cfg': { label: { zh: '引导强度', en: 'Guidance strength' }, hint: { zh: '越高越贴近参考音色，过高可能失真', en: 'Higher follows the reference voice more closely; too high may distort.' } },
-  guidance_method: {
-    label: { zh: '引导方式', en: 'Guidance method' },
-    hint: { zh: 'APG 通常更自然、伪影更少', en: 'APG is usually more natural with fewer artifacts.' },
-    options: { apg: { zh: 'APG（自适应投影，推荐）', en: 'APG (adaptive projection, recommended)' }, cfg: { zh: 'CFG（传统无分类器引导）', en: 'CFG (classic classifier-free guidance)' } },
-  },
-  'dots:num_steps': { label: { zh: '采样步数', en: 'Sampling steps' }, hint: { zh: 'SOAR 推荐 10 步；变多会更慢', en: 'SOAR recommends 10 steps; more is slower.' } },
-  guidance: { label: { zh: '引导强度', en: 'Guidance strength' }, hint: { zh: '越高越贴近参考音色，过高可能失真', en: 'Higher follows the reference voice more closely; too high may distort.' } },
-  clone_mode: {
-    label: { zh: '克隆方式', en: 'Clone mode' },
-    hint: { zh: '文字稿不准确时选「仅声纹」更稳', en: 'Use voice-only when the transcript may be inaccurate.' },
-    options: {
-      xvector: { zh: '仅声纹（只凭声音，推荐）', en: 'Voice only (sound alone, recommended)' },
-      continuation: { zh: '声纹 + 文字（文字稿准确时更相似）', en: 'Voice + transcript (more alike with an accurate transcript)' },
-    },
-  },
-  language: {
-    label: { zh: '语言标签', en: 'Language tag' },
-    hint: { zh: '多语言或混合语言时固定标签有帮助', en: 'A fixed tag helps with mixed-language text.' },
-    options: {
-      '': { zh: '自动', en: 'Auto' }, zh: { zh: '中文', en: 'Chinese' }, en: { zh: 'English', en: 'English' },
-      ja: { zh: '日本語', en: 'Japanese' }, ko: { zh: '한국어', en: 'Korean' }, fr: { zh: 'Français', en: 'French' },
-      de: { zh: 'Deutsch', en: 'German' }, es: { zh: 'Español', en: 'Spanish' },
-    },
-  },
-  template: {
-    label: { zh: '合成模板', en: 'Synthesis template' },
-    hint: { zh: '零样本最像；文字稿不准时选跨语种', en: 'Zero-shot is the closest; use cross-lingual with no transcript.' },
-    options: {
-      zero_shot: { zh: '零样本克隆（需文字稿，相似度最高）', en: 'Zero-shot clone (needs transcript, closest match)' },
-      cross_lingual: { zh: '跨语种克隆（只凭声音）', en: 'Cross-lingual clone (voice only)' },
-      instruct: { zh: '指令（用文字描述语气）', en: 'Instruct (describe the tone in words)' },
-    },
-  },
-  instruct: { label: { zh: '指令（仅「指令」模板使用）', en: 'Instruction (used only by the Instruct template)' }, hint: { zh: '例如：用温和亲切的语气，语速稍慢', en: 'e.g. Read in a gentle, warm tone at a slightly slower pace.' } },
-  'cosyvoice:num_steps': { label: { zh: '流式解码步数', en: 'Streaming decode steps' }, hint: { zh: '声学流匹配的 Euler 步数；越多越稳越慢', en: 'Euler steps for the acoustic flow matching; more is steadier and slower.' } },
-  top_k: { label: { zh: 'Top-K 采样', en: 'Top-K sampling' }, hint: { zh: '越小越稳定，越大越有变化', en: 'Lower is steadier; higher adds variation.' } },
-  'kokoro:voice': {
-    label: { zh: '音色', en: 'Voice' },
-    hint: { zh: 'Kokoro 只提供预置音色，不支持用自己的音频克隆。', en: 'Kokoro offers preset voices only; it cannot clone your own audio.' },
-  },
-  'qwen3tts:speaker': {
-    label: { zh: '预置音色', en: 'Preset speaker' },
-    hint: {
-      zh: '九个内置说话人，无需参考音频。',
-      en: 'Nine built-in speakers; no reference clip needed.',
-    },
-  },
-  'qwen3tts:instruct': {
-    label: { zh: '语气指令', en: 'Instruct' },
-    hint: {
-      zh: '可选，用自然语言调整语气，如「用兴奋的语气」。',
-      en: 'Optional natural-language tone instruction, e.g. "speak excitedly".',
-    },
-  },
-};
-
-function paramI18n(kind, name) {
-  return PARAM_I18N[`${kind}:${name}`] || PARAM_I18N[name] || null;
-}
-
-// English rendering of a Kokoro voice label: "Heart · 美式英语女声 (af_heart)"
-// -> "Heart · American English (female) (af_heart)", derived from the id.
-function kokoroVoiceEn(label) {
-  // Labels look like "Heart · 美式英语女声 (af_heart)": name, a localized
-  // descriptor and the voice id. The id's first letter gives the language
-  // and the second the gender, so no Chinese parsing is needed.
-  const m = label.match(/^(.*?)\s*·\s*.*\(([abefhijpz])([fm])_([a-z0-9]+)\)\s*$/);
-  if (!m) return label;
-  const [, name, l, g, tail] = m;
-  const langMap = {
-    a: 'American English', b: 'British English', e: 'Spanish', f: 'French',
-    h: 'Hindi', i: 'Italian', j: 'Japanese', p: 'Portuguese', z: 'Mandarin Chinese',
-  };
-  return `${name.trim()} · ${langMap[l] || l} (${g === 'f' ? 'female' : 'male'}) (${l}${g}_${tail})`;
+// Manifest text is either a plain string (third-party manifests) or a
+// {en, zh} object (everything we generate). Resolve it for the UI
+// language; engine-provided ids stay untouched when no label exists.
+function loc(value) {
+  if (value == null) return '';
+  if (typeof value === 'string') return value;
+  return value[lang] || value.zh || value.en || '';
 }
 
 // Server-side validation errors are Chinese strings; map the known ones
@@ -1880,8 +1803,8 @@ function renderEngineParams(e) {
   grid.style.marginTop = '10px';
   for (const p of specs) {
     const wrap = document.createElement('div');
-    wrap.appendChild(paramControl(p, e && e.kind));
-    const hintText = paramHint(e && e.kind, p);
+    wrap.appendChild(paramControl(p));
+    const hintText = paramHint(p);
     if (hintText) {
       const h = document.createElement('div');
       h.className = 'hint';
@@ -1898,33 +1821,19 @@ function fmtParamValue(p, v) {
   return p.type === 'float' ? String(Number(v)) : String(v);
 }
 
-function paramLabel(kind, p) {
-  if (lang === 'en') {
-    const loc = paramI18n(kind, p.name);
-    if (loc && loc.label && loc.label.en) return loc.label.en;
-  }
-  return p.label || p.name;
+function paramLabel(p) {
+  return loc(p.label) || p.name;
 }
 
-function paramHint(kind, p) {
-  if (lang === 'en') {
-    const loc = paramI18n(kind, p.name);
-    if (loc && loc.hint && loc.hint.en) return loc.hint.en;
-  }
-  return p.hint || '';
+function paramHint(p) {
+  return loc(p.hint);
 }
 
-function paramOptionLabel(kind, p, option) {
-  if (lang === 'en') {
-    if (kind === 'kokoro' && p.name === 'voice') return kokoroVoiceEn(option.label || option.value);
-    const loc = paramI18n(kind, p.name);
-    const hit = loc && loc.options && loc.options[option.value];
-    if (hit && hit.en) return hit.en;
-  }
-  return option.label || option.value;
+function paramOptionLabel(option) {
+  return loc(option.label) || option.value;
 }
 
-function paramControl(p, kind) {
+function paramControl(p) {
   const id = 'param-' + p.name;
   const min = Number(p.min), max = Number(p.max), step = p.step != null ? Number(p.step) : null;
   const wideRange = p.type === 'int' && (min < 0 || max - min > 1000);
@@ -1932,7 +1841,7 @@ function paramControl(p, kind) {
   const box = document.createElement('div');
   const lab = document.createElement('label');
   lab.htmlFor = id;
-  lab.textContent = paramLabel(kind, p);
+  lab.textContent = paramLabel(p);
   box.appendChild(lab);
 
   let input;
@@ -1945,7 +1854,7 @@ function paramControl(p, kind) {
     for (const o of p.options || []) {
       const opt = document.createElement('option');
       opt.value = o.value;
-      opt.textContent = paramOptionLabel(kind, p, o);
+      opt.textContent = paramOptionLabel(o);
       if (o.value === String(p.default)) opt.selected = true;
       input.appendChild(opt);
     }

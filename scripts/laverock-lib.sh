@@ -131,13 +131,13 @@ lv_prepare_python_venv() {
   local venv="$1" python="$2"
   VPY="$(lv_venv_python "$venv")"
   if [ ! -f "$VPY" ]; then
-    lv_stage "创建 Python 虚拟环境"
+    lv_stage "Creating Python virtual environment"
     "$python" -m venv "$venv"
   fi
   export LV_PY="$VPY"
   # Progress bars on even though pip sees a pipe, not a terminal.
   export PIP_PROGRESS_BAR=on
-  lv_stage "升级 pip"
+  lv_stage "Upgrading pip"
   "$VPY" -m pip install --upgrade pip
   if lv_is_windows && lv_has_nvidia \
      && ! "$VPY" -c 'import torch, torchaudio, sys; sys.exit(0 if torch.version.cuda else 1)' 2>/dev/null
@@ -146,7 +146,7 @@ lv_prepare_python_venv() {
     # None); install a CUDA build first so the engine's own requirements
     # leave torch satisfied. A CUDA-enabled torch already present is left
     # alone, so reruns do not re-resolve the multi-GB package.
-    lv_stage "安装 CUDA 版 PyTorch（首次约 1–2 GB）"
+    lv_stage "Installing CUDA PyTorch (~1–2 GB the first time)"
     "$VPY" -m pip install torch torchaudio \
       --index-url https://download.pytorch.org/whl/cu130
   fi
@@ -241,7 +241,7 @@ lv_audiocpp_bin() {
   tmp="$(mktemp -d)"
   mkdir -p "$tmp/ex" "$dir"
 
-  lv_stage "下载 audio.cpp 运行时（${asset}）"
+  lv_stage "Downloading audio.cpp runtime (${asset})"
   lv_download "$base/audio-$version-$asset$ext" "$tmp/runtime$ext" 0
   if [ "$ext" = ".zip" ]; then
     lv_unzip "$tmp/runtime.zip" "$tmp/ex"
@@ -250,7 +250,7 @@ lv_audiocpp_bin() {
     # than the single binary the portable CPU build yields.
     cp -a "$tmp/ex/." "$dir/"
     if [ "$ac_cuda" = 1 ]; then
-      lv_stage "下载 CUDA 运行库（cudart ${cuda_ver}，免安装 CUDA）"
+      lv_stage "Downloading CUDA runtime (cudart ${cuda_ver}, no CUDA install needed)"
       lv_download "$base/audio-$version-cudart-windows-x64-cuda${cuda_ver}.zip" \
         "$tmp/cudart.zip" 0
       mkdir -p "$tmp/cu"
@@ -333,7 +333,7 @@ lv_voxcpm2_runner() {
 
     # Manifest first: its sha256 line catches a truncated archive. The
     # layout is one line per file by design (see voxcpm2-runner.yml).
-    lv_stage "校验 voxcpm2-cli 预编译版本"
+    lv_stage "Verifying the prebuilt voxcpm2-cli"
     manifest="$cache/manifest.json"
     curl -fsSL --retry 2 "$base/voxcpm2-runner/voxcpm2-runner.json" -o "$manifest" || return 1
     want="$(sed -n "s/.*\"$asset\".*\"sha256\": *\"\([0-9a-fA-F]\{64\}\)\".*/\1/p" "$manifest" | head -1 | tr 'A-F' 'a-f')"
@@ -369,7 +369,7 @@ lv_voxcpm2_runner() {
 
   cp "$cache/$inner" "$dest/$inner"
   chmod +x "$dest/$inner" 2>/dev/null || true
-  lv_stage "voxcpm2-cli 预编译版本就绪"
+  lv_stage "Prebuilt voxcpm2-cli is ready"
 }
 
 # lv_fetch_parallel <url> <dest> <total_bytes> [workers]
@@ -436,7 +436,7 @@ lv_fetch_parallel() {
       got=$((got + $(lv_filesize "$dest.part$i")))
     done
     [ "$got" -ge "$total" ] && break
-    [ "$attempt" -lt 3 ] && lv_stage "下载不完整，正在续传（第 $((attempt + 1)) 次）"
+    [ "$attempt" -lt 3 ] && lv_stage "Incomplete download; resuming (attempt $((attempt + 1)))"
   done
 
   : >"$dest"
@@ -497,7 +497,7 @@ lv_hf_repo_files() {
   listing="$(curl -fsSL --retry 3 --retry-delay 2 --connect-timeout 20 \
     "$base/api/models/$repo/tree/main?recursive=true" 2>"$errfile")" || {
     err="$(tr '\n' ' ' <"$errfile" 2>/dev/null | cut -c1-200)"
-    echo "无法连接模型仓库 ${base}（${err:-连接超时}）。" >&2
+    echo "Cannot reach the model repository ${base} (${err:-connection timed out})." >&2
     lv_hf_network_hint "$base" >&2
     return 1
   }
@@ -522,10 +522,11 @@ lv_hf_network_hint() {
   local base="${1:-$(lv_hf_base)}"
   case "$base" in
     *hf-mirror.com*|*modelscope*)
-      echo "提示：请在应用「设置 → 下载网络」中确认镜像或代理可用，然后重试。" ;;
+      echo "Hint: check the mirror/proxy under Settings → Downloads, then retry." ;;
     *)
-      echo "提示：如果无法访问 huggingface.co，请在应用「设置 → 下载网络」中把
-Hugging Face 镜像设为 https://hf-mirror.com（或配置代理），并在模型页重新安装。" ;;
+      echo "Hint: if huggingface.co is unreachable, set the Hugging Face mirror to
+https://hf-mirror.com (or configure a proxy) under Settings → Downloads,
+then reinstall from the Models page." ;;
   esac
 }
 
@@ -549,7 +550,7 @@ lv_hf_download_repo() {
   local listing
   listing="$(lv_hf_repo_files "$repo" "$base")" || return 1
   if [ -z "$listing" ]; then
-    echo "仓库 ${repo} 没有可下载的文件（${base}）" >&2
+    echo "No downloadable files listed for ${repo} (${base})" >&2
     lv_hf_network_hint "$base" >&2
     return 1
   fi
@@ -581,7 +582,7 @@ lv_hf_download_repo() {
     # A few espeak data files contain spaces (e.g. "!v/Mr serious"); the
     # local name keeps them, only the URL is percent-encoded.
     url="$base/$repo/resolve/main/${rel// /%20}"
-    lv_stage "下载 ${rel}（$(awk -v b="${size:-0}" 'BEGIN { printf "%.1f MB", b / 1048576 }')）"
+    lv_stage "Downloading ${rel} ($(awk -v b="${size:-0}" 'BEGIN { printf "%.1f MB", b / 1048576 }'))"
     if [ "${size:-0}" -ge "$parallel_min" ]; then
       lv_fetch_parallel "$url" "$fdest" "$size" "$workers"
     else
@@ -612,7 +613,7 @@ lv_hf_download_repo() {
 # lv_fetch_parallel with the server-advertised size (resumable ranged
 # slices). A non-empty existing <dest> is left untouched.
 lv_hf_download_file() {
-  local repo="$1" rel="$2" dest="$3" workers="${4:-8}" label="${5:-下载 $rel}"
+  local repo="$1" rel="$2" dest="$3" workers="${4:-8}" label="${5:-Download $rel}"
   if [ -s "$dest" ]; then
     return 0
   fi
@@ -632,11 +633,11 @@ lv_hf_download_file() {
 # Download a .tar.bz2 release asset to <tar_path> and extract it into
 # <extract_dir> (created). Non-zero on a failed/empty download.
 lv_extract_tarball() {
-  local url="$1" tar_path="$2" extract_dir="$3" label="${4:-下载打包文件}"
+  local url="$1" tar_path="$2" extract_dir="$3" label="${4:-Download archive}"
   lv_stage "$label"
   lv_download "$url" "$tar_path" || return 1
   [ -s "$tar_path" ] || { echo "downloaded archive is empty: $url" >&2; return 1; }
-  lv_stage "解压模型文件"
+  lv_stage "Extracting model files"
   mkdir -p "$extract_dir"
   tar -xjf "$tar_path" -C "$extract_dir"
 }
@@ -651,7 +652,7 @@ lv_download() {
   local total have
   total="$(lv_content_length "$url")"
   have="$(lv_filesize "$dest")"
-  lv_stage "下载 $(basename "$dest")"
+  lv_stage "Downloading $(basename "$dest")"
 
   local args=(-sSL --fail --retry 3 --retry-delay 2 -o "$dest")
   if [ "$resume" = "1" ] && [ "$have" -gt 0 ]; then
@@ -666,7 +667,7 @@ lv_download() {
     if [ "${total:-0}" -gt 0 ]; then
       lv_progress "$(awk -v s="$size" -v t="$total" 'BEGIN { printf "%.1f", s * 100 / t }')"
     else
-      lv_stage "下载 $(basename "$dest") · $(awk -v s="$size" 'BEGIN { printf "%.0f MB", s / 1048576 }')"
+      lv_stage "Downloading $(basename "$dest") · $(awk -v s="$size" 'BEGIN { printf "%.0f MB", s / 1048576 }')"
     fi
   done
   wait "$cpid"

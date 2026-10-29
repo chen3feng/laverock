@@ -133,16 +133,19 @@ fn engine_preset(
                     return None;
                 }
                 p.options.iter().find_map(|o| {
-                    // Match the sid/value, the whole bilingual label, or a
+                    // Match the sid/value, either language's label, or a
                     // bare voice id embedded in the label ("… (af_heart)").
                     let label_id = o
                         .label
+                        .for_lang("en")
                         .rfind('(')
-                        .zip(o.label.rfind(')'))
+                        .zip(o.label.for_lang("en").rfind(')'))
                         .filter(|(a, b)| b > a)
-                        .map(|(a, b)| &o.label[a + 1..b]);
-                    (o.value == voice || o.label == voice || label_id.is_some_and(|id| id == voice))
-                        .then(|| (p.name.clone(), o.value.clone()))
+                        .map(|(a, b)| &o.label.for_lang("en")[a + 1..b]);
+                    (o.value == voice
+                        || o.label.matches(voice)
+                        || label_id.is_some_and(|id| id == voice))
+                    .then(|| (p.name.clone(), o.value.clone()))
                 })
             })
         })
