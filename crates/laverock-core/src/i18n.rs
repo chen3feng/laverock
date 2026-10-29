@@ -199,6 +199,11 @@ messages! {
         { en: "Hugging Face mirror", zh: "Hugging Face 镜像" },
     LabelPipMirror = "label_pip_mirror"
         { en: "PyPI mirror", zh: "PyPI 镜像" },
+    LabelWorkspace = "label_workspace"
+        { en: "Workspace directory", zh: "工作区目录" },
+    WorkspaceDirNotAbsolute = "workspace_dir_not_absolute"
+        { en: "{label} must be an absolute path, e.g. /data/laverock or D:\\laverock.",
+          zh: "{label}必须是绝对路径，例如 /data/laverock 或 D:\\laverock。" },
     UnsupportedLanguage = "unsupported_language"
         { en: "Unsupported language: {lang}", zh: "不支持的语言：{lang}" },
 

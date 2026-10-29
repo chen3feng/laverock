@@ -38,6 +38,15 @@ pub struct Settings {
     pub hf_endpoint: String,
     /// pip index used to build the Qwen3-TTS venv; empty means PyPI.
     pub pip_index: String,
+    /// Optional root for the model and tool (venv) directories. Empty
+    /// means the launcher's defaults (app-data for the desktop app,
+    /// `models/` + `.tools/` for the standalone server). When set, models
+    /// live in `<workspace_dir>/models` and venvs in `<workspace_dir>/tools`
+    /// — one switch to move the multi-GB assets to a bigger drive. The
+    /// server is authoritative: it overrides `LAVEROCK_MODELS_DIR`/
+    /// `LAVEROCK_TOOLS_DIR` from the environment. Profiles/history stay in
+    /// the data directory (next to this file), so it never chases itself.
+    pub workspace_dir: String,
     /// UI language: "" follows the browser, otherwise a code such as
     /// `zh` or `en`. Only the web UI interprets it.
     pub language: String,
@@ -80,6 +89,16 @@ impl Settings {
         env
     }
 
+    /// The workspace's `models` and `tools` directories, or `None` when no
+    /// workspace is set (the caller keeps its launcher defaults).
+    pub fn workspace_paths(&self) -> Option<(PathBuf, PathBuf)> {
+        if self.workspace_dir.is_empty() {
+            return None;
+        }
+        let root = PathBuf::from(&self.workspace_dir);
+        Some((root.join("models"), root.join("tools")))
+    }
+
     fn normalize(mut self) -> Result<Self> {
         self.proxy = self.proxy.trim().to_string();
         self.hf_endpoint = self.hf_endpoint.trim().trim_end_matches('/').to_string();
@@ -100,6 +119,14 @@ impl Settings {
         }
         check_url(Key::LabelHfMirror, &self.hf_endpoint, &["http", "https"])?;
         check_url(Key::LabelPipMirror, &self.pip_index, &["http", "https"])?;
+
+        self.workspace_dir = expand_home(self.workspace_dir.trim());
+        if !self.workspace_dir.is_empty() && !Path::new(&self.workspace_dir).is_absolute() {
+            return Err(CoreError::UserError(
+                i18n::Message::new(Key::WorkspaceDirNotAbsolute)
+                    .arg_key("label", Key::LabelWorkspace),
+            ));
+        }
 
         self.language = self.language.trim().to_string();
         if !matches!(self.language.as_str(), "" | "zh" | "en") {
@@ -122,6 +149,27 @@ pub const PROXY_VARS: &[&str] = &[
     "NO_PROXY",
     "no_proxy",
 ];
+
+/// Expand a leading `~`, `~/`, or `~\` to the user's home directory so
+/// the UI can accept the familiar short form. Anything else is returned
+/// unchanged.
+pub(crate) fn expand_home(path: &str) -> String {
+    let rest = if let Some(rest) = path.strip_prefix("~/").or_else(|| path.strip_prefix("~\\")) {
+        rest
+    } else if path == "~" {
+        ""
+    } else {
+        return path.to_string();
+    };
+    let home = std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"))
+        .map(std::path::PathBuf::from);
+    match home {
+        Some(home) if rest.is_empty() => home.to_string_lossy().into_owned(),
+        Some(home) => home.join(rest).to_string_lossy().into_owned(),
+        None => path.to_string(),
+    }
+}
 
 /// Keep any inherited exceptions, and always bypass loopback so a local
 /// mirror keeps working.
@@ -237,6 +285,7 @@ mod tests {
             proxy: "  http://127.0.0.1:10808  ".into(),
             hf_endpoint: " https://hf-mirror.com/ ".into(),
             pip_index: "https://pypi.tuna.tsinghua.edu.cn/simple/".into(),
+            workspace_dir: "  ".into(),
             language: String::new(),
         }
         .normalize()
@@ -247,6 +296,8 @@ mod tests {
             settings.pip_index,
             "https://pypi.tuna.tsinghua.edu.cn/simple"
         );
+        assert_eq!(settings.workspace_dir, "");
+        assert!(settings.workspace_paths().is_none());
     }
 
     #[test]
@@ -281,6 +332,7 @@ mod tests {
             proxy: "http://127.0.0.1:10808".into(),
             hf_endpoint: "https://hf-mirror.com".into(),
             pip_index: "https://pypi.tuna.tsinghua.edu.cn/simple".into(),
+            workspace_dir: String::new(),
             language: String::new(),
         };
         let env = settings.download_env(None);
@@ -329,6 +381,42 @@ mod tests {
             ..Settings::default()
         };
         assert!(s.normalize().is_err());
+    }
+
+    #[test]
+    fn workspace_dir_must_be_absolute() {
+        for bad in ["models", "./models", "../shared"] {
+            let s = Settings {
+                workspace_dir: bad.into(),
+                ..Settings::default()
+            };
+            assert!(s.normalize().is_err(), "{bad} should be rejected");
+        }
+        let s = Settings {
+            workspace_dir: "  /data/laverock  ".into(),
+            ..Settings::default()
+        }
+        .normalize()
+        .expect("absolute path is valid");
+        assert_eq!(s.workspace_dir, "/data/laverock");
+        let (models, tools) = s.workspace_paths().expect("paths derived");
+        assert_eq!(models, PathBuf::from("/data/laverock/models"));
+        assert_eq!(tools, PathBuf::from("/data/laverock/tools"));
+    }
+
+    #[test]
+    fn workspace_dir_expands_home() {
+        if std::env::var_os("HOME").is_none() {
+            return;
+        }
+        let s = Settings {
+            workspace_dir: "~/laverock-tts".into(),
+            ..Settings::default()
+        }
+        .normalize()
+        .expect("expanded path is absolute");
+        assert!(Path::new(&s.workspace_dir).is_absolute());
+        assert!(s.workspace_dir.ends_with("laverock-tts"));
     }
 
     #[test]

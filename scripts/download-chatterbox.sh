@@ -77,7 +77,7 @@ cat > "$DEST/engine.json" <<EOF
 {
   "id": "$ENGINE_ID",
   "kind": "chatterbox",
-  "name": "Chatterbox Multilingual V3 (voice clone)",
+  "name": "Chatterbox Multilingual (voice clone)",
   "languages": ["zh", "en", "ar", "da", "de", "el", "es", "fi", "fr", "he", "hi", "it", "ja", "ko", "ms", "nl", "no", "pl", "pt", "ru", "sv", "sw", "tr"],
   "capabilities": ["tts", "clone", "multilingual"],
   "chatterbox": {

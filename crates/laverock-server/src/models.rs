@@ -116,6 +116,7 @@ pub struct ModelList {
 
 pub struct ModelService {
     models_root: PathBuf,
+    tools_root: Option<PathBuf>,
     scripts_dir: Option<PathBuf>,
     settings: Arc<SettingsStore>,
     manager: Arc<EngineManager>,
@@ -125,6 +126,7 @@ pub struct ModelService {
 impl ModelService {
     pub fn new(
         models_root: impl Into<PathBuf>,
+        tools_root: Option<PathBuf>,
         scripts_dir: Option<PathBuf>,
         settings: Arc<SettingsStore>,
         manager: Arc<EngineManager>,
@@ -133,11 +135,13 @@ impl ModelService {
         // relative "models"; the directory may not exist yet.
         let models_root = models_root.into();
         let models_root = clean_native(std::fs::canonicalize(&models_root).unwrap_or(models_root));
+        let tools_root = tools_root.map(|p| clean_native(std::fs::canonicalize(&p).unwrap_or(p)));
         // Paths handed in by the desktop shell can contain `..`; show
         // clean paths in the UI and hand scripts a stable one.
         let scripts_dir = scripts_dir.map(|p| clean_native(std::fs::canonicalize(&p).unwrap_or(p)));
         Self {
             models_root,
+            tools_root,
             scripts_dir,
             settings,
             manager,
@@ -272,6 +276,7 @@ impl ModelService {
         let settings = self.settings.clone();
         let manager = self.manager.clone();
         let models_root = self.models_root.clone();
+        let tools_root = self.tools_root.clone();
         let script_dir = scripts.clone();
         let entry_for_thread = entry.clone();
 
@@ -283,6 +288,7 @@ impl ModelService {
                     script,
                     script_dir,
                     models_root,
+                    tools_root,
                     jobs,
                     settings,
                     manager,
@@ -303,6 +309,10 @@ impl ModelService {
 
     pub fn scripts_dir(&self) -> Option<&Path> {
         self.scripts_dir.as_deref()
+    }
+
+    pub fn tools_dir(&self) -> Option<&Path> {
+        self.tools_root.as_deref()
     }
 }
 
@@ -334,6 +344,7 @@ fn run_install(
     script: PathBuf,
     script_dir: PathBuf,
     models_root: PathBuf,
+    tools_root: Option<PathBuf>,
     jobs: Arc<Mutex<HashMap<String, Job>>>,
     settings: Arc<SettingsStore>,
     manager: Arc<EngineManager>,
@@ -354,6 +365,11 @@ fn run_install(
         .env("LAVEROCK_SCRIPTS_DIR", bash_path(&script_dir))
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+    // Pin the venv root when the workspace setting or launcher supplied
+    // one; otherwise the scripts default to `<repo>/.tools`.
+    if let Some(tools) = &tools_root {
+        cmd.env("LAVEROCK_TOOLS_DIR", bash_path(tools));
+    }
     // Bundled MinGit: make its bash/coreutils/curl visible to the script and
     // every process it spawns, without relying on the system PATH.
     if let Some(path) = shell.augmented_path() {
@@ -936,6 +952,7 @@ mod tests {
             script,
             scripts,
             models.clone(),
+            None,
             jobs.clone(),
             settings,
             manager,
