@@ -26,6 +26,8 @@ pub enum EngineKind {
     Kokoro,
     #[serde(rename = "ming3tts")]
     Ming3Tts,
+    #[serde(rename = "chatterbox")]
+    Chatterbox,
     /// Speech-to-text models (SenseVoice via sherpa-onnx). Not a
     /// synthesis engine; discovered by the transcriber instead.
     #[serde(rename = "stt")]
@@ -71,6 +73,7 @@ impl EngineKind {
             EngineKind::CosyVoice => "cosyvoice",
             EngineKind::Kokoro => "kokoro",
             EngineKind::Ming3Tts => "ming3tts",
+            EngineKind::Chatterbox => "chatterbox",
             EngineKind::Stt => "stt",
         }
     }
@@ -102,6 +105,8 @@ pub struct Manifest {
     pub kokoro: Option<KokoroManifest>,
     #[serde(default)]
     pub ming3tts: Option<Ming3TtsManifest>,
+    #[serde(default)]
+    pub chatterbox: Option<ChatterboxManifest>,
     /// STT configuration when `kind == "stt"`.
     #[serde(default)]
     pub stt: Option<SttManifest>,
@@ -173,6 +178,11 @@ impl Manifest {
                 .ming3tts
                 .is_none()
                 .then(|| missing("ming3tts"))
+                .flatten(),
+            EngineKind::Chatterbox => self
+                .chatterbox
+                .is_none()
+                .then(|| missing("chatterbox"))
                 .flatten(),
             EngineKind::Stt => self.stt.is_none().then(|| missing("stt")).flatten(),
         }
@@ -270,6 +280,7 @@ impl Manifest {
             EngineKind::Qwen3Tts => Vec::new(),
             // Every mode ships its own parameter lists via the manifest.
             EngineKind::Ming3Tts => Vec::new(),
+            EngineKind::Chatterbox => Vec::new(),
             // Flow-matching ODE: NFE steps, guidance strength/method, seed.
             EngineKind::LongCat => vec![
                 ParamSpec::int_slider(
@@ -901,6 +912,28 @@ pub struct Ming3TtsManifest {
 
 fn default_ming_mode() -> String {
     "clone".to_string()
+}
+
+/// Chatterbox (Resemble AI): a 0.5B multilingual TTS that clones a voice
+/// from a reference clip, with a per-request output language. Runs through
+/// the official `chatterbox-tts` Python package in its own venv.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChatterboxManifest {
+    #[serde(default = "default_python")]
+    pub python: String,
+    pub script: String,
+    pub model: String,
+    /// Multilingual T3 checkpoint filename; `v3` is the latest and default.
+    #[serde(default = "default_chatterbox_t3")]
+    pub t3: String,
+    #[serde(default = "default_device")]
+    pub device: String,
+    #[serde(default)]
+    pub env: std::collections::BTreeMap<String, String>,
+}
+
+fn default_chatterbox_t3() -> String {
+    "v3".to_string()
 }
 
 /// LongCat-AudioDiT (Meituan): a waveform-latent diffusion TTS model with

@@ -6,6 +6,7 @@
 
 use crate::{
     audiocpp::{AudioCppEngine, Family},
+    chatterbox::ChatterboxEngine,
     kokoro::KokoroEngine,
     longcat::LongCatEngine,
     ming3tts::Ming3TtsEngine,
@@ -188,6 +189,7 @@ impl EngineManager {
             }
             EngineKind::Kokoro => Arc::new(KokoroEngine::build(&dir, &manifest)?),
             EngineKind::Ming3Tts => Arc::new(Ming3TtsEngine::build(&dir, &manifest)?),
+            EngineKind::Chatterbox => Arc::new(ChatterboxEngine::build(&dir, &manifest)?),
             // STT models are discovered by the transcriber, not built as
             // synthesis engines.
             EngineKind::Stt => {
