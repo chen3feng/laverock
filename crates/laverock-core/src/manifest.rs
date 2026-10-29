@@ -24,6 +24,8 @@ pub enum EngineKind {
     CosyVoice,
     #[serde(rename = "kokoro")]
     Kokoro,
+    #[serde(rename = "ming3tts")]
+    Ming3Tts,
     /// Speech-to-text models (SenseVoice via sherpa-onnx). Not a
     /// synthesis engine; discovered by the transcriber instead.
     #[serde(rename = "stt")]
@@ -68,6 +70,7 @@ impl EngineKind {
             EngineKind::Dots => "dots",
             EngineKind::CosyVoice => "cosyvoice",
             EngineKind::Kokoro => "kokoro",
+            EngineKind::Ming3Tts => "ming3tts",
             EngineKind::Stt => "stt",
         }
     }
@@ -97,6 +100,8 @@ pub struct Manifest {
     pub cosyvoice: Option<AudioCppManifest>,
     #[serde(default)]
     pub kokoro: Option<KokoroManifest>,
+    #[serde(default)]
+    pub ming3tts: Option<Ming3TtsManifest>,
     /// STT configuration when `kind == "stt"`.
     #[serde(default)]
     pub stt: Option<SttManifest>,
@@ -164,6 +169,11 @@ impl Manifest {
                 .flatten(),
             EngineKind::LongCat => self.longcat.is_none().then(|| missing("longcat")).flatten(),
             EngineKind::Kokoro => self.kokoro.is_none().then(|| missing("kokoro")).flatten(),
+            EngineKind::Ming3Tts => self
+                .ming3tts
+                .is_none()
+                .then(|| missing("ming3tts"))
+                .flatten(),
             EngineKind::Stt => self.stt.is_none().then(|| missing("stt")).flatten(),
         }
     }
@@ -258,6 +268,8 @@ impl Manifest {
             ],
             // Non-diffusion autoregressive models expose no step control.
             EngineKind::Qwen3Tts => Vec::new(),
+            // Every mode ships its own parameter lists via the manifest.
+            EngineKind::Ming3Tts => Vec::new(),
             // Flow-matching ODE: NFE steps, guidance strength/method, seed.
             EngineKind::LongCat => vec![
                 ParamSpec::int_slider(
@@ -855,6 +867,40 @@ pub struct Qwen3TtsManifest {
     pub attn: String,
     #[serde(default)]
     pub env: std::collections::BTreeMap<String, String>,
+}
+
+/// Ming-3.0-tts: an isolated Python runner around the single 0.5B dense
+/// checkpoint, which handles every task (zero-shot cloning, voice design,
+/// multilingual, built-in IP voices, free-form control). The `mode` field
+/// selects which task the manifest exposes; all modes share one model dir.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Ming3TtsManifest {
+    #[serde(default = "default_python")]
+    pub python: String,
+    pub script: String,
+    pub model: String,
+    /// Directory holding the repo's Python sources (ming_tts.py + the
+    /// tts_tasks/frontend/modeling_bailingmm modules it imports).
+    #[serde(default)]
+    pub runtime: String,
+    #[serde(default = "default_ming_mode")]
+    pub mode: String,
+    /// Multilingual task language (`Chinese`, `English`, `German`, ...).
+    #[serde(default)]
+    pub language: Option<String>,
+    /// Built-in IP voice name for `mode == "ip"` and -design style fallback.
+    #[serde(default)]
+    pub instruct: Option<String>,
+    #[serde(default)]
+    pub speaker: Option<String>,
+    #[serde(default = "default_device")]
+    pub device: String,
+    #[serde(default)]
+    pub env: std::collections::BTreeMap<String, String>,
+}
+
+fn default_ming_mode() -> String {
+    "clone".to_string()
 }
 
 /// LongCat-AudioDiT (Meituan): a waveform-latent diffusion TTS model with

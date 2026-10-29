@@ -304,5 +304,126 @@
       "en": "The 1.7B model; a voice description is required to synthesize. Requires Python 3.10–3.12.",
       "zh": "1.7B 模型，合成时必须填写音色描述。需要 Python 3.10–3.12。"
     }
+  },
+  {
+    "id": "ming3tts",
+    "dir": "ming3tts",
+    "name": "Ming-3.0-tts 0.5B (voice clone)",
+    "description": {
+      "en": "Ming-3.0-tts ranks #1 among open-weights models on the Artificial Analysis Controlled Voice leaderboard. Clones a reference clip (Chinese/English and more) with a single 0.5B dense checkpoint; a transcript of the clip improves fidelity but is optional.",
+      "zh": "Ming-3.0-tts 在 Artificial Analysis「受控音色克隆」排行榜中位列开源模型第一。用单个 0.5B 稠密模型克隆参考音频（中英及更多语言）；给出参考音频的文字可提升一致度，但非必需。"
+    },
+    "size": "~3 GB（不含 venv）",
+    "languages": [
+      "zh",
+      "en",
+      "de",
+      "es",
+      "fr",
+      "ko",
+      "ja"
+    ],
+    "capabilities": [
+      "tts",
+      "clone"
+    ],
+    "script": "download-ming3tts.sh",
+    "env": {
+      "MING3TTS_VARIANT": "clone"
+    },
+    "note": {
+      "en": "FST text normalization needs pynini (conda-forge only) and is skipped automatically when absent. Variants share one checkpoint/venv. Requires Python 3.10–3.12.",
+      "zh": "FST 文本正则需要 pynini（仅 conda 提供），缺失时自动跳过。各变体共用同一份权重/venv。需要 Python 3.10–3.12。"
+    }
+  },
+  {
+    "id": "ming3tts-design",
+    "dir": "ming3tts-design",
+    "name": "Ming-3.0-tts 0.5B (voice design)",
+    "description": {
+      "en": "Create a voice from a natural-language description (voice design), e.g. \"a warm, calm male narrator\". No reference clip needed. Shares the weights/venv with the clone variant.",
+      "zh": "用自然语言描述来创造音色（声音设计），例如「一位温暖沉稳的男声旁白」。无需参考音频。与克隆版共用权重/venv。"
+    },
+    "size": "~0 MB 增量",
+    "languages": [
+      "zh",
+      "en",
+      "de",
+      "es",
+      "fr",
+      "ko",
+      "ja"
+    ],
+    "capabilities": [
+      "tts",
+      "voice-design",
+      "instruct"
+    ],
+    "script": "download-ming3tts.sh",
+    "env": {
+      "MING3TTS_VARIANT": "voice_design"
+    },
+    "note": {
+      "en": "A voice description is required to synthesize. Requires the clone variant's weights/venv (installing it alone also fetches them). Requires Python 3.10–3.12.",
+      "zh": "合成时必须填写音色描述。需要克隆版的权重/venv（单独安装也会拉取）。需要 Python 3.10–3.12。"
+    }
+  },
+  {
+    "id": "ming3tts-multilingual",
+    "dir": "ming3tts-multilingual",
+    "name": "Ming-3.0-tts 0.5B (multilingual clone)",
+    "description": {
+      "en": "Clone a reference voice but speak German, Spanish, French, Korean or Japanese, plus Chinese/English. Shares the weights/venv with the clone variant.",
+      "zh": "克隆参考声音但说德语、西班牙语、法语、韩语或日语，以及中英文。与克隆版共用权重/venv。"
+    },
+    "size": "~0 MB 增量",
+    "languages": [
+      "zh",
+      "en",
+      "de",
+      "es",
+      "fr",
+      "ko",
+      "ja"
+    ],
+    "capabilities": [
+      "tts",
+      "clone",
+      "multilingual"
+    ],
+    "script": "download-ming3tts.sh",
+    "env": {
+      "MING3TTS_VARIANT": "multilingual"
+    },
+    "note": {
+      "en": "The reference clip should be spoken in the target language for best results. Requires the clone variant's weights/venv (installing it alone also fetches them).",
+      "zh": "参考音频最好用目标语言录制以获得最佳效果。需要克隆版的权重/venv（单独安装也会拉取）。"
+    }
+  },
+  {
+    "id": "ming3tts-ip",
+    "dir": "ming3tts-ip",
+    "name": "Ming-3.0-tts 0.5B (preset voices)",
+    "description": {
+      "en": "Built-in Ming voices (UK/US English, Mandarin) with no reference clip needed. Shares the weights/venv with the clone variant.",
+      "zh": "Ming 内置音色（英/美英语、中文普通话），无需参考音频。与克隆版共用权重/venv。"
+    },
+    "size": "~0 MB 增量",
+    "languages": [
+      "zh",
+      "en"
+    ],
+    "capabilities": [
+      "tts",
+      "preset-voices"
+    ],
+    "script": "download-ming3tts.sh",
+    "env": {
+      "MING3TTS_VARIANT": "ip"
+    },
+    "note": {
+      "en": "Preset voices only; no reference clip needed. Requires the clone variant's weights/venv (installing it alone also fetches them).",
+      "zh": "仅预置音色，无需参考音频。需要克隆版的权重/venv（单独安装也会拉取）。"
+    }
   }
 ]

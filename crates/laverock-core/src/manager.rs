@@ -8,6 +8,7 @@ use crate::{
     audiocpp::{AudioCppEngine, Family},
     kokoro::KokoroEngine,
     longcat::LongCatEngine,
+    ming3tts::Ming3TtsEngine,
     qwen3tts::Qwen3TtsEngine,
     zipvoice::ZipVoiceEngine,
     Audio, CoreError, EngineKind, Manifest, ParamSpec, Result,
@@ -186,6 +187,7 @@ impl EngineManager {
                 Arc::new(AudioCppEngine::build(&dir, &manifest, Family::CosyVoice)?)
             }
             EngineKind::Kokoro => Arc::new(KokoroEngine::build(&dir, &manifest)?),
+            EngineKind::Ming3Tts => Arc::new(Ming3TtsEngine::build(&dir, &manifest)?),
             // STT models are discovered by the transcriber, not built as
             // synthesis engines.
             EngineKind::Stt => {
