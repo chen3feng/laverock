@@ -156,6 +156,157 @@ pub fn trim_reference(samples: &[f32], sample_rate: u32, max_seconds: f32) -> Co
     Cow::Owned(samples[..best].to_vec())
 }
 
+/// RMS amplitude (≈ -45 dBFS) below which a 10 ms frame counts as silence.
+/// Generated speech sits orders of magnitude above this; only digital
+/// near-silence and pause tails fall below it.
+const SILENCE_RMS: f32 = 0.0056;
+
+/// Length of the analysis window used by [`trim_silence`] and
+/// [`cap_silences`].
+fn silence_frame_len(sample_rate: u32) -> usize {
+    ((sample_rate.max(1) as f32) * 0.010).round().max(1.0) as usize
+}
+
+/// Per-frame "is silence" flags for `samples`.
+fn silence_flags(samples: &[f32], frame_len: usize) -> Vec<bool> {
+    samples
+        .chunks(frame_len)
+        .map(|frame| {
+            let rms = (frame.iter().map(|s| s * s).sum::<f32>() / frame.len() as f32).sqrt();
+            rms < SILENCE_RMS
+        })
+        .collect()
+}
+
+/// Measurements of the silence inside a clip, in seconds. Used to warn
+/// about reference recordings that will condition synthesis badly.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct SilenceProfile {
+    pub leading_secs: f32,
+    pub trailing_secs: f32,
+    pub longest_internal_pause_secs: f32,
+}
+
+/// Measure leading/trailing dead air and the longest pause between words.
+/// An entirely silent clip reports its whole duration as both leading and
+/// trailing silence.
+pub fn silence_profile(samples: &[f32], sample_rate: u32) -> SilenceProfile {
+    let frame_len = silence_frame_len(sample_rate);
+    if samples.len() < frame_len {
+        return SilenceProfile::default();
+    }
+    let frame_secs = frame_len as f32 / sample_rate.max(1) as f32;
+    let quiet = silence_flags(samples, frame_len);
+    let frames = quiet.len();
+    let Some(first_voiced) = quiet.iter().position(|q| !q) else {
+        let total = frames as f32 * frame_secs;
+        return SilenceProfile {
+            leading_secs: total,
+            trailing_secs: total,
+            longest_internal_pause_secs: 0.0,
+        };
+    };
+    let last_voiced = quiet.iter().rposition(|q| !q).unwrap_or(first_voiced);
+
+    let mut longest = 0usize;
+    let mut i = first_voiced;
+    while i <= last_voiced {
+        if !quiet[i] {
+            i += 1;
+            continue;
+        }
+        let start = i;
+        while i <= last_voiced && quiet[i] {
+            i += 1;
+        }
+        longest = longest.max(i - start);
+    }
+
+    SilenceProfile {
+        leading_secs: first_voiced as f32 * frame_secs,
+        trailing_secs: (frames - 1 - last_voiced) as f32 * frame_secs,
+        longest_internal_pause_secs: longest as f32 * frame_secs,
+    }
+}
+
+/// Remove leading and trailing near-silence, keeping `keep_seconds` of
+/// margin at each end. Inputs that are entirely silent become empty.
+pub fn trim_silence(samples: &[f32], sample_rate: u32, keep_seconds: f32) -> Cow<'_, [f32]> {
+    let frame_len = silence_frame_len(sample_rate);
+    if samples.len() < frame_len {
+        return Cow::Borrowed(samples);
+    }
+    let quiet = silence_flags(samples, frame_len);
+    let Some(first_voiced) = quiet.iter().position(|q| !q) else {
+        return Cow::Borrowed(&[]);
+    };
+    let last_voiced = quiet.iter().rposition(|q| !q).unwrap_or(first_voiced);
+    let keep = ((keep_seconds.max(0.0) * sample_rate.max(1) as f32) as usize).min(samples.len());
+    let start = (first_voiced * frame_len).saturating_sub(keep);
+    let end = ((last_voiced + 1) * frame_len + keep).min(samples.len());
+    if start == 0 && end == samples.len() {
+        Cow::Borrowed(samples)
+    } else {
+        Cow::Owned(samples[start..end].to_vec())
+    }
+}
+
+/// Shorten every *internal* near-silence longer than `max_pause_secs` to
+/// that length by cutting the middle out of the quiet run. Used to tame
+/// MOSS-TTS's "silence-token attractor", which inserts pauses of 0.3–1.5 s
+/// (occasionally much longer) mid-utterance. Edits happen inside near-zero
+/// audio, so no crossfade is needed.
+pub fn cap_silences(samples: &[f32], sample_rate: u32, max_pause_secs: f32) -> Cow<'_, [f32]> {
+    let frame_len = silence_frame_len(sample_rate);
+    if samples.len() < 3 * frame_len {
+        return Cow::Borrowed(samples);
+    }
+    let frame_secs = frame_len as f32 / sample_rate.max(1) as f32;
+    let max_frames = (max_pause_secs.max(frame_secs) / frame_secs).round() as usize;
+    let quiet = silence_flags(samples, frame_len);
+    let frames = quiet.len();
+
+    // Collect the sample ranges to drop: the middle of each long internal
+    // quiet run. Edges are left to `trim_silence`.
+    let mut drop_ranges: Vec<(usize, usize)> = Vec::new();
+    let mut i = 0;
+    while i < frames {
+        if !quiet[i] {
+            i += 1;
+            continue;
+        }
+        let start = i;
+        while i < frames && quiet[i] {
+            i += 1;
+        }
+        let end = i;
+        let len = end - start;
+        if start == 0 || end == frames || len <= max_frames {
+            continue;
+        }
+        let drop_frames = len - max_frames;
+        // Center the cut so the remaining pause keeps some silence on both
+        // sides of the splice.
+        let offset = (len - drop_frames) / 2;
+        let drop_start = (start + offset) * frame_len;
+        let drop_end = drop_start + drop_frames * frame_len;
+        drop_ranges.push((drop_start, drop_end.min(samples.len())));
+    }
+
+    if drop_ranges.is_empty() {
+        return Cow::Borrowed(samples);
+    }
+
+    let mut out = Vec::with_capacity(samples.len());
+    let mut cursor = 0;
+    for (start, end) in drop_ranges {
+        out.extend_from_slice(&samples[cursor..start]);
+        cursor = end;
+    }
+    out.extend_from_slice(&samples[cursor..]);
+    Cow::Owned(out)
+}
+
 /// Encode mono f32 samples as 16-bit PCM WAV.
 pub fn encode_wav(samples: &[f32], sample_rate: i32) -> Result<Vec<u8>> {
     let mut cursor = Cursor::new(Vec::new());
@@ -326,5 +477,91 @@ mod tests {
         assert_eq!(resample_mono(&samples, 48_000, 16_000).len(), 16_000);
         // Same rate is a passthrough copy.
         assert_eq!(resample_mono(&samples, 48_000, 48_000), samples);
+    }
+
+    /// A stereo-free test signal: `tone` seconds of a 220 Hz sine at 0.3,
+    /// `gap` seconds of digital silence, then the same tone again.
+    fn tone_gap_tone(tone_secs: f32, gap_secs: f32) -> Vec<f32> {
+        let sr = 24_000;
+        let tone: Vec<f32> = (0..(sr as f32 * tone_secs) as usize)
+            .map(|i| 0.3 * (i as f32 * 220.0 * std::f32::consts::TAU / sr as f32).sin())
+            .collect();
+        let gap = vec![0.0; (sr as f32 * gap_secs) as usize];
+        [tone.clone(), gap, tone].concat()
+    }
+
+    #[test]
+    fn trim_silence_strips_dead_air_but_keeps_margin() {
+        let sr = 24_000;
+        let leading = vec![0.0; 7_200]; // 0.3 s
+        let body = tone_gap_tone(0.5, 0.0);
+        let mut samples = leading.clone();
+        samples.extend_from_slice(&body);
+        samples.extend(vec![0.0; 7_200]);
+
+        let trimmed = trim_silence(&samples, sr as u32, 0.05);
+        let expected = samples.len() - 7_200 - 7_200 + 2 * 1_200; // keep 50 ms each side
+        assert!(
+            (trimmed.len() as i64 - expected as i64).abs() <= 2,
+            "trimmed {} vs expected {expected}",
+            trimmed.len()
+        );
+        assert_eq!(trimmed[..1_200], [0.0; 1_200], "kept margin is silent");
+    }
+
+    #[test]
+    fn cap_silences_shortens_a_long_internal_pause() {
+        let resume = tone_gap_tone(0.5, 1.5);
+        let capped = cap_silences(&resume, 24_000, 0.45);
+        // 1.5 s of silence becomes 0.45 s.
+        let removed = resume.len() as i64 - capped.len() as i64;
+        assert!((removed - 25_200).abs() <= 240, "removed {removed} samples");
+
+        // No run of near-silence longer than the cap remains.
+        let frame = 240;
+        let longest = capped
+            .chunks(frame)
+            .map(|f| f.iter().all(|s| s.abs() < 0.0056))
+            .fold((0usize, 0usize), |(best, cur), quiet| {
+                if quiet {
+                    (best.max(cur + 1), cur + 1)
+                } else {
+                    (best, 0)
+                }
+            });
+        assert!(longest.0 <= 46, "longest quiet run {} frames", longest.0);
+    }
+
+    #[test]
+    fn cap_silences_leaves_short_pauses_alone() {
+        let samples = tone_gap_tone(0.5, 0.3);
+        assert!(matches!(
+            cap_silences(&samples, 24_000, 0.45),
+            Cow::Borrowed(_)
+        ));
+    }
+
+    #[test]
+    fn silence_profile_measures_edges_and_pauses() {
+        let mut samples = vec![0.0; 7_200]; // 0.3 s leading
+        samples.extend(tone_gap_tone(0.5, 1.0)); // 0.5 + 1.0 gap + 0.5
+        samples.extend(vec![0.0; 4_800]); // 0.2 s trailing
+        let p = silence_profile(&samples, 24_000);
+        assert!((p.leading_secs - 0.3).abs() < 0.011, "{p:?}");
+        assert!((p.trailing_secs - 0.2).abs() < 0.011, "{p:?}");
+        assert!((p.longest_internal_pause_secs - 1.0).abs() < 0.011, "{p:?}");
+
+        let silent = silence_profile(&[0.0; 24_000], 24_000);
+        assert!((silent.leading_secs - 1.0).abs() < 0.011, "{silent:?}");
+        assert!((silent.trailing_secs - 1.0).abs() < 0.011, "{silent:?}");
+        assert_eq!(silent.longest_internal_pause_secs, 0.0);
+    }
+
+    #[test]
+    fn silence_helpers_tolerate_tiny_inputs() {
+        assert!(cap_silences(&[], 24_000, 0.45).is_empty());
+        // Shorter than one analysis frame: returned untouched.
+        assert_eq!(trim_silence(&[0.0; 3], 24_000, 0.05).len(), 3);
+        assert_eq!(trim_silence(&[0.2; 10], 24_000, 0.05).len(), 10);
     }
 }
