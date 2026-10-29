@@ -429,9 +429,9 @@
   {
     "id": "chatterbox",
     "dir": "chatterbox",
-    "name": "Chatterbox Multilingual V3 (voice clone)",
+    "name": "Chatterbox Multilingual (voice clone)",
     "description": {
-      "en": "Chatterbox (Resemble AI) is a 0.5B multilingual voice-clone model. Clone a reference clip and speak any of 23 languages — Chinese/English and more — in one model. Requires a Python 3.10–3.12 venv with the chatterbox-tts package.",
+      "en": "Chatterbox (Resemble AI) is a 0.5B multilingual voice-clone model. Clone a reference clip and speak any of 23 languages — Chinese/English and more — in one model. Requires a Python 3.10–3.12 venv with the chatterbox-tts package (the released PyPI build, whose from_local() loads the v2 multilingual checkpoint).",
       "zh": "Chatterbox（Resemble AI）是 0.5B 多语言声音克隆模型。克隆一段参考音频即可说 23 种语言——中英文等——统一模型完成。需要装 chatterbox-tts 包的 Python 3.10–3.12 venv。"
     },
     "size": "~5 GB（含 venv/权重）",

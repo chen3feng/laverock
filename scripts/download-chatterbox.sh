@@ -4,7 +4,12 @@
 # T3 weights, and the laverock runner script.
 #
 #   CHATTERBOX_MODEL=ResembleAI/chatterbox   override the weight repo id
-#   CHATTERBOX_T3=v3                          multilingual T3 checkpoint name
+#
+# chatterbox-tts 0.1.7 (the latest PyPI release) loads the multilingual T3
+# checkpoint by a fixed filename (t3_mtl23ls_v2.safetensors) from the model
+# directory; the newer GitHub `master` source exposes a `t3_model` argument
+# (v3), but that is not yet packaged on PyPI. This script downloads the v2
+# checkpoint the released package actually reads.
 #
 # Chatterbox is a 0.5B multilingual voice-clone TTS. It clones a reference
 # clip and speaks any supported language (default Chinese). Weights are
@@ -20,7 +25,7 @@ lv_init
 VENV="$TOOLS/chatterbox-venv"
 ENGINE_ID="chatterbox"
 DEST="$MODELS_DIR/chatterbox"
-T3="${CHATTERBOX_T3:-v3}"
+T3="v2"
 MODEL="${CHATTERBOX_MODEL:-ResembleAI/chatterbox}"
 
 PYTHON="$(lv_find_python "${CHATTERBOX_PYTHON:-}")" || {
@@ -36,6 +41,11 @@ mkdir -p "$DEST" "$TOOLS"
 lv_prepare_python_venv "$VENV" "$PYTHON"
 lv_stage_key stage_install_pip_deps
 "$VPY" -m pip install --upgrade "chatterbox-tts"
+# chatterbox's Perth audio-watermarker (resemble-perth) does
+# `from pkg_resources import resource_filename`, and setuptools >=81 removed
+# pkg_resources entirely. Pin a version that still bundles it so the
+# watermarker imports and the model can be constructed.
+"$VPY" -m pip install --upgrade "setuptools<81"
 if lv_is_windows && lv_has_nvidia; then
   "$VPY" -m pip install --ignore-installed --no-deps torch torchaudio \
     --index-url https://download.pytorch.org/whl/cu130
@@ -44,8 +54,9 @@ fi
 # 2. Chatterbox weights. `from_local` reads a flat directory named by the
 #    manifest "model"; pass the exact file stems this multilingual runner
 #    needs so large unrelated artifacts (other T3/LLM checkpoints) are not
-#    pulled. resolve-URL GET/range requests (not `hf download`) keep this
-#    working through hf-mirror.com.
+#    pulled. The v2 filename is fixed by the chatterbox-tts 0.1.7 package.
+#    resolve-URL GET/range requests (not `hf download`) keep this working
+#    through hf-mirror.com.
 WEIGHTS="$DEST/weights"
 lv_stage_key stage_download_model_tokenizer
 lv_hf_download_repo "$MODEL" "$WEIGHTS" 8 \
