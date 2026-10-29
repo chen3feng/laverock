@@ -104,6 +104,9 @@ messages! {
     MingReferenceRequired = "ming_reference_required"
         { en: "Ming-3.0-tts clone/multilingual mode needs a reference clip.",
           zh: "Ming-3.0-tts 克隆 / 多语模式需要一段参考音频。" },
+    ChatterboxReferenceRequired = "chatterbox_reference_required"
+        { en: "Chatterbox clones your voice, so it needs a reference clip.",
+          zh: "Chatterbox 克隆你的声音，需要一段参考音频。" },
     EmptyClip = "empty_clip"
         { en: "The audio clip is empty.", zh: "音频为空。" },
     SttModelMissing = "stt_model_missing"

@@ -6,6 +6,7 @@
 
 mod audio;
 mod audiocpp;
+mod chatterbox;
 pub mod i18n;
 mod kokoro;
 mod longcat;
@@ -23,8 +24,8 @@ pub use manager::{
     EngineInfo, EngineManager, ProgressEvent, ProgressSink, SpeechEngine, SynthRequest,
 };
 pub use manifest::{
-    AudioCppManifest, EngineKind, KokoroManifest, Localized, LongCatManifest, Manifest,
-    Ming3TtsManifest, ParamKind, ParamOption, ParamSpec, Qwen3TtsManifest, SttManifest,
+    AudioCppManifest, ChatterboxManifest, EngineKind, KokoroManifest, Localized, LongCatManifest,
+    Manifest, Ming3TtsManifest, ParamKind, ParamOption, ParamSpec, Qwen3TtsManifest, SttManifest,
     SynthDefaults, ZipVoiceManifest,
 };
 pub use transcribe::Transcriber;
