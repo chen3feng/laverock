@@ -62,6 +62,61 @@ def write_wav(path: str, waveform, sample_rate: int) -> None:
         f.writeframes(pcm.tobytes())
 
 
+def use_soundfile_audio_io(torch, torchaudio) -> None:
+    """Route torchaudio load/save through soundfile in this process.
+
+    torchaudio 2.9+ reads and writes through torchcodec, which needs a
+    system FFmpeg and is missing from the ming venv. ming_tts only ever
+    loads WAV prompt clips, and soundfile (libsndfile wheels included) is
+    already a dependency, so shim the module for this process instead of
+    adding an FFmpeg requirement.
+    """
+    try:
+        import soundfile
+    except ImportError:
+        return
+    if getattr(torchaudio, "_laverock_soundfile", False):
+        return
+
+    def load(path, *args, **kwargs):
+        import numpy as np
+
+        data, sample_rate = soundfile.read(path, dtype="float32", always_2d=True)
+        return torch.from_numpy(np.ascontiguousarray(data)).transpose(0, 1), sample_rate
+
+    def save(path, waveform, sample_rate, *args, **kwargs):
+        data = waveform.detach().cpu().float().transpose(0, 1).numpy()
+        soundfile.write(path, data, int(sample_rate), subtype="PCM_16")
+
+    torchaudio.load = load
+    torchaudio.save = save
+    torchaudio._laverock_soundfile = True
+
+
+def use_portable_dtype(model, torch, device: str) -> None:
+    """Make the CUDA-oriented checkpoint run on MPS/CPU.
+
+    ming_tts loads the checkpoint in bfloat16 and only wraps generation in
+    bfloat16 autocast for CUDA. Off CUDA that context is a no-op, so the
+    float32 speaker embedding from the ONNX extractor hits bfloat16 weights
+    ("mat1 and mat2 must have the same dtype"), and the VAE's ISTFT cannot
+    build a complex32 signal on CPU or MPS. Cast the weights to float32 and
+    let the prompt encoder follow the encoder's dtype instead of the
+    checkpoint's hardcoded bfloat16 cast.
+    """
+    if device.startswith("cuda"):
+        return
+    model.model.to(torch.float32)
+    audio = model.model.audio
+    encode = audio.encode_latent
+    dtype = next(audio.encoder.parameters()).dtype
+
+    def encode_latent(waveform, waveform_length, *args, **kwargs):
+        return encode(waveform.to(dtype=dtype), waveform_length, *args, **kwargs)
+
+    audio.encode_latent = encode_latent
+
+
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser()
     p.add_argument("--model", required=True)
@@ -87,6 +142,9 @@ def main() -> int:
 
     emit("stage", "Loading model into memory")
     import torch
+    import torchaudio
+
+    use_soundfile_audio_io(torch, torchaudio)
     from ming_tts import MingTTS
 
     device = resolve_device(torch, args.device)
@@ -100,7 +158,9 @@ def main() -> int:
         model = MingTTS(args.model, device=device, text_normalization=pynini)
     except Exception:
         # A device or dtype mismatch should not be fatal to the request.
-        model = MingTTS(args.model, device="cpu", text_normalization=pynini)
+        device = "cpu"
+        model = MingTTS(args.model, device=device, text_normalization=pynini)
+    use_portable_dtype(model, torch, device)
 
     emit("stage", "Generating speech")
     if args.mode in ("clone", "multilingual"):

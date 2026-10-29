@@ -52,7 +52,13 @@ fi
 
 # 2. Repo Python runtime (ming_tts.py + the modules it imports). The tarball
 #    is gzip, unlike the bzip2 model archives, so extract it directly.
-if [ ! -f "$SHARED/runtime/ming_tts.py" ]; then
+#    Copy every top-level module plus the packages they import: an earlier
+#    installer copied only a hand-picked list and broke on prompt_contract,
+#    fm and audio_tokenizer.
+if [ ! -f "$SHARED/runtime/ming_tts.py" ] \
+   || [ ! -f "$SHARED/runtime/prompt_contract.py" ] \
+   || [ ! -f "$SHARED/runtime/fm/dit.py" ] \
+   || [ ! -f "$SHARED/runtime/audio_tokenizer/modeling_audio_vae.py" ]; then
   lv_stage_key stage_fetch_runtime
   if ! lv_download "$RUNTIME_URL" "$TMP/runtime.tar.gz"; then
     echo "cannot download the Ming-3.0-tts runtime in MING3TTS_RUNTIME_URL, make sure your proxy/mirror is reachable" >&2
@@ -62,23 +68,35 @@ if [ ! -f "$SHARED/runtime/ming_tts.py" ]; then
   tar -xzf "$TMP/runtime.tar.gz" -C "$TMP/tar"
   TOP="$(find "$TMP/tar" -mindepth 1 -maxdepth 1 -type d | head -n1)"
   [ -n "$TOP" ] || { echo "runtime archive has no top-level directory" >&2; exit 1; }
-  cp -R "$TOP"/ming_tts.py "$TOP"/tts_tasks.py "$TOP"/frontend \
-        "$TOP"/modeling_bailingmm.py "$TOP"/spkemb_extractor.py \
-        "$TOP"/requirements.txt "$SHARED/runtime/"
+  cp "$TOP"/*.py "$TOP"/requirements.txt "$SHARED/runtime/"
+  cp -R "$TOP"/frontend "$TOP"/fm "$TOP"/audio_tokenizer "$SHARED/runtime/"
 fi
 
-# 3. Isolated venv. torch/torchaudio pins are dropped so the build that
-#    lv_prepare_python_venv selected (e.g. CUDA torch on Windows+NVIDIA)
-#    stays put instead of being replaced by a generic CPU wheel.
+# 3. Isolated venv.
 VENV="$TOOLS/ming3tts-venv"
 lv_prepare_python_venv "$VENV" "$PYTHON"
 lv_stage_key stage_install_pip_deps
-# Drop the torch/torchaudio pins and the pynini comment so the build that
+# Drop the torch/torchaudio pins (and comments) so the build that
 # lv_prepare_python_venv selected (e.g. CUDA torch on Windows+NVIDIA) stays
 # put instead of being replaced by a generic CPU wheel.
 grep -vE '^(torch|torchaudio)==|^#|^\s*$' "$SHARED/runtime/requirements.txt" \
   > "$TMP/requirements.txt" || true
 "$VPY" -m pip install -r "$TMP/requirements.txt"
+
+# 3b. With the pins dropped, a dependency (x-transformers) pulls a torch
+#     build but nothing pulls torchaudio, which ming_tts.py and
+#     spkemb_extractor.py import. Install the pair if it is not importable,
+#     keeping the CUDA build lv_prepare_python_venv selected on Windows.
+if ! "$VPY" -c 'import torch, torchaudio' 2>/dev/null; then
+  if lv_is_windows && lv_has_nvidia; then
+    lv_stage_key stage_torch_cuda
+    "$VPY" -m pip install torch torchaudio \
+      --index-url https://download.pytorch.org/whl/cu130
+  else
+    lv_stage_key stage_torch
+    "$VPY" -m pip install torch torchaudio
+  fi
+fi
 
 # 4. Runner + manifest (absolute paths are allowed and used as-is).
 cp "$SCRIPT_DIR/ming3tts_runner.py" "$SHARED/runtime/ming3tts_runner.py"
