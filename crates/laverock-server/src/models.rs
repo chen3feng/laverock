@@ -12,6 +12,7 @@ use crate::{
     proxy,
     settings::{ProxyMode, SettingsStore, PROXY_VARS},
 };
+use laverock_core::i18n::{self, Key};
 use laverock_core::{CoreError, EngineManager, Localized, Result};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -71,7 +72,7 @@ impl Job {
             started_at: now_secs(),
             finished_at: None,
             log: String::new(),
-            stage: Some("等待开始".to_string()),
+            stage: Some("stage_waiting".to_string()),
             progress: None,
         }
     }
@@ -180,7 +181,7 @@ impl ModelService {
                 installed,
                 problem,
                 engine_id,
-                job: jobs.get(&entry.id).map(JobView::from),
+                job: jobs.get(&entry.id).map(|job| JobView::localized(job, lang)),
             });
         }
 
@@ -229,28 +230,29 @@ impl ModelService {
             .iter()
             .find(|e| e.id == id)
             .cloned()
-            .ok_or_else(|| CoreError::BadRequest(format!("未知的模型：{id}")))?;
+            .ok_or_else(|| {
+                CoreError::UserError(i18n::Message::new(Key::UnknownModel).arg("model", id))
+            })?;
 
         // A healthy install is left alone; a broken/outdated one (e.g. the
         // VoxCPM2 layout from the retired llama.cpp runner) may be
         // reinstalled in place — the script rewrites engine.json.
         let manifest_path = self.models_root.join(&entry.dir).join("engine.json");
         if manifest_path.is_file() && manifest_problem(&manifest_path, "en").is_none() {
-            return Err(CoreError::BadRequest(format!("{} 已经安装", entry.name)));
+            return Err(CoreError::UserError(
+                i18n::Message::new(Key::AlreadyInstalled).arg("model", &entry.name),
+            ));
         }
 
-        let scripts = self.scripts_dir.as_ref().ok_or_else(|| {
-            CoreError::BadRequest(
-                "找不到下载脚本目录。请设置 LAVEROCK_SCRIPTS_DIR 指向仓库的 scripts/ 目录。"
-                    .to_string(),
-            )
-        })?;
+        let scripts = self
+            .scripts_dir
+            .as_ref()
+            .ok_or_else(|| CoreError::UserError(i18n::Message::new(Key::ScriptsDirMissing)))?;
         let script = scripts.join(&entry.script);
         if !script.is_file() {
-            return Err(CoreError::BadRequest(format!(
-                "缺少下载脚本：{}",
-                script.display()
-            )));
+            return Err(CoreError::UserError(
+                i18n::Message::new(Key::ScriptMissing).arg("path", script.display()),
+            ));
         }
 
         {
@@ -259,7 +261,9 @@ impl ModelService {
                 .get(&entry.id)
                 .is_some_and(|job| job.status == JobStatus::Running)
             {
-                return Err(CoreError::BadRequest("该模型正在下载中".to_string()));
+                return Err(CoreError::UserError(i18n::Message::new(
+                    Key::DownloadInProgress,
+                )));
             }
             jobs.insert(entry.id.clone(), Job::running());
         }
@@ -302,14 +306,23 @@ impl ModelService {
     }
 }
 
-impl From<&Job> for JobView {
-    fn from(job: &Job) -> Self {
+impl JobView {
+    /// Render a job for a UI language. A stage emitted as a script key
+    /// (`stage_download_file name=… size=…`) is translated here; ad-hoc
+    /// stage text is shown as-is.
+    fn localized(job: &Job, lang: &str) -> Self {
+        let lang = laverock_core::i18n::Lang::parse(lang);
+        let stage = job.stage.as_deref().map(|stage| {
+            laverock_core::i18n::message_from_marker(stage)
+                .map(|message| message.render(lang))
+                .unwrap_or_else(|| stage.to_string())
+        });
         Self {
             status: job.status,
             started_at: job.started_at,
             finished_at: job.finished_at,
             log: tail(&job.log, LOG_TAIL),
-            stage: job.stage.clone(),
+            stage,
             progress: job.progress,
         }
     }
@@ -980,6 +993,26 @@ mod tests {
             OsString::from("/home/laverock/models")
         };
         assert_eq!(bash_path(&native), expected);
+    }
+
+    #[test]
+    fn job_stages_translate_and_legacy_text_passes_through() {
+        let mut job = Job::running();
+        job.stage = Some("stage_download_file name=model.onnx size=12.3%20MB".to_string());
+        let en = JobView::localized(&job, "en");
+        assert_eq!(
+            en.stage.as_deref(),
+            Some("Downloading model.onnx (12.3 MB)")
+        );
+        let zh = JobView::localized(&job, "zh");
+        assert_eq!(zh.stage.as_deref(), Some("下载 model.onnx（12.3 MB）"));
+
+        // Stages from older scripts are shown verbatim.
+        job.stage = Some("下载权重".to_string());
+        assert_eq!(
+            JobView::localized(&job, "en").stage.as_deref(),
+            Some("下载权重")
+        );
     }
 
     #[test]

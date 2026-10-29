@@ -6,6 +6,7 @@
 //! connection. An empty mirror means "use the official endpoint", so a
 //! fresh install behaves exactly like running the scripts by hand.
 
+use laverock_core::i18n::{self, Key};
 use laverock_core::{CoreError, Result};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -86,24 +87,25 @@ impl Settings {
 
         match self.proxy_mode {
             ProxyMode::Manual if self.proxy.is_empty() => {
-                return Err(CoreError::BadRequest(
-                    "手动代理模式需要填写代理地址，或改用「跟随系统代理」".to_string(),
-                ));
+                return Err(CoreError::UserError(i18n::Message::new(
+                    Key::ManualProxyRequired,
+                )));
             }
-            ProxyMode::Manual => {
-                check_url("代理", &self.proxy, &["http", "https", "socks5", "socks5h"])?
-            }
+            ProxyMode::Manual => check_url(
+                Key::LabelProxy,
+                &self.proxy,
+                &["http", "https", "socks5", "socks5h"],
+            )?,
             ProxyMode::System | ProxyMode::Direct => {}
         }
-        check_url("Hugging Face 镜像", &self.hf_endpoint, &["http", "https"])?;
-        check_url("PyPI 镜像", &self.pip_index, &["http", "https"])?;
+        check_url(Key::LabelHfMirror, &self.hf_endpoint, &["http", "https"])?;
+        check_url(Key::LabelPipMirror, &self.pip_index, &["http", "https"])?;
 
         self.language = self.language.trim().to_string();
         if !matches!(self.language.as_str(), "" | "zh" | "en") {
-            return Err(CoreError::BadRequest(format!(
-                "unsupported language: {}",
-                self.language
-            )));
+            return Err(CoreError::UserError(
+                i18n::Message::new(Key::UnsupportedLanguage).arg("lang", &self.language),
+            ));
         }
         Ok(self)
     }
@@ -193,21 +195,25 @@ fn parse(raw: &str) -> Result<Settings> {
 
 /// Accepts an empty value (engine default) or an absolute URL whose
 /// scheme is in `schemes`.
-fn check_url(label: &str, value: &str, schemes: &[&str]) -> Result<()> {
+fn check_url(label: Key, value: &str, schemes: &[&str]) -> Result<()> {
     if value.is_empty() {
         return Ok(());
     }
-    let (scheme, rest) = value
-        .split_once("://")
-        .ok_or_else(|| CoreError::BadRequest(format!("{label} 需要以 http:// 或 https:// 开头")))?;
+    let (scheme, rest) = value.split_once("://").ok_or_else(|| {
+        CoreError::UserError(i18n::Message::new(Key::UrlSchemeRequired).arg_key("label", label))
+    })?;
     if !schemes.contains(&scheme.to_ascii_lowercase().as_str()) {
-        return Err(CoreError::BadRequest(format!(
-            "{label} 不支持 {scheme}://，可用：{}",
-            schemes.join("、")
-        )));
+        return Err(CoreError::UserError(
+            i18n::Message::new(Key::UrlSchemeUnsupported)
+                .arg_key("label", label)
+                .arg("scheme", scheme)
+                .arg("allowed", schemes.join(", ")),
+        ));
     }
     if rest.is_empty() || rest.starts_with('/') {
-        return Err(CoreError::BadRequest(format!("{label} 缺少主机名")));
+        return Err(CoreError::UserError(
+            i18n::Message::new(Key::UrlHostMissing).arg_key("label", label),
+        ));
     }
     Ok(())
 }

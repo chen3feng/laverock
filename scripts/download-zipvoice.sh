@@ -26,13 +26,13 @@ fi
 # both are separate upstream artifacts.
 cd "$MODELS_DIR/$MODEL"
 if [ ! -f vocos_24khz.onnx ]; then
-  lv_stage "Downloading vocoder (2/3)"
+  lv_stage_key stage_download_vocoder
   lv_download \
     https://github.com/k2-fsa/sherpa-onnx/releases/download/vocoder-models/vocos_24khz.onnx \
     vocos_24khz.onnx
 fi
 if [ ! -f lexicon-en-us.txt ]; then
-  lv_stage "Downloading English lexicon (3/3)"
+  lv_stage_key stage_download_lexicon
   lv_download \
     https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/lexicon-en-us.txt \
     lexicon-en-us.txt
@@ -54,7 +54,7 @@ if [ ! -f lexicon-en-us.clean.txt ]; then
 fi
 cd - >/dev/null
 
-lv_stage "Writing engine manifest"
+lv_stage_key stage_write_manifest
 cat > "$MODELS_DIR/$MODEL/engine.json" <<EOF
 {
   "id": "$MODEL",

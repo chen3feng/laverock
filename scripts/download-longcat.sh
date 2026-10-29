@@ -38,7 +38,7 @@ mkdir -p "$TOOLS"
 
 # 1. Official implementation (contains the `audiodit` package).
 if [ ! -d "$SRC/.git" ]; then
-  lv_stage "Fetching LongCat-AudioDiT source"
+  lv_stage_key stage_fetch_source
   git clone --depth 1 --progress https://github.com/meituan-longcat/LongCat-AudioDiT.git "$SRC"
 fi
 
@@ -46,7 +46,7 @@ fi
 #    pip, and pre-installs CUDA torch on Windows+NVIDIA; VPY points at its
 #    interpreter (also used by the HF helpers for JSON parsing via LV_PY).
 lv_prepare_python_venv "$VENV" "$PYTHON"
-lv_stage "Installing dependencies (PyTorch and transformers 5, ~1–2 GB)"
+lv_stage_key stage_install_deps
 "$VPY" -m pip install -r "$SRC/requirements.txt"
 # The UMT5 tokenizer ships a SentencePiece model; transformers can fall
 # back to it when converting, so keep the library available.
@@ -58,18 +58,18 @@ lv_stage "Installing dependencies (PyTorch and transformers 5, ~1–2 GB)"
 #    metadata HEAD negotiation rejects hf-mirror redirects, and a single
 #    flaky-proxy reset used to abort the multi-GB stream. The helper resumes
 #    per file and skips files already present with the right size.
-lv_stage "Downloading model weights (${SIZE_NOTE})"
+lv_stage_key stage_download_weights "note=${SIZE_NOTE}"
 lv_hf_download_repo "$MODEL" "$WEIGHTS" 8
 # An interrupted earlier attempt can leave multi-GB partials behind.
 find "$WEIGHTS/.cache" -name "*.incomplete" -delete 2>/dev/null || true
-lv_stage "Downloading the UMT5 tokenizer"
+lv_stage_key stage_download_tokenizer
 # Only the four tokenizer files: the umt5-base repo also ships multi-GB
 # encoder weights that LongCat does not load.
 lv_hf_download_repo google/umt5-base "$TOKENIZER" 8 \
   tokenizer.json tokenizer_config.json special_tokens_map.json spiece.model
 
 # 4. Runner plus the audiodit package next to it.
-lv_stage "Installing the runner script"
+lv_stage_key stage_install_runner
 cp "$SCRIPT_DIR/longcat_runner.py" "$DEST/longcat_runner.py"
 rm -rf "$DEST/audiodit"
 cp -R "$SRC/audiodit" "$DEST/audiodit"

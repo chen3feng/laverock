@@ -7,6 +7,7 @@
 //! Sample rates outside the nine MPEG Layer III rates are resampled with
 //! linear interpolation to the nearest supported rate.
 
+use laverock_core::i18n::{self, Key};
 use laverock_core::{decode_wav_channels, CoreError, Result};
 use rusty_mp3::{Mp3Encoder, Mp3EncoderConfig};
 
@@ -28,12 +29,12 @@ pub fn mp3_available() -> bool {
 
 pub fn wav_to_mp3(wav: &[u8]) -> Result<Vec<u8>> {
     if wav.len() > MAX_WAV_BYTES {
-        return Err(CoreError::BadRequest("音频过大，无法导出 MP3".into()));
+        return Err(CoreError::UserError(i18n::Message::new(Key::Mp3TooLarge)));
     }
     let (pcm, channels, sample_rate) =
         decode_wav_channels(wav).map_err(|e| CoreError::Wav(format!("无法解析 WAV 音频：{e}")))?;
     if pcm.is_empty() {
-        return Err(CoreError::BadRequest("WAV 中没有可编码的音频数据".into()));
+        return Err(CoreError::UserError(i18n::Message::new(Key::WavNoAudio)));
     }
 
     let channels = channels.max(1);

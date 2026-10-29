@@ -56,6 +56,37 @@ struct AppState {
     port: u16,
 }
 
+tokio::task_local! {
+    /// UI language of the request being served (see `lang_middleware`).
+    static REQUEST_LANG: laverock_core::i18n::Lang;
+}
+
+/// Language of the current request; English outside one.
+fn request_lang() -> laverock_core::i18n::Lang {
+    REQUEST_LANG
+        .try_with(|lang| *lang)
+        .unwrap_or(laverock_core::i18n::Lang::En)
+}
+
+/// Make the request's language available to handlers and error mapping.
+async fn lang_middleware(req: Request<Body>, next: Next) -> Response {
+    let lang = req
+        .headers()
+        .get(header::ACCEPT_LANGUAGE)
+        .and_then(|v| v.to_str().ok())
+        .map(|v| laverock_core::i18n::Lang::from_accept_language(Some(v)))
+        // An explicit ?lang= wins (the SPA sends it).
+        .or_else(|| {
+            req.uri().query().and_then(|q| {
+                q.split('&')
+                    .find_map(|pair| pair.strip_prefix("lang="))
+                    .map(laverock_core::i18n::Lang::parse)
+            })
+        })
+        .unwrap_or_default();
+    REQUEST_LANG.scope(lang, next.run(req)).await
+}
+
 /// Error type mapping core errors to HTTP.
 #[derive(Debug)]
 struct ApiError {
@@ -74,7 +105,8 @@ impl ApiError {
     fn forbidden() -> Self {
         Self {
             status: StatusCode::FORBIDDEN,
-            message: "该操作只能在电脑端进行".to_string(),
+            message: laverock_core::i18n::Message::new(laverock_core::i18n::Key::LoopbackOnly)
+                .render(request_lang()),
         }
     }
 
@@ -107,6 +139,10 @@ impl From<CoreError> for ApiError {
             CoreError::BadRequest(msg) => Self {
                 status: StatusCode::BAD_REQUEST,
                 message: msg,
+            },
+            CoreError::UserError(message) => Self {
+                status: StatusCode::BAD_REQUEST,
+                message: message.render(request_lang()),
             },
             other => {
                 error!(error = %other, "request failed");
@@ -196,7 +232,11 @@ async fn auth_middleware(
     } else {
         (
             StatusCode::UNAUTHORIZED,
-            Json(serde_json::json!({ "error": "未配对的设备，请先在电脑上扫码配对" })),
+            Json(
+                serde_json::json!({ "error": laverock_core::i18n::Message::new(
+                laverock_core::i18n::Key::DeviceUnpaired,
+            ).render(request_lang()) }),
+            ),
         )
             .into_response()
     }
@@ -308,7 +348,8 @@ async fn start_pairing(
     }
     let Some(base) = remote::lan_url(state.port) else {
         return Err(ApiError::bad_request(
-            "请先开启局域网访问，并确认电脑已连接到网络",
+            laverock_core::i18n::Message::new(laverock_core::i18n::Key::LanUnavailable)
+                .render(request_lang()),
         ));
     };
     let (code, expires_at) = state.remote.start_pairing();
@@ -338,7 +379,10 @@ async fn claim(
     let token = state
         .remote
         .claim(&body.code, &body.device_name)
-        .map_err(ApiError::bad_request)?;
+        .map_err(|message| ApiError {
+            status: StatusCode::BAD_REQUEST,
+            message: message.render(request_lang()),
+        })?;
 
     let device = state.remote.authorize(&token);
     let cookie =
@@ -1408,6 +1452,8 @@ async fn main() {
             state.clone(),
             auth_middleware,
         ))
+        // Outermost: every handler and error mapping sees the request language.
+        .layer(middleware::from_fn(lang_middleware))
         .with_state(state);
 
     // The supervisor owns the router so the LAN listener can be started

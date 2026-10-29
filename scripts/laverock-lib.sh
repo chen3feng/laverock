@@ -39,6 +39,22 @@ lv_stage() {
   printf '@@LV stage %s\n' "$*"
 }
 
+# lv_stage_key <key> [name=value ...]
+#
+# Emit a *translatable* stage: the key and its arguments are rendered by
+# the server in the UI language (see laverock_core::i18n). Values must be
+# single tokens; lv_stage_key escapes spaces as %20.
+lv_stage_key() {
+  local key="$1"
+  shift
+  local out="$key"
+  local pair
+  for pair in "$@"; do
+    out="$out ${pair// /%20}"
+  done
+  printf '@@LV stage %s\n' "$out"
+}
+
 # lv_progress <percent 0-100>
 lv_progress() {
   local pct="$1"
@@ -131,13 +147,13 @@ lv_prepare_python_venv() {
   local venv="$1" python="$2"
   VPY="$(lv_venv_python "$venv")"
   if [ ! -f "$VPY" ]; then
-    lv_stage "Creating Python virtual environment"
+    lv_stage_key stage_venv
     "$python" -m venv "$venv"
   fi
   export LV_PY="$VPY"
   # Progress bars on even though pip sees a pipe, not a terminal.
   export PIP_PROGRESS_BAR=on
-  lv_stage "Upgrading pip"
+  lv_stage_key stage_pip_upgrade
   "$VPY" -m pip install --upgrade pip
   if lv_is_windows && lv_has_nvidia \
      && ! "$VPY" -c 'import torch, torchaudio, sys; sys.exit(0 if torch.version.cuda else 1)' 2>/dev/null
@@ -146,7 +162,7 @@ lv_prepare_python_venv() {
     # None); install a CUDA build first so the engine's own requirements
     # leave torch satisfied. A CUDA-enabled torch already present is left
     # alone, so reruns do not re-resolve the multi-GB package.
-    lv_stage "Installing CUDA PyTorch (~1–2 GB the first time)"
+    lv_stage_key stage_torch_cuda
     "$VPY" -m pip install torch torchaudio \
       --index-url https://download.pytorch.org/whl/cu130
   fi
@@ -241,7 +257,7 @@ lv_audiocpp_bin() {
   tmp="$(mktemp -d)"
   mkdir -p "$tmp/ex" "$dir"
 
-  lv_stage "Downloading audio.cpp runtime (${asset})"
+  lv_stage_key stage_audiocpp "asset=${asset}"
   lv_download "$base/audio-$version-$asset$ext" "$tmp/runtime$ext" 0
   if [ "$ext" = ".zip" ]; then
     lv_unzip "$tmp/runtime.zip" "$tmp/ex"
@@ -250,7 +266,7 @@ lv_audiocpp_bin() {
     # than the single binary the portable CPU build yields.
     cp -a "$tmp/ex/." "$dir/"
     if [ "$ac_cuda" = 1 ]; then
-      lv_stage "Downloading CUDA runtime (cudart ${cuda_ver}, no CUDA install needed)"
+      lv_stage_key stage_cuda_runtime "version=${cuda_ver}"
       lv_download "$base/audio-$version-cudart-windows-x64-cuda${cuda_ver}.zip" \
         "$tmp/cudart.zip" 0
       mkdir -p "$tmp/cu"
@@ -333,7 +349,7 @@ lv_voxcpm2_runner() {
 
     # Manifest first: its sha256 line catches a truncated archive. The
     # layout is one line per file by design (see voxcpm2-runner.yml).
-    lv_stage "Verifying the prebuilt voxcpm2-cli"
+    lv_stage_key stage_verify_vox
     manifest="$cache/manifest.json"
     curl -fsSL --retry 2 "$base/voxcpm2-runner/voxcpm2-runner.json" -o "$manifest" || return 1
     want="$(sed -n "s/.*\"$asset\".*\"sha256\": *\"\([0-9a-fA-F]\{64\}\)\".*/\1/p" "$manifest" | head -1 | tr 'A-F' 'a-f')"
@@ -369,7 +385,7 @@ lv_voxcpm2_runner() {
 
   cp "$cache/$inner" "$dest/$inner"
   chmod +x "$dest/$inner" 2>/dev/null || true
-  lv_stage "Prebuilt voxcpm2-cli is ready"
+  lv_stage_key stage_vox_ready
 }
 
 # lv_fetch_parallel <url> <dest> <total_bytes> [workers]
@@ -436,7 +452,7 @@ lv_fetch_parallel() {
       got=$((got + $(lv_filesize "$dest.part$i")))
     done
     [ "$got" -ge "$total" ] && break
-    [ "$attempt" -lt 3 ] && lv_stage "Incomplete download; resuming (attempt $((attempt + 1)))"
+    [ "$attempt" -lt 3 ] && lv_stage_key stage_resume "attempt=$((attempt + 1))"
   done
 
   : >"$dest"
@@ -582,7 +598,7 @@ lv_hf_download_repo() {
     # A few espeak data files contain spaces (e.g. "!v/Mr serious"); the
     # local name keeps them, only the URL is percent-encoded.
     url="$base/$repo/resolve/main/${rel// /%20}"
-    lv_stage "Downloading ${rel} ($(awk -v b="${size:-0}" 'BEGIN { printf "%.1f MB", b / 1048576 }'))"
+    lv_stage_key stage_download_file "name=${rel}" "size=$(awk -v b="${size:-0}" 'BEGIN { printf "%.1f MB", b / 1048576 }')"
     if [ "${size:-0}" -ge "$parallel_min" ]; then
       lv_fetch_parallel "$url" "$fdest" "$size" "$workers"
     else
@@ -637,7 +653,7 @@ lv_extract_tarball() {
   lv_stage "$label"
   lv_download "$url" "$tar_path" || return 1
   [ -s "$tar_path" ] || { echo "downloaded archive is empty: $url" >&2; return 1; }
-  lv_stage "Extracting model files"
+  lv_stage_key stage_extract
   mkdir -p "$extract_dir"
   tar -xjf "$tar_path" -C "$extract_dir"
 }
@@ -652,7 +668,7 @@ lv_download() {
   local total have
   total="$(lv_content_length "$url")"
   have="$(lv_filesize "$dest")"
-  lv_stage "Downloading $(basename "$dest")"
+  lv_stage_key stage_downloading "name=$(basename "$dest")"
 
   local args=(-sSL --fail --retry 3 --retry-delay 2 -o "$dest")
   if [ "$resume" = "1" ] && [ "$have" -gt 0 ]; then
@@ -667,7 +683,7 @@ lv_download() {
     if [ "${total:-0}" -gt 0 ]; then
       lv_progress "$(awk -v s="$size" -v t="$total" 'BEGIN { printf "%.1f", s * 100 / t }')"
     else
-      lv_stage "Downloading $(basename "$dest") · $(awk -v s="$size" 'BEGIN { printf "%.0f MB", s / 1048576 }')"
+      lv_stage_key stage_download_size "name=$(basename "$dest")" "size=$(awk -v s="$size" 'BEGIN { printf "%.0f MB", s / 1048576 }')"
     fi
   done
   wait "$cpid"

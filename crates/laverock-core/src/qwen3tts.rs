@@ -10,6 +10,7 @@
 //!   custom_voice  preset speakers, optional natural-language instruction
 //!   voice_design  voice described in natural language
 
+use crate::i18n::{self, Key};
 use crate::{
     decode_wav, encode_wav, Audio, CoreError, Manifest, ProgressEvent, Result, SpeechEngine,
     SynthRequest,
@@ -100,9 +101,9 @@ impl SpeechEngine for Qwen3TtsEngine {
 
     fn synthesize(&self, req: &SynthRequest) -> Result<Audio> {
         if self.mode == "clone" && req.prompt_samples.is_empty() {
-            return Err(CoreError::BadRequest(
-                "Qwen3-TTS 克隆模式需要一段参考音频（3 秒以上效果更好）".into(),
-            ));
+            return Err(CoreError::UserError(i18n::Message::new(
+                Key::QwenReferenceRequired,
+            )));
         }
         if self.mode == "voice_design" {
             let has_instruct = req
@@ -116,9 +117,9 @@ impl SpeechEngine for Qwen3TtsEngine {
                     .as_deref()
                     .is_some_and(|s| !s.trim().is_empty());
             if !has_instruct {
-                return Err(CoreError::BadRequest(
-                    "声音设计模式需要填写音色描述（instruct）".into(),
-                ));
+                return Err(CoreError::UserError(i18n::Message::new(
+                    Key::VoiceDesignDescriptionRequired,
+                )));
             }
         }
 

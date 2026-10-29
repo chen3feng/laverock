@@ -10,6 +10,7 @@
 //! * `cosyvoice` — CosyVoice3: 0.5B streaming LLM TTS with zero-shot,
 //!   cross-lingual and instruction templates.
 
+use crate::i18n::{self, Key};
 use crate::{
     decode_wav, encode_wav, trim_reference, Audio, CoreError, Manifest, ProgressEvent, Result,
     SpeechEngine, SynthRequest, VOXCPM2_MAX_REFERENCE_SECS,
@@ -164,24 +165,23 @@ impl SpeechEngine for AudioCppEngine {
     fn synthesize(&self, req: &SynthRequest) -> Result<Audio> {
         let has_prompt = !req.prompt_samples.is_empty();
         if !has_prompt && matches!(self.family, Family::Dots | Family::CosyVoice) {
-            return Err(CoreError::BadRequest(format!(
-                "{} 需要一段参考音频（3–10 秒效果最好）",
-                self.family.label()
-            )));
+            return Err(CoreError::UserError(
+                i18n::Message::new(Key::ReferenceAudioRequired).arg("engine", self.family.label()),
+            ));
         }
         match self.family {
             Family::Dots | Family::VoxCpm2 => (),
             Family::CosyVoice => {
                 let template = self.param_str(req, "template", "zero_shot");
                 if template == "zero_shot" && self.prompt_text(req).is_none() {
-                    return Err(CoreError::BadRequest(
-                        "零样本克隆需要参考音频对应的文字；不确定时可改用「跨语种」模板".into(),
-                    ));
+                    return Err(CoreError::UserError(i18n::Message::new(
+                        Key::ZeroShotTranscriptRequired,
+                    )));
                 }
                 if template == "instruct" && self.param_str(req, "instruct", "").is_empty() {
-                    return Err(CoreError::BadRequest(
-                        "「指令」模板需要填写指令内容，例如「用温和的语气朗读」".into(),
-                    ));
+                    return Err(CoreError::UserError(i18n::Message::new(
+                        Key::InstructRequired,
+                    )));
                 }
             }
         }
@@ -397,10 +397,9 @@ impl AudioCppEngine {
                             cmd.arg("--reference-text").arg(text);
                         }
                         None => {
-                            return Err(CoreError::BadRequest(
-                                "「声纹 + 文字」模式需要参考音频对应的文字；文字不准确时请改用「仅声纹」"
-                                    .into(),
-                            ))
+                            return Err(CoreError::UserError(i18n::Message::new(
+                                Key::TranscriptRequired,
+                            )))
                         }
                     }
                 }
@@ -615,12 +614,15 @@ mod tests {
         let engine = fixture(&dir, "cosyvoice");
         let mut req = request(&[("template", serde_json::json!("zero_shot"))]);
         req.prompt_text = None;
-        let err = engine.synthesize(&req).unwrap_err().to_string();
-        assert!(err.contains("零样本"), "{err}");
+        // Display is English; the Chinese text is available via localized().
+        let err = engine.synthesize(&req).unwrap_err();
+        assert!(err.to_string().contains("Zero-shot"), "{err}");
+        assert!(err.localized(crate::i18n::Lang::Zh).contains("零样本"));
 
         let req = request(&[("template", serde_json::json!("instruct"))]);
-        let err = engine.synthesize(&req).unwrap_err().to_string();
-        assert!(err.contains("指令"), "{err}");
+        let err = engine.synthesize(&req).unwrap_err();
+        assert!(err.to_string().contains("instruct template"), "{err}");
+        assert!(err.localized(crate::i18n::Lang::Zh).contains("指令"));
         let _ = std::fs::remove_dir_all(&dir);
     }
 

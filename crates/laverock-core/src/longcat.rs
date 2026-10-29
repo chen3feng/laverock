@@ -10,6 +10,7 @@
 //! model directory is invoked as a subprocess and streams `@@LV` progress
 //! markers on stdout.
 
+use crate::i18n::{self, Key};
 use crate::{
     decode_wav, encode_wav, Audio, CoreError, Manifest, ProgressEvent, Result, SpeechEngine,
     SynthRequest,
@@ -114,8 +115,8 @@ impl SpeechEngine for LongCatEngine {
                 .map(str::trim)
                 .filter(|t| !t.is_empty());
             if transcript.is_none() {
-                return Err(CoreError::BadRequest(
-                    "LongCat-AudioDiT 克隆需要参考音频对应的文字".into(),
+                return Err(CoreError::UserError(
+                    i18n::Message::new(Key::TranscriptRequired).arg("engine", &self.name),
                 ));
             }
         }

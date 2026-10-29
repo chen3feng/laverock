@@ -42,7 +42,7 @@ download_github() {
 # per file, and never uses --retry-all-errors (which double-appends a
 # fixed curl range after a mid-transfer reset).
 download_hf() {
-  lv_stage "Fetching files from HuggingFace ($(lv_hf_base))"
+  lv_stage_key stage_fetch_listing "base=$(lv_hf_base)"
   lv_hf_download_repo "$HF_REPO" "$DEST" 8 model.int8.onnx tokens.txt
 }
 
@@ -61,7 +61,7 @@ for f in model.int8.onnx tokens.txt; do
   fi
 done
 
-lv_stage "Writing engine manifest"
+lv_stage_key stage_write_manifest
 cat > "$DEST/engine.json" <<EOF
 {
   "id": "$MODEL",

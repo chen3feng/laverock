@@ -32,7 +32,7 @@ lv_hf_skip() {
 }
 
 download_hf() {
-  lv_stage "Fetching file list from HuggingFace ($(lv_hf_base))"
+  lv_stage_key stage_fetch_listing "base=$(lv_hf_base)"
   lv_hf_download_repo "$HF_REPO" "$DEST" 8
 }
 
@@ -60,7 +60,7 @@ done
 # Speaker ids follow the order baked into the ONNX metadata
 # (`speaker_names`), not alphabetic order — em_santa is sid 53.
 # af_* 美式英语 | bf_*/bm_* 英式英语 | zf_*/zm_* 中文（普通话）
-lv_stage "Writing engine manifest"
+lv_stage_key stage_write_manifest
 cat > "$DEST/engine.json" <<EOF
 {
   "id": "$MODEL",

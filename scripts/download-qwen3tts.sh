@@ -52,7 +52,7 @@ mkdir -p "$DEST" "$TOOLS"
 #    lv_prepare_python_venv creates the venv, upgrades pip, and pre-installs
 #    CUDA torch on Windows+NVIDIA; VPY then points at its interpreter.
 lv_prepare_python_venv "$VENV" "$PYTHON"
-lv_stage "Installing qwen-tts dependencies (~2 GB the first time)"
+lv_stage_key stage_qwen_deps
 "$VPY" -m pip install --upgrade "qwen-tts"
 
 # 2. Weights. The model repo already bundles its speech tokenizer under
@@ -61,7 +61,7 @@ lv_stage "Installing qwen-tts dependencies (~2 GB the first time)"
 #    resolve-URL GET/range requests (not `hf download`) keep this working
 #    through hf-mirror.com, whose redirects huggingface_hub 0.36 rejects.
 WEIGHTS="$DEST/weights"
-lv_stage "Downloading model and tokenizer (~2.5 GB the first time)"
+lv_stage_key stage_download_model_tokenizer
 lv_hf_download_repo "$MODEL" "$WEIGHTS" 8
 
 # 3. Runner script.

@@ -3,6 +3,7 @@
 //! Runtime: the official `sherpa-onnx` Rust crate, which links a
 //! prebuilt static sherpa-onnx + onnxruntime at build time.
 
+use crate::i18n::{self, Key};
 use crate::{Audio, CoreError, Manifest, Result, SpeechEngine, SynthRequest};
 use sherpa_onnx::{
     GenerationConfig, OfflineTts, OfflineTtsConfig, OfflineTtsModelConfig,
@@ -112,8 +113,8 @@ impl SpeechEngine for ZipVoiceEngine {
 
     fn synthesize(&self, req: &SynthRequest) -> Result<Audio> {
         if req.prompt_samples.is_empty() {
-            return Err(CoreError::BadRequest(
-                "ZipVoice 需要一段参考音频；请录音/上传，或选择声音库中的声音。".into(),
+            return Err(CoreError::UserError(
+                i18n::Message::new(Key::ReferenceAudioRequired).arg("engine", &self.name),
             ));
         }
         let reference_text = req
@@ -122,8 +123,8 @@ impl SpeechEngine for ZipVoiceEngine {
             .map(str::trim)
             .filter(|t| !t.is_empty())
             .ok_or_else(|| {
-                CoreError::BadRequest(
-                    "ZipVoice 需要参考音频对应的文字；如果用 VoxCPM2 则可留空。".into(),
+                CoreError::UserError(
+                    i18n::Message::new(Key::TranscriptRequired).arg("engine", &self.name),
                 )
             })?;
 
