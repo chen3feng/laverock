@@ -66,9 +66,10 @@ def main() -> int:
     from chatterbox.mtl_tts import ChatterboxMultilingualTTS
 
     device = resolve_device(torch, args.device)
-    model = ChatterboxMultilingualTTS.from_local(
-        args.model, device=device, t3_model=args.t3
-    )
+    # chatterbox-tts 0.1.7's from_local() takes (ckpt_dir, device) and
+    # loads the multilingual T3 checkpoint (t3_mtl23ls_v2.safetensors)
+    # by name from ckpt_dir; there is no t3_model argument on PyPI yet.
+    model = ChatterboxMultilingualTTS.from_local(args.model, device=device)
 
     if not args.ref_audio:
         print("clone mode requires --ref-audio", file=sys.stderr)
