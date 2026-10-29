@@ -317,15 +317,25 @@
            Non-diffusion engines (Qwen3-TTS) simply have none. -->
       <div class="card" id="engineParams" hidden></div>
 
+      <div class="card">
+        <label for="samples" data-i18n="synth.samples">候选项</label>
+        <div class="prompt-box">
+          <button class="ghost" id="samplesMinus" type="button">−</button>
+          <input type="number" id="samples" min="1" max="4" value="1"
+                 style="width:74px;text-align:center" aria-label="takes" />
+          <button class="ghost" id="samplesPlus" type="button">＋</button>
+        </div>
+        <div class="hint" data-i18n="synth.samples_hint">一次生成多段候选项逐一试听，选中满意的再下载。</div>
+      </div>
+
       <div class="actions">
         <button id="go" type="button" data-i18n="go">生成语音</button>
         <span id="status"></span>
-        <a id="download" class="hint" download="laverock.wav" data-i18n="download.wav" hidden>下载 WAV</a>
-        <a id="downloadMp3" class="hint" href="#" data-i18n="download.mp3" hidden>下载 MP3</a>
       </div>
       <div id="synthProgress" class="pbar" hidden><div class="pbar-fill indeterminate"></div></div>
       <div id="synthProgressLabel" class="pbar-label" hidden><span></span><b></b></div>
-      <audio id="player" controls hidden></audio>
+      <!-- Each take (or the single result) renders as a card here. -->
+      <div id="synthResults" hidden></div>
       <audio id="previewer" hidden></audio>
     </section>
 
@@ -593,6 +603,8 @@ const I18N = {
     'saveprofile': '保存声音',
     'text.label': '要合成的文字', 'text.ph': '输入中文或 English 文本……',
     'go': '生成语音', 'download.wav': '下载 WAV', 'download.mp3': '下载 MP3',
+    'synth.samples': '候选项',
+    'synth.samples_hint': '一次生成多段候选项逐一试听，选中满意的再下载。克隆引擎会通过不同的种子/采样本产生差异。',
 
     'voices.title': '语音素材',
     'voices.sub': '保存的参考声音可以复用到任何克隆引擎。',
@@ -631,6 +643,8 @@ const I18N = {
     'history.sub': '本机生成的语音，最多保留 100 条或 1 GB。',
     'history.clear': '清空全部',
     'history.empty': '还没有生成记录。去「合成」生成第一条吧。',
+    'history.variant': '候选项 {n}',
+    'history.variant_group': '共 {n} 个候选项',
 
     'settings.title': '设置',
     'settings.sub': '下载网络、手机遥控与关于信息。',
@@ -804,6 +818,8 @@ const I18N = {
     'saveprofile': 'Save voice',
     'text.label': 'Text to synthesize', 'text.ph': 'Type Chinese or English text…',
     'go': 'Generate', 'download.wav': 'Download WAV', 'download.mp3': 'Download MP3',
+    'synth.samples': 'Takes',
+    'synth.samples_hint': 'Generate several takes at once to audition side by side, then download the one you like. Cloning engines vary them via seed/sampling.',
 
     'voices.title': 'Voice clips',
     'voices.sub': 'Saved reference voices work with any cloning engine.',
@@ -842,6 +858,8 @@ const I18N = {
     'history.sub': 'Speech generated on this computer, capped at 100 entries or 1 GB.',
     'history.clear': 'Clear all',
     'history.empty': 'No generations yet. Head to Synthesize to make the first one.',
+    'history.variant': 'take #{n}',
+    'history.variant_group': '{n} takes',
 
     'settings.title': 'Settings',
     'settings.sub': 'Downloads, phone remote control and about.',
@@ -1549,6 +1567,18 @@ function restoreDraftFields() {
   if (typeof d.prompt === 'string') $('prompt_text').value = d.prompt;
 }
 
+function wireSamplesStepper() {
+  const input = $('samples');
+  const clamp = () => {
+    let n = Math.round(Number(input.value));
+    if (!Number.isFinite(n)) n = 1;
+    input.value = Math.max(1, Math.min(4, n));
+  };
+  input.addEventListener('change', clamp);
+  $('samplesMinus').onclick = () => { input.value = Math.max(1, Number(input.value) - 1); };
+  $('samplesPlus').onclick = () => { input.value = Math.min(4, Number(input.value) + 1); };
+}
+
 function wireDraftPersistence() {
   $('text').addEventListener('input', saveDraft);
   $('prompt_text').addEventListener('input', saveDraft);
@@ -2236,10 +2266,12 @@ $('go').onclick = async () => {
     }
 
     // Framed SSE: `event: stage|steps|wav|error` / `data: …`, blank line.
+    // WAV frames carry {i, n, wav} — the take index, the batch size, and
+    // the base64 audio — so a single request renders as a variant gallery.
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
     let buf = '';
-    let blob = null;
+    const variants = [];
     let lastStage = '';
     for (;;) {
       const { value, done } = await reader.read();
@@ -2269,37 +2301,32 @@ $('go').onclick = async () => {
             audioText = ` · ${(steps / 12.5).toFixed(0)}s ${t("ui.audio")}`;
           }
         } else if (event === 'wav') {
-          const bytes = Uint8Array.from(atob(data), (c) => c.charCodeAt(0));
-          blob = new Blob([bytes], { type: 'audio/wav' });
+          const p = JSON.parse(data);
+          const bytes = Uint8Array.from(atob(p.wav), (c) => c.charCodeAt(0));
+          variants[Number(p.i)] = {
+            blob: new Blob([bytes], { type: 'audio/wav' }),
+            index: Number(p.i),
+            total: Number(p.n),
+          };
         } else if (event === 'error') {
           const j = JSON.parse(data);
           throw new Error(j.message || t("ui.synthesis_failed"));
         }
       }
     }
-    if (!blob) throw new Error(t("ui.no_audio_data_received"));
+    const got = variants.filter((v) => v && v.blob).sort((a, b) => a.index - b.index);
+    if (!got.length) throw new Error(t("ui.no_audio_data_received"));
     setDeterminate(100);
-    const audioUrl = URL.createObjectURL(blob);
-    const player = $('player');
-    if (player.dataset.url) URL.revokeObjectURL(player.dataset.url);
-    player.dataset.url = audioUrl;
-    player.src = audioUrl;
-    player.hidden = false;
-    player.play().catch(() => {});
-    const dl = $('download');
-    dl.href = audioUrl;
-    dl.download = audioFileName('wav', engine && engine.id);
-    dl.onclick = (event) => {
-      event.preventDefault();
-      saveBlob(blob, audioFileName('wav', engine && engine.id));
-    };
-    dl.hidden = false;
-    // Remember the WAV so the MP3 link can convert it on demand.
-    lastSynthBlob = blob;
-    $('downloadMp3').hidden = !mp3Supported;
+    renderSynthResults(got, engine);
+    // Keep the last take reachable for any downstream helper (e.g. the
+    // previous top-level MP3 conversion; the gallery links are the UI).
+    lastSynthBlob = got[got.length - 1].blob;
     if (engine) engine.loaded = true;
     status.className = 'ok';
-    status.textContent = `${t("ui.done")} · ${(blob.size / 1024).toFixed(0)} KB · ${((performance.now() - t0) / 1000).toFixed(1)}s`;
+    const totalBytes = got.reduce((s, v) => s + v.blob.size, 0);
+    status.textContent =
+      `${t("ui.done")} · ${got.length > 1 ? got.length + '× · ' : ''}` +
+      `${(totalBytes / 1024).toFixed(0)} KB · ${((performance.now() - t0) / 1000).toFixed(1)}s`;
   } catch (e) {
     status.className = 'err';
     status.textContent = (t("ui.failed")) + e.message;
@@ -2310,6 +2337,74 @@ $('go').onclick = async () => {
     $('go').disabled = false;
   }
 };
+
+// --------------------------------------------------------- synth results
+
+// Object URLs handed out by renderSynthResults, revoked on the next render.
+let synthResultUrls = [];
+
+function mkDownloadLink(label, handler) {
+  const a = document.createElement('a');
+  a.className = 'hint';
+  a.href = '#';
+  a.textContent = label;
+  a.onclick = (e) => { e.preventDefault(); handler(a); };
+  return a;
+}
+
+function renderSynthResults(list, engine) {
+  const box = $('synthResults');
+  for (const url of synthResultUrls) URL.revokeObjectURL(url);
+  synthResultUrls = [];
+  box.innerHTML = '';
+  box.hidden = false;
+  const multi = list.length > 1;
+  for (const v of list) {
+    const card = document.createElement('div');
+    card.className = 'card';
+    card.style.marginTop = '12px';
+    if (multi) {
+      const chip = document.createElement('span');
+      chip.className = 'chip';
+      chip.textContent = t('history.variant', { n: v.index + 1 });
+      card.appendChild(chip);
+    }
+    const audio = document.createElement('audio');
+    audio.controls = true;
+    audio.preload = 'none';
+    const url = URL.createObjectURL(v.blob);
+    synthResultUrls.push(url);
+    audio.src = url;
+    card.appendChild(audio);
+
+    const row = document.createElement('div');
+    row.className = 'hist-row';
+    row.appendChild(mkDownloadLink(t('download.wav'), () =>
+      saveBlob(v.blob, audioFileName('wav', engine && engine.id))));
+    if (mp3Supported) {
+      row.appendChild(mkDownloadLink(t('download.mp3'), async (link) => {
+        const label = link.textContent;
+        link.style.pointerEvents = 'none';
+        link.textContent = t("ui.converting");
+        try {
+          const res = await apiFetch('/api/audio/mp3', { method: 'POST', body: v.blob });
+          if (!res.ok) {
+            const msg = await res.json().then((j) => j.error).catch(() => res.statusText);
+            throw new Error(msg);
+          }
+          await saveBlob(await res.blob(), audioFileName('mp3', engine && engine.id));
+        } catch (e) {
+          toast((t("ui.mp3_export_failed")) + e.message, true);
+        } finally {
+          link.style.pointerEvents = '';
+          link.textContent = label;
+        }
+      }));
+    }
+    card.appendChild(row);
+    box.appendChild(card);
+  }
+}
 
 // ---------------------------------------------------------------- models
 
@@ -2529,102 +2624,153 @@ function renderHistory() {
   $('clearHistory').hidden = historyItems.length === 0;
   const engineName = Object.fromEntries(engines.map((e) => [e.id, e.name]));
 
+  // Entries that share a generation id came from one multi-take request:
+  // group them into a single card with per-take rows. Standalone entries
+  // render as their own card.
+  const groups = [];
+  const byGen = new Map();
   for (const h of historyItems) {
+    if (h.generation) {
+      let g = byGen.get(h.generation);
+      if (!g) { g = []; byGen.set(h.generation, g); groups.push(g); }
+      g.push(h);
+    } else {
+      groups.push([h]);
+    }
+  }
+  for (const g of groups) g.sort((a, b) => (a.index || 0) - (b.index || 0));
+  groups.sort((a, b) => newest(b) - newest(a)); // newest generation first
+
+  for (const group of groups) {
     const card = document.createElement('div');
     card.className = 'card';
-
-    const meta = document.createElement('div');
-    meta.className = 'hist-meta';
-    const chip = document.createElement('span');
-    chip.className = 'chip';
-    chip.textContent = engineName[h.engine_id] || h.engine_name || h.engine_id;
-    const when = document.createElement('span');
-    when.className = 'hint';
-    when.textContent =
-      new Date(h.created_at * 1000).toLocaleString(dateLocale(), { hour12: false }) +
-      ` · ${fmtDur(h.duration_secs)} · ${fmtBytes(h.bytes)}`;
-    meta.append(chip, when);
-
-    const text = document.createElement('div');
-    text.className = 'hist-text';
-    text.textContent = h.text;
-
-    const row = document.createElement('div');
-    row.className = 'hist-row';
-    const audio = document.createElement('audio');
-    audio.controls = true;
-    audio.preload = 'none';
-    audio.src = `/api/history/${encodeURIComponent(h.id)}/audio`;
-
-    const saveFromUrl = async (el, url, name, busyLabel) => {
-      const label = el.textContent;
-      el.style.pointerEvents = 'none';
-      el.textContent = busyLabel;
-      try {
-        const res = await apiFetch(url);
-        if (!res.ok) throw new Error('HTTP ' + res.status);
-        await saveBlob(await res.blob(), name);
-      } catch (e) {
-        toast((t("ui.download_failed")) + e.message, true);
-      } finally {
-        el.style.pointerEvents = '';
-        el.textContent = label;
-      }
-    };
-
-    const dl = document.createElement('a');
-    dl.className = 'hint';
-    dl.href = audio.src;
-    dl.textContent = t('download.wav');
-    dl.onclick = (e) => {
-      e.preventDefault();
-      saveFromUrl(dl, audio.src, `laverock-${h.id}.wav`,
-        t("ui.preparing"));
-    };
-
-    let mp3 = null;
-    if (mp3Supported) {
-      mp3 = document.createElement('a');
-      mp3.className = 'hint';
-      mp3.href = `/api/history/${encodeURIComponent(h.id)}/audio?format=mp3`;
-      mp3.textContent = t('download.mp3');
-      const mp3Url = mp3.href;
-      mp3.onclick = (e) => {
-        e.preventDefault();
-        saveFromUrl(mp3, mp3Url, `laverock-${h.id}.mp3`,
-          t("ui.converting"));
-      };
+    const multi = group.length > 1;
+    if (multi) {
+      const head = document.createElement('div');
+      head.className = 'hist-meta';
+      const chip = document.createElement('span');
+      chip.className = 'chip';
+      chip.textContent = t('history.variant_group', { n: group.length });
+      const when = document.createElement('span');
+      when.className = 'hint';
+      when.textContent = new Date(newest(group) * 1000)
+        .toLocaleString(dateLocale(), { hour12: false });
+      head.append(chip, when);
+      card.appendChild(head);
     }
-
-    const del = document.createElement('button');
-    del.className = 'ghost danger';
-    del.type = 'button';
-    del.textContent = t("ui.delete");
-    del.onclick = async () => {
-      const yes = await confirmAction(
-        t("ui.delete_this_generation_the_audio"),
-        { title: t("ui.delete_entry"), okText: t("ui.delete") },
-      );
-      if (!yes) return;
-      del.disabled = true;
-      try {
-        await api(`/api/history/${encodeURIComponent(h.id)}`, { method: 'DELETE' });
-        card.remove();
-        historyItems = historyItems.filter((x) => x.id !== h.id);
-        $('historyEmpty').hidden = historyItems.length > 0;
-        $('clearHistory').hidden = historyItems.length === 0;
-      } catch (e) {
-        del.disabled = false;
-        toast((t("ui.delete_failed")) + e.message, true);
+    for (let i = 0; i < group.length; i++) {
+      if (i > 0) {
+        const hr = document.createElement('hr');
+        hr.style.cssText = 'border:none;border-top:1px solid var(--line);margin:10px 0';
+        card.appendChild(hr);
       }
-    };
-
-    row.append(audio, dl);
-    if (mp3) row.append(mp3);
-    row.append(del);
-    card.append(meta, text, row);
+      buildHistoryTake(card, group[i], engineName,
+        multi ? t('history.variant', { n: (group[i].index || 0) + 1 }) : null);
+    }
     box.appendChild(card);
   }
+}
+
+function newest(group) {
+  return Math.max(...group.map((x) => x.created_at));
+}
+
+function buildHistoryTake(host, h, engineName, variantLabel) {
+  const meta = document.createElement('div');
+  meta.className = 'hist-meta';
+  const chip = document.createElement('span');
+  chip.className = 'chip';
+  chip.textContent = engineName[h.engine_id] || h.engine_name || h.engine_id;
+  meta.appendChild(chip);
+  if (variantLabel) {
+    const take = document.createElement('span');
+    take.className = 'chip';
+    take.textContent = variantLabel;
+    meta.appendChild(take);
+  }
+  const when = document.createElement('span');
+  when.className = 'hint';
+  when.textContent =
+    new Date(h.created_at * 1000).toLocaleString(dateLocale(), { hour12: false }) +
+    ` · ${fmtDur(h.duration_secs)} · ${fmtBytes(h.bytes)}`;
+  meta.appendChild(when);
+
+  const text = document.createElement('div');
+  text.className = 'hist-text';
+  text.textContent = h.text;
+
+  const row = document.createElement('div');
+  row.className = 'hist-row';
+  const audio = document.createElement('audio');
+  audio.controls = true;
+  audio.preload = 'none';
+  audio.src = `/api/history/${encodeURIComponent(h.id)}/audio`;
+
+  const saveFromUrl = async (el, url, name, busyLabel) => {
+    const label = el.textContent;
+    el.style.pointerEvents = 'none';
+    el.textContent = busyLabel;
+    try {
+      const res = await apiFetch(url);
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      await saveBlob(await res.blob(), name);
+    } catch (e) {
+      toast((t("ui.download_failed")) + e.message, true);
+    } finally {
+      el.style.pointerEvents = '';
+      el.textContent = label;
+    }
+  };
+
+  const dl = document.createElement('a');
+  dl.className = 'hint';
+  dl.href = audio.src;
+  dl.textContent = t('download.wav');
+  dl.onclick = (e) => {
+    e.preventDefault();
+    saveFromUrl(dl, audio.src, `laverock-${h.id}.wav`,
+      t("ui.preparing"));
+  };
+
+  if (mp3Supported) {
+    const mp3 = document.createElement('a');
+    mp3.className = 'hint';
+    mp3.href = `/api/history/${encodeURIComponent(h.id)}/audio?format=mp3`;
+    mp3.textContent = t('download.mp3');
+    const mp3Url = mp3.href;
+    mp3.onclick = (e) => {
+      e.preventDefault();
+      saveFromUrl(mp3, mp3Url, `laverock-${h.id}.mp3`,
+        t("ui.converting"));
+    };
+    row.append(audio, dl, mp3);
+  } else {
+    row.append(audio, dl);
+  }
+
+  const del = document.createElement('button');
+  del.className = 'ghost danger';
+  del.type = 'button';
+  del.textContent = t("ui.delete");
+  del.onclick = async () => {
+    const yes = await confirmAction(
+      t("ui.delete_this_generation_the_audio"),
+      { title: t("ui.delete_entry"), okText: t("ui.delete") },
+    );
+    if (!yes) return;
+    del.disabled = true;
+    try {
+      await api(`/api/history/${encodeURIComponent(h.id)}`, { method: 'DELETE' });
+      // Simplest correct refresh: re-fetch so grouped cards stay consistent.
+      await loadHistory();
+    } catch (e) {
+      del.disabled = false;
+      toast((t("ui.delete_failed")) + e.message, true);
+    }
+  };
+  row.append(del);
+
+  host.append(meta, text, row);
 }
 
 $('clearHistory').onclick = async () => {
@@ -2972,30 +3118,6 @@ function showPage(page) {
 
 window.addEventListener('hashchange', () => showPage(currentPage()));
 
-$('downloadMp3').onclick = async (event) => {
-  event.preventDefault();
-  if (!lastSynthBlob) return;
-  const link = $('downloadMp3');
-  const label = link.textContent;
-  link.style.pointerEvents = 'none';
-  link.textContent = t("ui.converting");
-  try {
-    const res = await apiFetch('/api/audio/mp3', { method: 'POST', body: lastSynthBlob });
-    if (!res.ok) {
-      const msg = await res.json().then((j) => j.error).catch(() => res.statusText);
-      throw new Error(msg);
-    }
-    const mp3 = await res.blob();
-    const engine = engines.find((x) => x.id === $('engine').value);
-    await saveBlob(mp3, audioFileName('mp3', engine && engine.id));
-  } catch (e) {
-    toast((t("ui.mp3_export_failed")) + e.message, true);
-  } finally {
-    link.style.pointerEvents = '';
-    link.textContent = label;
-  }
-};
-
 async function loadHealth() {
   try {
     const h = await api('/api/health');
@@ -3004,7 +3126,6 @@ async function loadHealth() {
     $('aboutVersion').textContent = v ? 'v' + v : '—';
     $('connState').classList.remove('off');
     mp3Supported = !!h.mp3;
-    if (!mp3Supported) $('downloadMp3').hidden = true;
     transcribeAvailable = !!h.transcribe;
     for (const cap of [synthCapture, voiceCapture]) cap.syncTranscribeButton();
   } catch (_) {
@@ -3030,6 +3151,7 @@ async function boot() {
 }
 
 wireDraftPersistence();
+wireSamplesStepper();
 boot();
 </script>
 </body>
