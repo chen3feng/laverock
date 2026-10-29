@@ -239,6 +239,8 @@ messages! {
         { en: "Installing dependencies", zh: "安装依赖" },
     StageTorchCuda = "stage_torch_cuda"
         { en: "Installing CUDA PyTorch (~1–2 GB the first time)", zh: "安装 CUDA 版 PyTorch（首次约 1–2 GB）" },
+    StageTorch = "stage_torch"
+        { en: "Installing PyTorch (torch + torchaudio)", zh: "安装 PyTorch（torch + torchaudio）" },
     StageAudioCpp = "stage_audiocpp"
         { en: "Downloading the audio.cpp runtime ({asset})", zh: "下载 audio.cpp 运行时（{asset}）" },
     StageCudaRuntime = "stage_cuda_runtime"
