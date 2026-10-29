@@ -28,7 +28,12 @@
       "../../scripts/download-longcat.sh": "scripts/download-longcat.sh",
       "../../scripts/download-dots.sh": "scripts/download-dots.sh",
       "../../scripts/download-cosyvoice.sh": "scripts/download-cosyvoice.sh",
-      "../../scripts/longcat_runner.py": "scripts/longcat_runner.py"
+      "../../scripts/longcat_runner.py": "scripts/longcat_runner.py",
+      "../../scripts/download-ming3tts.sh": "scripts/download-ming3tts.sh",
+      "../../scripts/ming3tts_runner.py": "scripts/ming3tts_runner.py",
+      "../../scripts/download-chatterbox.sh": "scripts/download-chatterbox.sh",
+      "../../scripts/chatterbox_runner.py": "scripts/chatterbox_runner.py",
+      "../../scripts/download-mosstts.sh": "scripts/download-mosstts.sh"
     },
     "macOS": {
       "signingIdentity": "-",
