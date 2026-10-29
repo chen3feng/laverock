@@ -10,8 +10,8 @@
 //! before invoking the binary.
 
 use crate::{
-    decode_wav, encode_wav, resample_mono, Audio, CoreError, Manifest, ProgressEvent, Result,
-    SpeechEngine, SynthRequest,
+    cap_silences, decode_wav, encode_wav, resample_mono, trim_silence, Audio, CoreError, Manifest,
+    ProgressEvent, Result, SpeechEngine, SynthRequest,
 };
 use std::{
     io::{BufRead, BufReader, Read},
@@ -22,6 +22,16 @@ use std::{
 
 /// The native runtime requires reference audio at this exact rate.
 const REFERENCE_SAMPLE_RATE: u32 = 24_000;
+
+/// The delay-pattern backbone has a "silence-token attractor": now and then
+/// it emits codec frames that decode to near-silence, stacking up pauses of
+/// 0.3–1.5 s inside an utterance. Longer runs of silence are cut back to
+/// this length so the result stays listenable.
+const MAX_OUTPUT_PAUSE_SECS: f32 = 0.45;
+
+/// Pauses in the reference clip condition that same attractor, so the
+/// prompt is cleaned harder than the output.
+const MAX_REFERENCE_PAUSE_SECS: f32 = 0.25;
 
 pub struct MossTtsEngine {
     id: String,
@@ -131,20 +141,26 @@ impl SpeechEngine for MossTtsEngine {
             cmd.arg("--language").arg(language);
         }
 
-        // Optional voice cloning: the runtime wants a 24 kHz mono WAV.
+        // Optional voice cloning: the runtime wants a 24 kHz mono WAV. Dead
+        // air at the ends and long pauses inside the clip are stripped
+        // first — the model copies the prompt's rhythm, and raw microphone
+        // recordings (or TTS-generated references) are often full of gaps.
         if !req.prompt_samples.is_empty() {
-            let pcm = resample_mono(
-                &req.prompt_samples,
-                req.prompt_sr.max(1) as u32,
-                REFERENCE_SAMPLE_RATE,
-            );
-            let path = tmp.join("reference.wav");
-            let bytes = encode_wav(&pcm, REFERENCE_SAMPLE_RATE as i32)?;
-            std::fs::write(&path, bytes).map_err(CoreError::from)?;
-            cmd.arg("--audio-encoder-model")
-                .arg(&self.audio_encoder)
-                .arg("--reference-audio")
-                .arg(&path);
+            let rate = req.prompt_sr.max(1) as u32;
+            let trimmed = trim_silence(&req.prompt_samples, rate, 0.05);
+            let cleaned = cap_silences(&trimmed, rate, MAX_REFERENCE_PAUSE_SECS);
+            let pcm = resample_mono(&cleaned, rate, REFERENCE_SAMPLE_RATE);
+            // An all-silent or near-empty clip carries no timbre; fall back
+            // to the default voice instead of failing inside the runtime.
+            if pcm.len() >= (REFERENCE_SAMPLE_RATE as usize) / 5 {
+                let path = tmp.join("reference.wav");
+                let bytes = encode_wav(&pcm, REFERENCE_SAMPLE_RATE as i32)?;
+                std::fs::write(&path, bytes).map_err(CoreError::from)?;
+                cmd.arg("--audio-encoder-model")
+                    .arg(&self.audio_encoder)
+                    .arg("--reference-audio")
+                    .arg(&path);
+            }
         }
 
         for (key, value) in &self.env {
@@ -220,8 +236,14 @@ impl SpeechEngine for MossTtsEngine {
 
         let _ = std::fs::remove_dir_all(&tmp);
 
+        // Collapse the delay-pattern model's leftover long pauses and trim
+        // the dead air at both ends of the clip.
+        let rate = sample_rate.max(1) as u32;
+        let capped = cap_silences(&samples, rate, MAX_OUTPUT_PAUSE_SECS);
+        let trimmed = trim_silence(&capped, rate, 0.1);
+
         Ok(Audio {
-            samples,
+            samples: trimmed.into_owned(),
             sample_rate,
         })
     }

@@ -39,7 +39,9 @@ use axum::{
     routing::{delete, get, post},
     Json, Router,
 };
-use laverock_core::{decode_wav, encode_wav, Audio, CoreError, EngineManager, SynthRequest};
+use laverock_core::{
+    decode_wav, encode_wav, trim_silence, Audio, CoreError, EngineManager, SynthRequest,
+};
 use models::ModelService;
 use profiles::ProfileStore;
 use remote::{LanCmd, RemoteState};
@@ -1113,10 +1115,18 @@ async fn synthesize(
     let (prompt_samples, prompt_sr) = match prompt_bytes {
         Some(bytes) => {
             let (samples, rate) = decode_wav(&bytes)?;
-            if samples.is_empty() {
-                return Err(ApiError::bad_request("reference audio is empty"));
+            // Temporary recordings usually start before the speaker does
+            // (and linger after they stop). Trim that dead air exactly like
+            // profile ingest does; internal pauses stay, since only some
+            // engines need them fixed up (MOSS-TTS does it itself).
+            let trimmed = trim_silence(&samples, rate.max(1) as u32, 0.10);
+            if trimmed.is_empty() {
+                return Err(CoreError::UserError(laverock_core::i18n::Message::new(
+                    laverock_core::i18n::Key::ReferenceSilent,
+                ))
+                .into());
             }
-            (samples, rate)
+            (trimmed.into_owned(), rate)
         }
         None => (Vec::new(), 0),
     };
