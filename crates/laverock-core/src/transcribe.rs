@@ -11,6 +11,7 @@ use std::sync::Mutex;
 
 use sherpa_onnx::{OfflineRecognizer, OfflineRecognizerConfig, OfflineSenseVoiceModelConfig};
 
+use crate::i18n::{self, Key};
 use crate::{audio::decode_wav, manifest::Manifest, CoreError, Result};
 
 /// Holds an optional loaded recognizer; one model at a time.
@@ -40,7 +41,7 @@ impl Transcriber {
     pub fn transcribe(&self, wav: &[u8]) -> Result<String> {
         let (samples, sample_rate) = decode_wav(wav)?;
         if samples.is_empty() {
-            return Err(CoreError::BadRequest("empty audio clip".into()));
+            return Err(CoreError::UserError(i18n::Message::new(Key::EmptyClip)));
         }
 
         let mut guard = self

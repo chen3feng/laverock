@@ -12,7 +12,8 @@ use crate::{
     proxy,
     settings::{ProxyMode, SettingsStore, PROXY_VARS},
 };
-use laverock_core::{CoreError, EngineManager, Result};
+use laverock_core::i18n::{self, Key};
+use laverock_core::{CoreError, EngineManager, Localized, Result};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, HashMap},
@@ -31,10 +32,9 @@ struct CatalogEntry {
     id: String,
     dir: String,
     name: String,
-    description: String,
-    /// Optional English override of `description`.
-    #[serde(default)]
-    description_en: Option<String>,
+    /// Localized: `{"en": …, "zh": …}` for our entries, a plain string
+    /// for third-party catalogs.
+    description: Localized,
     size: String,
     languages: Vec<String>,
     capabilities: Vec<String>,
@@ -42,25 +42,7 @@ struct CatalogEntry {
     #[serde(default)]
     env: BTreeMap<String, String>,
     #[serde(default)]
-    note: Option<String>,
-    /// Optional English override of `note`.
-    #[serde(default)]
-    note_en: Option<String>,
-}
-
-impl CatalogEntry {
-    /// Pick the localized description/notes for the requested UI language.
-    /// Only English has an override; Chinese is the catalog's default.
-    fn localized<'a>(&'a self, lang: &str) -> (&'a str, Option<&'a str>) {
-        if lang == "en" {
-            (
-                self.description_en.as_deref().unwrap_or(&self.description),
-                self.note_en.as_deref().or(self.note.as_deref()),
-            )
-        } else {
-            (&self.description, self.note.as_deref())
-        }
-    }
+    note: Option<Localized>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -90,7 +72,7 @@ impl Job {
             started_at: now_secs(),
             finished_at: None,
             log: String::new(),
-            stage: Some("等待开始".to_string()),
+            stage: Some("stage_waiting".to_string()),
             progress: None,
         }
     }
@@ -174,7 +156,7 @@ impl ModelService {
             let engine_id = read_engine_id(&manifest);
             let installed = manifest.is_file();
             let problem = if installed {
-                manifest_problem(&manifest)
+                manifest_problem(&manifest, lang)
             } else {
                 None
             };
@@ -183,20 +165,23 @@ impl ModelService {
             } else if installed {
                 known.push(entry.dir.clone());
             }
-            let (description, note) = entry.localized(lang);
             models.push(ModelView {
                 id: entry.id.clone(),
                 dir: entry.dir.clone(),
                 name: entry.name.clone(),
-                description: description.to_string(),
+                description: entry.description.for_lang(lang).to_string(),
                 size: entry.size.clone(),
                 languages: entry.languages.clone(),
                 capabilities: entry.capabilities.clone(),
-                note: note.map(str::to_string),
+                note: entry
+                    .note
+                    .as_ref()
+                    .map(|n| n.for_lang(lang).to_string())
+                    .filter(|n| !n.is_empty()),
                 installed,
                 problem,
                 engine_id,
-                job: jobs.get(&entry.id).map(JobView::from),
+                job: jobs.get(&entry.id).map(|job| JobView::localized(job, lang)),
             });
         }
 
@@ -209,16 +194,17 @@ impl ModelService {
             if !dir.join("engine.json").is_file() {
                 continue;
             }
-            let description = if lang == "en" {
-                "Manually installed model (manifest from the model directory)."
-            } else {
-                "手动安装的模型（manifest 来自模型目录）。"
+            let description = Localized::Translations {
+                en: Some(
+                    "Manually installed model (manifest from the model directory).".to_string(),
+                ),
+                zh: Some("手动安装的模型（manifest 来自模型目录）。".to_string()),
             };
             models.push(ModelView {
                 id: engine.id.clone(),
                 dir: engine.id.clone(),
                 name: engine.name,
-                description: description.to_string(),
+                description: description.for_lang(lang).to_string(),
                 size: String::new(),
                 languages: engine.languages,
                 capabilities: engine.capabilities,
@@ -244,28 +230,29 @@ impl ModelService {
             .iter()
             .find(|e| e.id == id)
             .cloned()
-            .ok_or_else(|| CoreError::BadRequest(format!("未知的模型：{id}")))?;
+            .ok_or_else(|| {
+                CoreError::UserError(i18n::Message::new(Key::UnknownModel).arg("model", id))
+            })?;
 
         // A healthy install is left alone; a broken/outdated one (e.g. the
         // VoxCPM2 layout from the retired llama.cpp runner) may be
         // reinstalled in place — the script rewrites engine.json.
         let manifest_path = self.models_root.join(&entry.dir).join("engine.json");
-        if manifest_path.is_file() && manifest_problem(&manifest_path).is_none() {
-            return Err(CoreError::BadRequest(format!("{} 已经安装", entry.name)));
+        if manifest_path.is_file() && manifest_problem(&manifest_path, "en").is_none() {
+            return Err(CoreError::UserError(
+                i18n::Message::new(Key::AlreadyInstalled).arg("model", &entry.name),
+            ));
         }
 
-        let scripts = self.scripts_dir.as_ref().ok_or_else(|| {
-            CoreError::BadRequest(
-                "找不到下载脚本目录。请设置 LAVEROCK_SCRIPTS_DIR 指向仓库的 scripts/ 目录。"
-                    .to_string(),
-            )
-        })?;
+        let scripts = self
+            .scripts_dir
+            .as_ref()
+            .ok_or_else(|| CoreError::UserError(i18n::Message::new(Key::ScriptsDirMissing)))?;
         let script = scripts.join(&entry.script);
         if !script.is_file() {
-            return Err(CoreError::BadRequest(format!(
-                "缺少下载脚本：{}",
-                script.display()
-            )));
+            return Err(CoreError::UserError(
+                i18n::Message::new(Key::ScriptMissing).arg("path", script.display()),
+            ));
         }
 
         {
@@ -274,7 +261,9 @@ impl ModelService {
                 .get(&entry.id)
                 .is_some_and(|job| job.status == JobStatus::Running)
             {
-                return Err(CoreError::BadRequest("该模型正在下载中".to_string()));
+                return Err(CoreError::UserError(i18n::Message::new(
+                    Key::DownloadInProgress,
+                )));
             }
             jobs.insert(entry.id.clone(), Job::running());
         }
@@ -317,14 +306,23 @@ impl ModelService {
     }
 }
 
-impl From<&Job> for JobView {
-    fn from(job: &Job) -> Self {
+impl JobView {
+    /// Render a job for a UI language. A stage emitted as a script key
+    /// (`stage_download_file name=… size=…`) is translated here; ad-hoc
+    /// stage text is shown as-is.
+    fn localized(job: &Job, lang: &str) -> Self {
+        let lang = laverock_core::i18n::Lang::parse(lang);
+        let stage = job.stage.as_deref().map(|stage| {
+            laverock_core::i18n::message_from_marker(stage)
+                .map(|message| message.render(lang))
+                .unwrap_or_else(|| stage.to_string())
+        });
         Self {
             status: job.status,
             started_at: job.started_at,
             finished_at: job.finished_at,
             log: tail(&job.log, LOG_TAIL),
-            stage: job.stage.clone(),
+            stage,
             progress: job.progress,
         }
     }
@@ -629,14 +627,22 @@ fn read_engine_id(manifest: &Path) -> Option<String> {
 /// Why an installed directory is unusable, if it is. An unparsable
 /// manifest counts: the engine never registers in that case, so the
 /// model page must offer a reinstall rather than claiming it is fine.
-fn manifest_problem(manifest: &Path) -> Option<String> {
+fn manifest_problem(manifest: &Path, lang: &str) -> Option<String> {
     let raw = match std::fs::read_to_string(manifest) {
         Ok(raw) => raw,
-        Err(e) => return Some(format!("读取 engine.json 失败：{e}")),
+        Err(e) => {
+            return Some(match lang {
+                "en" => format!("cannot read engine.json: {e}"),
+                _ => format!("读取 engine.json 失败：{e}"),
+            })
+        }
     };
     match serde_json::from_str::<laverock_core::Manifest>(&raw) {
-        Ok(m) => m.problem(),
-        Err(e) => Some(format!("engine.json 无法解析：{e}")),
+        Ok(m) => m.problem().map(|p| p.for_lang(lang).to_string()),
+        Err(e) => Some(match lang {
+            "en" => format!("engine.json cannot be parsed: {e}"),
+            _ => format!("engine.json 无法解析：{e}"),
+        }),
     }
 }
 
@@ -914,15 +920,16 @@ mod tests {
             id: "fake".to_string(),
             dir: "fake".to_string(),
             name: "Fake".to_string(),
-            description: "中文说明".to_string(),
-            description_en: Some("English note".to_string()),
+            description: Localized::Translations {
+                en: Some("English note".into()),
+                zh: Some("中文说明".into()),
+            },
             size: String::new(),
             languages: Vec::new(),
             capabilities: Vec::new(),
             script: "fake.sh".to_string(),
             env: BTreeMap::new(),
             note: None,
-            note_en: None,
         };
         run_install(
             entry,
@@ -989,24 +996,52 @@ mod tests {
     }
 
     #[test]
-    fn localized_text_falls_back_to_chinese() {
+    fn job_stages_translate_and_legacy_text_passes_through() {
+        let mut job = Job::running();
+        job.stage = Some("stage_download_file name=model.onnx size=12.3%20MB".to_string());
+        let en = JobView::localized(&job, "en");
+        assert_eq!(
+            en.stage.as_deref(),
+            Some("Downloading model.onnx (12.3 MB)")
+        );
+        let zh = JobView::localized(&job, "zh");
+        assert_eq!(zh.stage.as_deref(), Some("下载 model.onnx（12.3 MB）"));
+
+        // Stages from older scripts are shown verbatim.
+        job.stage = Some("下载权重".to_string());
+        assert_eq!(
+            JobView::localized(&job, "en").stage.as_deref(),
+            Some("下载权重")
+        );
+    }
+
+    #[test]
+    fn localized_text_resolves_per_language() {
         let entry = CatalogEntry {
             id: "x".into(),
             dir: "x".into(),
             name: "X".into(),
-            description: "中文".into(),
-            description_en: Some("English".into()),
+            description: Localized::Translations {
+                en: Some("English".into()),
+                zh: Some("中文".into()),
+            },
             size: String::new(),
             languages: Vec::new(),
             capabilities: Vec::new(),
             script: "x.sh".into(),
             env: BTreeMap::new(),
-            note: Some("中文备注".into()),
-            note_en: Some("English note".into()),
+            note: Some(Localized::Translations {
+                en: Some("English note".into()),
+                zh: Some("中文备注".into()),
+            }),
         };
-        assert_eq!(entry.localized("en"), ("English", Some("English note")));
-        // Unknown language and Chinese both use the default fields.
-        assert_eq!(entry.localized("zh").0, "中文");
-        assert_eq!(entry.localized("de").1, Some("中文备注"));
+        assert_eq!(entry.description.for_lang("en"), "English");
+        assert_eq!(entry.description.for_lang("zh"), "中文");
+        // Unknown languages fall back to the other translation.
+        assert_eq!(entry.description.for_lang("de"), "English");
+        assert_eq!(entry.note.as_ref().unwrap().for_lang("en"), "English note");
+        // Plain strings (third-party manifests) pass through unchanged.
+        let plain = Localized::Text("raw".into());
+        assert_eq!(plain.for_lang("zh"), "raw");
     }
 }

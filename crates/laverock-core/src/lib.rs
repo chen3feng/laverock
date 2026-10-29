@@ -6,6 +6,7 @@
 
 mod audio;
 mod audiocpp;
+pub mod i18n;
 mod kokoro;
 mod longcat;
 mod manager;
@@ -21,7 +22,7 @@ pub use manager::{
     EngineInfo, EngineManager, ProgressEvent, ProgressSink, SpeechEngine, SynthRequest,
 };
 pub use manifest::{
-    AudioCppManifest, EngineKind, KokoroManifest, LongCatManifest, Manifest, ParamKind,
+    AudioCppManifest, EngineKind, KokoroManifest, Localized, LongCatManifest, Manifest, ParamKind,
     ParamOption, ParamSpec, Qwen3TtsManifest, SttManifest, SynthDefaults, ZipVoiceManifest,
 };
 pub use transcribe::Transcriber;
@@ -52,11 +53,26 @@ pub enum CoreError {
     #[error("{0}")]
     BadRequest(String),
 
+    /// A user-facing validation error with translations (see [`i18n`]).
+    #[error("{0}")]
+    UserError(i18n::Message),
+
     #[error(transparent)]
     Io(#[from] std::io::Error),
 
     #[error(transparent)]
     Json(#[from] serde_json::Error),
+}
+
+impl CoreError {
+    /// User-facing text in `lang`. Engine internals (subprocess output,
+    /// file paths) stay as they are; validation errors translate.
+    pub fn localized(&self, lang: i18n::Lang) -> String {
+        match self {
+            CoreError::UserError(message) => message.render(lang),
+            other => other.to_string(),
+        }
+    }
 }
 
 pub type Result<T> = std::result::Result<T, CoreError>;

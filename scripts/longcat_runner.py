@@ -228,7 +228,7 @@ def approx_duration_from_text(text: str, max_duration: float = 30.0) -> float:
 def main() -> int:
     args = parse_args()
 
-    emit("stage", "正在加载模型到内存")
+    emit("stage", "Loading model into memory")
     import numpy as np
     import torch
     import torch.nn.functional as F
@@ -282,10 +282,10 @@ def main() -> int:
             audio = trim_to_silence(audio, max(2.0, approx_pd * 1.4), sr)
             emit(
                 "stage",
-                f"参考音频较长，已裁剪到 {audio.shape[-1] / sr:.1f} 秒以匹配文字稿",
+                f"Reference clip was longer than the transcript; trimmed to {audio.shape[-1] / sr:.1f}s",
             )
         elif clip_secs < approx_pd / 1.8:
-            emit("stage", "提示：文字稿明显长于参考音频，开头可能不完整")
+            emit("stage", "Note: the transcript is much longer than the reference clip; the start may be clipped")
         prompt_wav = audio.unsqueeze(0).to(device)
 
         # Upstream pads one hop of margin, then drops it, so the VAE sees
@@ -318,19 +318,19 @@ def main() -> int:
     budget = max(1.0, (max_duration - prompt_time - 0.5) / ratio)
     chunks = split_into_chunks(text, budget)
     if len(chunks) > 1:
-        emit("stage", f"文本较长，分 {len(chunks)} 段合成")
+        emit("stage", f"Long text: synthesizing in {len(chunks)} chunks")
 
     pieces = []
     for index, chunk in enumerate(chunks):
         if len(chunks) > 1:
-            emit("stage", f"正在合成第 {index + 1}/{len(chunks)} 段")
+            emit("stage", f"Synthesizing chunk {index + 1}/{len(chunks)}")
         full_text = chunk if no_prompt else f"{prompt_text} {chunk}"
         inputs = tokenizer([full_text], padding="longest", return_tensors="pt")
         dur_sec = approx_duration_from_text(chunk, max_duration=budget) * ratio
         duration = int(dur_sec * sr // full_hop)
         duration = min(duration + prompt_dur, int(max_duration * sr // full_hop))
         if len(chunks) == 1:
-            emit("stage", f"正在合成语音（{dur_sec:.1f} 秒）")
+            emit("stage", f"Generating speech ({dur_sec:.1f}s)")
         torch.manual_seed(args.seed + index)
         with torch.no_grad():
             output = model(

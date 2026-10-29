@@ -7,6 +7,7 @@
 //! A profile is deliberately engine-agnostic: the same reference audio
 //! works with any cloning engine that accepts a prompt clip.
 
+use laverock_core::i18n::{self, Key};
 use laverock_core::{decode_wav, CoreError, Result};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -111,20 +112,24 @@ impl ProfileStore {
         let name = name.trim();
         let prompt_text = prompt_text.trim();
         if name.is_empty() {
-            return Err(CoreError::Wav("voice name must not be empty".into()));
+            return Err(CoreError::UserError(i18n::Message::new(
+                Key::VoiceNameEmpty,
+            )));
         }
         if name.chars().count() > 80 {
-            return Err(CoreError::Wav(
-                "voice name is too long (max 80 chars)".into(),
-            ));
+            return Err(CoreError::UserError(i18n::Message::new(
+                Key::VoiceNameTooLong,
+            )));
         }
         if prompt_text.is_empty() {
-            return Err(CoreError::Wav(
-                "reference transcript must not be empty".into(),
-            ));
+            return Err(CoreError::UserError(i18n::Message::new(
+                Key::TranscriptMissing,
+            )));
         }
         if wav.len() > MAX_REFERENCE_BYTES {
-            return Err(CoreError::Wav("reference audio exceeds 20 MB".into()));
+            return Err(CoreError::UserError(i18n::Message::new(
+                Key::ReferenceTooLarge,
+            )));
         }
         // Reject clips that do not decode, so the library cannot fill up
         // with unusable references.
@@ -172,15 +177,21 @@ impl ProfileStore {
 
         let name = name.trim();
         if name.is_empty() {
-            return Err(CoreError::BadRequest("声音名称不能为空".into()));
+            return Err(CoreError::UserError(i18n::Message::new(
+                Key::VoiceNameEmpty,
+            )));
         }
         if name.chars().count() > 80 {
-            return Err(CoreError::BadRequest("声音名称过长（最多 80 字）".into()));
+            return Err(CoreError::UserError(i18n::Message::new(
+                Key::VoiceNameTooLong,
+            )));
         }
 
         if let Some(wav) = wav {
             if wav.len() > MAX_REFERENCE_BYTES {
-                return Err(CoreError::BadRequest("参考音频超过 20 MB".into()));
+                return Err(CoreError::UserError(i18n::Message::new(
+                    Key::ReferenceTooLarge,
+                )));
             }
             decode_wav(wav)?;
             fs::write(dir.join("reference.wav"), wav)?;
@@ -300,7 +311,9 @@ impl ProfileStore {
         use zip::{write::SimpleFileOptions, CompressionMethod, ZipWriter};
 
         if ids.is_empty() {
-            return Err(CoreError::BadRequest("no voices selected".into()));
+            return Err(CoreError::UserError(i18n::Message::new(
+                Key::NothingSelected,
+            )));
         }
         let exported_at = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -470,22 +483,24 @@ fn read_archive_voices(bytes: &[u8]) -> Result<Vec<ArchiveVoice>> {
     use std::io::Read;
     use zip::ZipArchive;
 
-    let mut archive = ZipArchive::new(std::io::Cursor::new(bytes))
-        .map_err(|e| CoreError::BadRequest(format!("无效的音色文件（不是 ZIP）：{e}")))?;
+    let mut archive = ZipArchive::new(std::io::Cursor::new(bytes)).map_err(|e| {
+        CoreError::UserError(i18n::Message::new(Key::ArchiveNotZip).arg("error", e))
+    })?;
 
     // Index: zip path -> file bytes (the archive is small, max a few
     // hundred MB of reference clips).
     let mut files: std::collections::HashMap<String, Vec<u8>> = std::collections::HashMap::new();
     for i in 0..archive.len() {
-        let mut file = archive
-            .by_index(i)
-            .map_err(|e| CoreError::BadRequest(format!("无法读取音色文件：{e}")))?;
+        let mut file = archive.by_index(i).map_err(|e| {
+            CoreError::UserError(i18n::Message::new(Key::ArchiveUnreadable).arg("error", e))
+        })?;
         if file.is_dir() {
             continue;
         }
         let mut buf = Vec::new();
-        file.read_to_end(&mut buf)
-            .map_err(|e| CoreError::BadRequest(format!("读取失败：{e}")))?;
+        file.read_to_end(&mut buf).map_err(|e| {
+            CoreError::UserError(i18n::Message::new(Key::ArchiveUnreadable).arg("error", e))
+        })?;
         files.insert(file.name().replace('\\', "/"), buf);
     }
 
@@ -496,7 +511,7 @@ fn read_archive_voices(bytes: &[u8]) -> Result<Vec<ArchiveVoice>> {
         let entries = bundle
             .get("voices")
             .and_then(|v| v.as_array())
-            .ok_or_else(|| CoreError::BadRequest("voices.json 缺少 voices 数组".into()))?;
+            .ok_or_else(|| CoreError::UserError(i18n::Message::new(Key::ArchiveVoicesMissing)))?;
         for e in entries {
             let dir = e
                 .get("dir")
@@ -538,7 +553,7 @@ fn read_archive_voices(bytes: &[u8]) -> Result<Vec<ArchiveVoice>> {
     // Single-voice layout at the archive root.
     let manifest = files
         .get("manifest.json")
-        .ok_or_else(|| CoreError::BadRequest("音色文件缺少 manifest.json / voices.json".into()))?;
+        .ok_or_else(|| CoreError::UserError(i18n::Message::new(Key::ArchiveMissingIndex)))?;
     let manifest: serde_json::Value = serde_json::from_slice(manifest)?;
     if manifest.get("format").and_then(|v| v.as_str()) != Some("laverock-voice") {
         return Err(CoreError::BadRequest(
@@ -546,7 +561,9 @@ fn read_archive_voices(bytes: &[u8]) -> Result<Vec<ArchiveVoice>> {
         ));
     }
     let Some(wav) = files.get("reference.wav") else {
-        return Err(CoreError::BadRequest("音色文件缺少 reference.wav".into()));
+        return Err(CoreError::UserError(i18n::Message::new(
+            Key::ArchiveMissingWav,
+        )));
     };
     out.push(ArchiveVoice {
         name: manifest

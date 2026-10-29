@@ -114,44 +114,57 @@ impl Manifest {
     /// Cheap to compute (no model load), so the model manager can flag
     /// an installed directory as "needs reinstall" before the user hits
     /// a synthesis error.
-    pub fn problem(&self) -> Option<String> {
+    pub fn problem(&self) -> Option<Localized> {
+        let legacy = || {
+            Some(
+                (
+                    "This install is from a retired runner and must be reinstalled.",
+                    "该安装来自旧的运行器，需要重新安装",
+                )
+                    .into(),
+            )
+        };
+        let legacy_vox = || {
+            Some(
+                (
+                    "This install is from the retired llama.cpp runner; reinstall it.",
+                    "该安装来自旧的 llama.cpp 运行器，需要重新安装",
+                )
+                    .into(),
+            )
+        };
+        let missing = |section: &str| Some(Localized::Text(format!("missing [{section}] section")));
         let empty_audio_cpp =
             |cfg: &AudioCppManifest| cfg.binary.trim().is_empty() && cfg.model.trim().is_empty();
         match self.kind {
             EngineKind::Dots => match &self.dots {
-                None => Some("缺少 [dots] 配置段".into()),
-                Some(c) if empty_audio_cpp(c) => Some("安装来自旧的运行器，需要重新安装".into()),
+                None => missing("dots"),
+                Some(c) if empty_audio_cpp(c) => legacy(),
                 Some(_) => None,
             },
             EngineKind::CosyVoice => match &self.cosyvoice {
-                None => Some("缺少 [cosyvoice] 配置段".into()),
-                Some(c) if empty_audio_cpp(c) => Some("安装来自旧的运行器，需要重新安装".into()),
+                None => missing("cosyvoice"),
+                Some(c) if empty_audio_cpp(c) => legacy(),
                 Some(_) => None,
             },
             EngineKind::VoxCpm2 => match &self.voxcpm2 {
-                None => Some("缺少 [voxcpm2] 配置段".into()),
-                Some(c) if empty_audio_cpp(c) => {
-                    Some("该安装来自旧的 llama.cpp 运行器，需要重新安装".into())
-                }
+                None => missing("voxcpm2"),
+                Some(c) if empty_audio_cpp(c) => legacy_vox(),
                 Some(_) => None,
             },
             EngineKind::ZipVoice => self
                 .zipvoice
                 .is_none()
-                .then(|| "缺少 [zipvoice] 配置段".to_string()),
+                .then(|| missing("zipvoice"))
+                .flatten(),
             EngineKind::Qwen3Tts => self
                 .qwen3tts
                 .is_none()
-                .then(|| "缺少 [qwen3tts] 配置段".to_string()),
-            EngineKind::LongCat => self
-                .longcat
-                .is_none()
-                .then(|| "缺少 [longcat] 配置段".to_string()),
-            EngineKind::Kokoro => self
-                .kokoro
-                .is_none()
-                .then(|| "缺少 [kokoro] 配置段".to_string()),
-            EngineKind::Stt => self.stt.is_none().then(|| "缺少 [stt] 配置段".to_string()),
+                .then(|| missing("qwen3tts"))
+                .flatten(),
+            EngineKind::LongCat => self.longcat.is_none().then(|| missing("longcat")).flatten(),
+            EngineKind::Kokoro => self.kokoro.is_none().then(|| missing("kokoro")).flatten(),
+            EngineKind::Stt => self.stt.is_none().then(|| missing("stt")).flatten(),
         }
     }
 
@@ -173,45 +186,74 @@ impl Manifest {
             EngineKind::ZipVoice => vec![
                 ParamSpec::slider(
                     "speed",
-                    "语速",
+                    ("Speed", "语速"),
                     1.0,
                     0.5,
                     2.0,
                     0.1,
-                    "越大语速越快，不改变音色",
+                    (
+                        "Higher is faster; the voice itself is unchanged.",
+                        "越大语速越快，不改变音色",
+                    ),
                 ),
-                ParamSpec::int_slider("num_steps", "扩散步数", 4, 1, 16, 1, "越多越稳但越慢"),
+                ParamSpec::int_slider(
+                    "num_steps",
+                    ("Diffusion steps", "扩散步数"),
+                    4,
+                    1,
+                    16,
+                    1,
+                    ("More steps are steadier but slower.", "越多越稳但越慢"),
+                ),
             ],
             EngineKind::VoxCpm2 => vec![
                 ParamSpec::slider(
                     "speed",
-                    "语速",
+                    ("Speed", "语速"),
                     1.0,
                     0.5,
                     2.0,
                     0.1,
-                    "越大语速越快，不改变音色",
+                    (
+                        "Higher is faster; the voice itself is unchanged.",
+                        "越大语速越快，不改变音色",
+                    ),
                 ),
-                ParamSpec::int_slider("num_steps", "扩散步数", 10, 1, 30, 1, "越多越稳但越慢"),
+                ParamSpec::int_slider(
+                    "num_steps",
+                    ("Diffusion steps", "扩散步数"),
+                    10,
+                    1,
+                    30,
+                    1,
+                    ("More steps are steadier but slower.", "越多越稳但越慢"),
+                ),
                 ParamSpec::slider(
                     "guidance",
-                    "引导强度 (CFG)",
+                    ("Guidance strength (CFG)", "引导强度 (CFG)"),
                     2.0,
                     0.0,
                     5.0,
                     0.1,
-                    "过高会失真，过低音色偏离参考",
+                    (
+                        "Too high distorts; too low drifts from the reference.",
+                        "过高会失真，过低音色偏离参考",
+                    ),
                 ),
                 ParamSpec {
                     name: "seed".into(),
-                    label: "随机种子".into(),
+                    label: ("Random seed", "随机种子").into(),
                     kind: ParamKind::Int,
                     min: Some(json!(-1)),
                     max: Some(json!(2_147_483_647)),
                     step: None,
                     options: Vec::new(),
                     default: json!(42),
-                    hint: "相同种子 + 文本得到可复现的声音；-1 每次随机".into(),
+                    hint: (
+                        "Same seed + text gives reproducible speech; -1 randomizes each run.",
+                        "相同种子 + 文本得到可复现的声音；-1 每次随机",
+                    )
+                        .into(),
                 },
             ],
             // Non-diffusion autoregressive models expose no step control.
@@ -220,108 +262,148 @@ impl Manifest {
             EngineKind::LongCat => vec![
                 ParamSpec::int_slider(
                     "num_steps",
-                    "采样步数 (NFE)",
+                    ("Sampling steps (NFE)", "采样步数 (NFE)"),
                     16,
                     1,
                     32,
                     1,
-                    "扩散 ODE 步数；16 已足够，越多越慢",
+                    (
+                        "Diffusion ODE steps; 16 is enough, more is slower.",
+                        "扩散 ODE 步数；16 已足够，越多越慢",
+                    ),
                 ),
                 ParamSpec::slider(
                     "cfg",
-                    "引导强度",
+                    ("Guidance strength", "引导强度"),
                     4.0,
                     0.0,
                     10.0,
                     0.1,
-                    "越高越贴近参考音色，过高可能失真",
+                    (
+                        "Higher follows the reference voice more closely; too high may distort.",
+                        "越高越贴近参考音色，过高可能失真",
+                    ),
                 ),
                 ParamSpec {
                     name: "guidance_method".into(),
-                    label: "引导方式".into(),
+                    label: ("Guidance method", "引导方式").into(),
                     kind: ParamKind::Choice,
                     min: None,
                     max: None,
                     step: None,
                     options: vec![
                         ParamOption {
-                            label: "APG（自适应投影，推荐）".into(),
+                            label: (
+                                "APG (adaptive projection, recommended)",
+                                "APG（自适应投影，推荐）",
+                            )
+                                .into(),
                             value: "apg".into(),
                         },
                         ParamOption {
-                            label: "CFG（传统无分类器引导）".into(),
+                            label: (
+                                "CFG (classic classifier-free guidance)",
+                                "CFG（传统无分类器引导）",
+                            )
+                                .into(),
                             value: "cfg".into(),
                         },
                     ],
                     default: serde_json::json!("apg"),
-                    hint: "APG 通常更自然、伪影更少".into(),
+                    hint: (
+                        "APG is usually more natural with fewer artifacts.",
+                        "APG 通常更自然、伪影更少",
+                    )
+                        .into(),
                 },
                 ParamSpec {
                     name: "seed".into(),
-                    label: "随机种子".into(),
+                    label: ("Random seed", "随机种子").into(),
                     kind: ParamKind::Int,
                     min: Some(serde_json::json!(0)),
                     max: Some(serde_json::json!(2_147_483_647)),
                     step: None,
                     options: Vec::new(),
                     default: serde_json::json!(1024),
-                    hint: "相同种子 + 文本得到可复现的声音".into(),
+                    hint: (
+                        "Same seed + text gives reproducible speech.",
+                        "相同种子 + 文本得到可复现的声音",
+                    )
+                        .into(),
                 },
             ],
             // Continuous-AR flow matching; 48 kHz output.
             EngineKind::Dots => vec![
                 ParamSpec::int_slider(
                     "num_steps",
-                    "采样步数",
+                    ("Sampling steps", "采样步数"),
                     10,
                     1,
                     32,
                     1,
-                    "SOAR 推荐 10 步；变多会更慢",
+                    (
+                        "SOAR recommends 10 steps; more is slower.",
+                        "SOAR 推荐 10 步；变多会更慢",
+                    ),
                 ),
                 ParamSpec::slider(
                     "guidance",
-                    "引导强度",
+                    ("Guidance strength", "引导强度"),
                     1.2,
                     0.0,
                     3.0,
                     0.1,
-                    "越高越贴近参考音色，过高可能失真",
+                    (
+                        "Higher follows the reference voice more closely; too high may distort.",
+                        "越高越贴近参考音色，过高可能失真",
+                    ),
                 ),
                 ParamSpec {
                     name: "clone_mode".into(),
-                    label: "克隆方式".into(),
+                    label: ("Clone mode", "克隆方式").into(),
                     kind: ParamKind::Choice,
                     min: None,
                     max: None,
                     step: None,
                     options: vec![
                         ParamOption {
-                            label: "仅声纹（只凭声音，推荐）".into(),
+                            label: (
+                                "Voice only (sound alone, recommended)",
+                                "仅声纹（只凭声音，推荐）",
+                            )
+                                .into(),
                             value: "xvector".into(),
                         },
                         ParamOption {
-                            label: "声纹 + 文字（文字稿准确时更相似）".into(),
+                            label: (
+                                "Voice + transcript (more alike with an accurate transcript)",
+                                "声纹 + 文字（文字稿准确时更相似）",
+                            )
+                                .into(),
                             value: "continuation".into(),
                         },
                     ],
                     default: serde_json::json!("xvector"),
-                    hint: "文字稿不准确时选「仅声纹」更稳".into(),
+                    hint: (
+                        "Use voice-only when the transcript may be inaccurate.",
+                        "文字稿不准确时选「仅声纹」更稳",
+                    )
+                        .into(),
                 },
                 ParamSpec {
                     name: "language".into(),
-                    label: "语言标签".into(),
+                    label: ("Language tag", "语言标签").into(),
                     kind: ParamKind::Choice,
                     min: None,
                     max: None,
                     step: None,
                     options: vec![
                         ParamOption {
-                            label: "自动".into(),
+                            label: ("Auto", "自动").into(),
                             value: "".into(),
                         },
                         ParamOption {
-                            label: "中文".into(),
+                            label: ("Chinese", "中文").into(),
                             value: "zh".into(),
                         },
                         ParamOption {
@@ -329,108 +411,148 @@ impl Manifest {
                             value: "en".into(),
                         },
                         ParamOption {
-                            label: "日本語".into(),
+                            label: ("Japanese", "日本語").into(),
                             value: "ja".into(),
                         },
                         ParamOption {
-                            label: "한국어".into(),
+                            label: ("Korean", "한국어").into(),
                             value: "ko".into(),
                         },
                         ParamOption {
-                            label: "Français".into(),
+                            label: ("French", "Français").into(),
                             value: "fr".into(),
                         },
                         ParamOption {
-                            label: "Deutsch".into(),
+                            label: ("German", "Deutsch").into(),
                             value: "de".into(),
                         },
                         ParamOption {
-                            label: "Español".into(),
+                            label: ("Spanish", "Español").into(),
                             value: "es".into(),
                         },
                     ],
                     default: serde_json::json!(""),
-                    hint: "多语言或混合语言时固定标签有帮助".into(),
+                    hint: (
+                        "A fixed tag helps with mixed-language text.",
+                        "多语言或混合语言时固定标签有帮助",
+                    )
+                        .into(),
                 },
                 ParamSpec {
                     name: "seed".into(),
-                    label: "随机种子".into(),
+                    label: ("Random seed", "随机种子").into(),
                     kind: ParamKind::Int,
                     min: Some(serde_json::json!(0)),
                     max: Some(serde_json::json!(2_147_483_647)),
                     step: None,
                     options: Vec::new(),
                     default: serde_json::json!(42),
-                    hint: "相同种子 + 文本得到可复现的声音".into(),
+                    hint: (
+                        "Same seed + text gives reproducible speech.",
+                        "相同种子 + 文本得到可复现的声音",
+                    )
+                        .into(),
                 },
             ],
             // CosyVoice3: streaming LLM TTS with three request templates.
             EngineKind::CosyVoice => vec![
                 ParamSpec {
                     name: "template".into(),
-                    label: "合成模板".into(),
+                    label: ("Synthesis template", "合成模板").into(),
                     kind: ParamKind::Choice,
                     min: None,
                     max: None,
                     step: None,
                     options: vec![
                         ParamOption {
-                            label: "零样本克隆（需文字稿，相似度最高）".into(),
+                            label: (
+                                "Zero-shot clone (needs transcript, closest match)",
+                                "零样本克隆（需文字稿，相似度最高）",
+                            )
+                                .into(),
                             value: "zero_shot".into(),
                         },
                         ParamOption {
-                            label: "跨语种克隆（只凭声音）".into(),
+                            label: ("Cross-lingual clone (voice only)", "跨语种克隆（只凭声音）")
+                                .into(),
                             value: "cross_lingual".into(),
                         },
                         ParamOption {
-                            label: "指令（用文字描述语气）".into(),
+                            label: (
+                                "Instruct (describe the tone in words)",
+                                "指令（用文字描述语气）",
+                            )
+                                .into(),
                             value: "instruct".into(),
                         },
                     ],
                     default: serde_json::json!("zero_shot"),
-                    hint: "零样本最像；文字稿不准时选跨语种".into(),
+                    hint: (
+                        "Zero-shot is the closest; use cross-lingual with no transcript.",
+                        "零样本最像；文字稿不准时选跨语种",
+                    )
+                        .into(),
                 },
                 ParamSpec {
                     name: "instruct".into(),
-                    label: "指令（仅「指令」模板使用）".into(),
+                    label: (
+                        "Instruction (used only by the Instruct template)",
+                        "指令（仅「指令」模板使用）",
+                    )
+                        .into(),
                     kind: ParamKind::TextArea,
                     min: None,
                     max: None,
                     step: None,
                     options: Vec::new(),
                     default: serde_json::json!(""),
-                    hint: "例如：用温和亲切的语气，语速稍慢".into(),
+                    hint: (
+                        "e.g. Read in a gentle, warm tone at a slightly slower pace.",
+                        "例如：用温和亲切的语气，语速稍慢",
+                    )
+                        .into(),
                 },
                 ParamSpec::int_slider(
                     "num_steps",
-                    "流式解码步数",
+                    ("Streaming decode steps", "流式解码步数"),
                     10,
                     1,
                     32,
                     1,
-                    "声学流匹配的 Euler 步数；越多越稳越慢",
+                    (
+                        "Euler steps for the acoustic flow matching; more is steadier and slower.",
+                        "声学流匹配的 Euler 步数；越多越稳越慢",
+                    ),
                 ),
                 ParamSpec {
                     name: "top_k".into(),
-                    label: "Top-K 采样".into(),
+                    label: ("Top-K sampling", "Top-K 采样").into(),
                     kind: ParamKind::Int,
                     min: Some(serde_json::json!(1)),
                     max: Some(serde_json::json!(100)),
                     step: None,
                     options: Vec::new(),
                     default: serde_json::json!(25),
-                    hint: "越小越稳定，越大越有变化".into(),
+                    hint: (
+                        "Lower is steadier; higher adds variation.",
+                        "越小越稳定，越大越有变化",
+                    )
+                        .into(),
                 },
                 ParamSpec {
                     name: "seed".into(),
-                    label: "随机种子".into(),
+                    label: ("Random seed", "随机种子").into(),
                     kind: ParamKind::Int,
                     min: Some(serde_json::json!(0)),
                     max: Some(serde_json::json!(2_147_483_647)),
                     step: None,
                     options: Vec::new(),
                     default: serde_json::json!(1986),
-                    hint: "相同种子 + 文本得到可复现的声音".into(),
+                    hint: (
+                        "Same seed + text gives reproducible speech.",
+                        "相同种子 + 文本得到可复现的声音",
+                    )
+                        .into(),
                 },
             ],
             // Preset-voices model: speed is the only built-in control;
@@ -438,12 +560,15 @@ impl Manifest {
             // declare their own parameter list with every sid they ship.
             EngineKind::Kokoro => vec![ParamSpec::slider(
                 "speed",
-                "语速",
+                ("Speed", "语速"),
                 1.0,
                 0.5,
                 2.0,
                 0.1,
-                "越大语速越快，不改变音色",
+                (
+                    "Higher is faster; the voice itself is unchanged.",
+                    "越大语速越快，不改变音色",
+                ),
             )],
         }
     }
@@ -457,8 +582,9 @@ impl Manifest {
 pub struct ParamSpec {
     /// Form field / engine option name, e.g. `num_steps` or `cfg`.
     pub name: String,
-    /// UI label.
-    pub label: String,
+    /// UI label. Manifests we generate carry both languages; a plain
+    /// string (third-party manifests) is shown as-is.
+    pub label: Localized,
     #[serde(rename = "type")]
     pub kind: ParamKind,
     #[serde(default)]
@@ -472,7 +598,84 @@ pub struct ParamSpec {
     pub options: Vec<ParamOption>,
     pub default: serde_json::Value,
     #[serde(default)]
-    pub hint: String,
+    pub hint: Localized,
+}
+
+/// Display text supplied by a manifest or catalog.
+///
+/// Engine-provided identifiers (Kokoro's `af_heart`, Qwen's `Vivian`)
+/// are data and are shown as-is; anything *we* author — descriptions,
+/// hints, parameter labels — must be translatable, so it is stored as
+/// `{"en": …, "zh": …}` and resolved by the UI. A bare string keeps
+/// hand-written third-party manifests working.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum Localized {
+    Text(String),
+    Translations {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        en: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        zh: Option<String>,
+    },
+}
+
+impl Localized {
+    /// Text for `lang` ("en" or "zh"), falling back to the other
+    /// language and finally to an empty string.
+    pub fn for_lang(&self, lang: &str) -> &str {
+        match self {
+            Localized::Text(text) => text,
+            Localized::Translations { en, zh } => {
+                // Unknown languages fall back to English rather than Chinese.
+                let (first, second) = if lang == "zh" { (zh, en) } else { (en, zh) };
+                first.as_deref().or(second.as_deref()).unwrap_or("")
+            }
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.for_lang("en").is_empty() && self.for_lang("zh").is_empty()
+    }
+
+    /// Whether any language's text equals `value` (used to match a
+    /// requested voice against an option's label).
+    pub fn matches(&self, value: &str) -> bool {
+        match self {
+            Localized::Text(text) => text == value,
+            Localized::Translations { en, zh } => {
+                en.as_deref() == Some(value) || zh.as_deref() == Some(value)
+            }
+        }
+    }
+}
+
+impl From<&str> for Localized {
+    fn from(value: &str) -> Self {
+        Localized::Text(value.to_string())
+    }
+}
+
+impl From<(&str, &str)> for Localized {
+    /// `(English, Chinese)` shorthand used by the built-in parameter sets.
+    fn from((en, zh): (&str, &str)) -> Self {
+        Localized::Translations {
+            en: Some(en.to_string()),
+            zh: Some(zh.to_string()),
+        }
+    }
+}
+
+impl From<String> for Localized {
+    fn from(value: String) -> Self {
+        Localized::Text(value)
+    }
+}
+
+impl Default for Localized {
+    fn default() -> Self {
+        Localized::Text(String::new())
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -490,7 +693,7 @@ pub enum ParamKind {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ParamOption {
-    pub label: String,
+    pub label: Localized,
     pub value: String,
 }
 
@@ -498,10 +701,10 @@ impl ParamSpec {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         name: &str,
-        label: &str,
+        label: impl Into<Localized>,
         kind: ParamKind,
         default: serde_json::Value,
-        hint: &str,
+        hint: impl Into<Localized>,
     ) -> Self {
         Self {
             name: name.into(),
@@ -518,12 +721,12 @@ impl ParamSpec {
 
     pub fn slider(
         name: &str,
-        label: &str,
+        label: impl Into<Localized>,
         default: f64,
         min: f64,
         max: f64,
         step: f64,
-        hint: &str,
+        hint: impl Into<Localized>,
     ) -> Self {
         use serde_json::json;
         Self {
@@ -537,12 +740,12 @@ impl ParamSpec {
     #[allow(clippy::too_many_arguments)]
     pub fn int_slider(
         name: &str,
-        label: &str,
+        label: impl Into<Localized>,
         default: i64,
         min: i64,
         max: i64,
         step: i64,
-        hint: &str,
+        hint: impl Into<Localized>,
     ) -> Self {
         use serde_json::json;
         Self {

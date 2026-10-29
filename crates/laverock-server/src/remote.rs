@@ -9,6 +9,8 @@
 //! binds the machine's LAN address rather than 0.0.0.0 so the loopback
 //! listener stays separate.
 
+use laverock_core::i18n;
+
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
@@ -149,20 +151,22 @@ impl RemoteState {
 
     /// Exchange a pairing code for a device token. Returns the plaintext
     /// token once; only its hash is persisted.
-    pub fn claim(&self, code: &str, device_name: &str) -> Result<String, String> {
+    pub fn claim(&self, code: &str, device_name: &str) -> Result<String, i18n::Message> {
         let mut guard = self.pair.lock().expect("pair lock");
-        let session = guard.as_mut().ok_or("没有进行中的配对")?;
+        let session = guard
+            .as_mut()
+            .ok_or(i18n::Message::new(i18n::Key::PairNoSession))?;
         if SystemTime::now() > session.expires {
             *guard = None;
-            return Err("配对码已过期，请在电脑上重新生成".into());
+            return Err(i18n::Message::new(i18n::Key::PairExpired));
         }
         if session.code != code.trim() {
             session.failures += 1;
             if session.failures >= MAX_PAIR_FAILURES {
                 *guard = None;
-                return Err("尝试次数过多，请重新生成配对码".into());
+                return Err(i18n::Message::new(i18n::Key::PairTooMany));
             }
-            return Err("配对码不正确".into());
+            return Err(i18n::Message::new(i18n::Key::PairInvalid));
         }
         let code = session.code.clone();
         drop(guard);
@@ -179,7 +183,8 @@ impl RemoteState {
         {
             let mut config = self.config.lock().expect("remote lock");
             config.devices.push(device);
-            save(&self.path, &config).map_err(|e| format!("保存设备失败: {e}"))?;
+            save(&self.path, &config)
+                .map_err(|e| i18n::Message::raw(format!("cannot save devices: {e}")))?;
         }
         *self.pair.lock().expect("pair lock") = None;
         tracing::info!(code_len = code.len(), "device paired");

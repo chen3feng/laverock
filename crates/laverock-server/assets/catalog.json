@@ -3,8 +3,10 @@
     "id": "zipvoice",
     "dir": "sherpa-onnx-zipvoice-distill-int8-zh-en-emilia",
     "name": "ZipVoice Distill INT8",
-    "description": "中英文零样本克隆。ONNX 静态运行时，体积最小、CPU 速度最快，适合作为默认引擎。",
-    "description_en": "Zero-shot Chinese/English voice cloning. A static ONNX runtime, smallest download and fastest on CPU — a good default engine.",
+    "description": {
+      "en": "Zero-shot Chinese/English voice cloning. A static ONNX runtime, smallest download and fastest on CPU — a good default engine.",
+      "zh": "中英文零样本克隆。ONNX 静态运行时，体积最小、CPU 速度最快，适合作为默认引擎。"
+    },
     "size": "~160 MB",
     "languages": [
       "zh",
@@ -16,15 +18,19 @@
     ],
     "script": "download-zipvoice.sh",
     "env": {},
-    "note": "克隆时必须提供参考音频对应的文字。",
-    "note_en": "Cloning requires the transcript of the reference audio."
+    "note": {
+      "en": "Cloning requires the transcript of the reference audio.",
+      "zh": "克隆时必须提供参考音频对应的文字。"
+    }
   },
   {
     "id": "kokoro",
     "dir": "kokoro-int8-multi-lang-v1_0",
     "name": "Kokoro 82M (INT8)",
-    "description": "仅 82M 参数的轻量 TTS，CPU 上即可实时合成；54 个官方预置音色，覆盖中英日法西意葡印地 8 种语言。不支持声音克隆，只能选择内置音色。",
-    "description_en": "A lightweight 82M-parameter TTS that runs in real time on CPU. 54 official preset voices across 8 languages (English, Chinese, Japanese, French, Spanish, Italian, Portuguese, Hindi). No voice cloning — choose a built-in voice.",
+    "description": {
+      "en": "A lightweight 82M-parameter TTS that runs in real time on CPU. 54 official preset voices across 8 languages (English, Chinese, Japanese, French, Spanish, Italian, Portuguese, Hindi). No voice cloning — choose a built-in voice.",
+      "zh": "仅 82M 参数的轻量 TTS，CPU 上即可实时合成；54 个官方预置音色，覆盖中英日法西意葡印地 8 种语言。不支持声音克隆，只能选择内置音色。"
+    },
     "size": "~135 MB",
     "languages": [
       "zh",
@@ -42,15 +48,19 @@
     ],
     "script": "download-kokoro.sh",
     "env": {},
-    "note": "纯 ONNX 运行时，无需 Python 或编译工具链。该模型只有预置音色：选中后合成页不会出现声音库/录音/参考文字，改为在引擎参数里选择音色。",
-    "note_en": "Pure ONNX runtime — no Python or build toolchain needed. Preset voices only: when selected, the synth page hides the voice library/recorder/transcript and offers a built-in voice picker."
+    "note": {
+      "en": "Pure ONNX runtime — no Python or build toolchain needed. Preset voices only: when selected, the synth page hides the voice library/recorder/transcript and offers a built-in voice picker.",
+      "zh": "纯 ONNX 运行时，无需 Python 或编译工具链。该模型只有预置音色：选中后合成页不会出现声音库/录音/参考文字，改为在引擎参数里选择音色。"
+    }
   },
   {
     "id": "stt-sensevoice",
     "dir": "sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17-int8",
     "name": "SenseVoice Small (INT8)",
-    "description": "本地语音识别（参考音频自动转写）。中英日韩粤，数字与标点自动归一化；录音后可一键填入参考文字，无需手敲。",
-    "description_en": "On-device speech recognition for automatic reference-clip transcription. Chinese/English/Japanese/Korean/Cantonese with automatic number and punctuation normalization; fills the reference transcript with one tap after recording.",
+    "description": {
+      "en": "On-device speech recognition for automatic reference-clip transcription. Chinese/English/Japanese/Korean/Cantonese with automatic number and punctuation normalization; fills the reference transcript with one tap after recording.",
+      "zh": "本地语音识别（参考音频自动转写）。中英日韩粤，数字与标点自动归一化；录音后可一键填入参考文字，无需手敲。"
+    },
     "size": "~234 MB",
     "languages": [
       "zh",
@@ -64,15 +74,19 @@
     ],
     "script": "download-stt.sh",
     "env": {},
-    "note": "可选组件：仅克隆类引擎（ZipVoice、LongCat、CosyVoice 零样本等）需要参考文字时有用；Kokoro 等预置音色引擎用不到。纯 ONNX，无需 Python。",
-    "note_en": "Optional: only useful when cloning engines (ZipVoice, LongCat, zero-shot CosyVoice) need a reference transcript; preset-voice engines like Kokoro do not use it. Pure ONNX, no Python needed."
+    "note": {
+      "en": "Optional: only useful when cloning engines (ZipVoice, LongCat, zero-shot CosyVoice) need a reference transcript; preset-voice engines like Kokoro do not use it. Pure ONNX, no Python needed.",
+      "zh": "可选组件：仅克隆类引擎（ZipVoice、LongCat、CosyVoice 零样本等）需要参考文字时有用；Kokoro 等预置音色引擎用不到。纯 ONNX，无需 Python。"
+    }
   },
   {
     "id": "voxcpm2",
     "dir": "voxcpm2",
     "name": "VoxCPM2",
-    "description": "30 种语言、零样本克隆与声音设计。GGUF 权重经 llama.cpp 在本机推理。",
-    "description_en": "30 languages with zero-shot cloning and voice design. GGUF weights run locally through llama.cpp.",
+    "description": {
+      "en": "30 languages with zero-shot cloning and voice design. GGUF weights run locally through llama.cpp.",
+      "zh": "30 种语言、零样本克隆与声音设计。GGUF 权重经 llama.cpp 在本机推理。"
+    },
     "size": "~3.3 GB",
     "languages": [
       "zh",
@@ -91,15 +105,19 @@
     ],
     "script": "download-voxcpm2.sh",
     "env": {},
-    "note": "通过 audio.cpp 原生运行时推理（Windows 带 NVIDIA 显卡时使用 CUDA），与 dots.tts、CosyVoice3 共享同一个运行时，只下载一次；另需下载约 3 GB GGUF 权重。参考音频超过 14 秒时会自动截取开头并在静音点切分，建议直接使用 3–10 秒的干净人声。",
-    "note_en": "Runs on the audio.cpp native runtime (CUDA on Windows with an NVIDIA GPU), shared with dots.tts and CosyVoice3 so it downloads once; the ~3 GB GGUF weights are fetched separately. A voice reference longer than 14 s is trimmed from the start at a silence point; 3-10 s of clean speech works best."
+    "note": {
+      "en": "Runs on the audio.cpp native runtime (CUDA on Windows with an NVIDIA GPU), shared with dots.tts and CosyVoice3 so it downloads once; the ~3 GB GGUF weights are fetched separately. A voice reference longer than 14 s is trimmed from the start at a silence point; 3-10 s of clean speech works best.",
+      "zh": "通过 audio.cpp 原生运行时推理（Windows 带 NVIDIA 显卡时使用 CUDA），与 dots.tts、CosyVoice3 共享同一个运行时，只下载一次；另需下载约 3 GB GGUF 权重。参考音频超过 14 秒时会自动截取开头并在静音点切分，建议直接使用 3–10 秒的干净人声。"
+    }
   },
   {
     "id": "longcat",
     "dir": "longcat",
     "name": "LongCat-AudioDiT 1B",
-    "description": "美团 LongCat 的波形潜空间扩散 TTS，零样本克隆效果接近 Seed-TTS；官方 audiodit 包跑在独立 venv 中。",
-    "description_en": "Meituan's LongCat waveform-latent diffusion TTS, with zero-shot cloning close to Seed-TTS. The official audiodit package runs in an isolated venv.",
+    "description": {
+      "en": "Meituan's LongCat waveform-latent diffusion TTS, with zero-shot cloning close to Seed-TTS. The official audiodit package runs in an isolated venv.",
+      "zh": "美团 LongCat 的波形潜空间扩散 TTS，零样本克隆效果接近 Seed-TTS；官方 audiodit 包跑在独立 venv 中。"
+    },
     "size": "~7 GB（含 venv）",
     "languages": [
       "zh",
@@ -111,15 +129,19 @@
     ],
     "script": "download-longcat.sh",
     "env": {},
-    "note": "需要 Python 3.10–3.12 与 Git；克隆需要参考音频对应的文字，音频明显长于文字稿时会自动裁剪；数字会转成中文读法，长文本自动分段合成。单次最长约 30 秒（含参考音频）。可用 LONGCAT_MODEL=meituan-longcat/LongCat-AudioDiT-3.5B 安装更大的版本（~15 GB）。",
-    "note_en": "Requires Python 3.10–3.12 and Git. Cloning needs the reference transcript; clips much longer than the transcript are trimmed automatically. Numbers are read in Chinese and long text is split into chunks. Each run is capped at ~30 s including the reference. Set LONGCAT_MODEL=meituan-longcat/LongCat-AudioDiT-3.5B for the larger ~15 GB model."
+    "note": {
+      "en": "Requires Python 3.10–3.12 and Git. Cloning needs the reference transcript; clips much longer than the transcript are trimmed automatically. Numbers are read in Chinese and long text is split into chunks. Each run is capped at ~30 s including the reference. Set LONGCAT_MODEL=meituan-longcat/LongCat-AudioDiT-3.5B for the larger ~15 GB model.",
+      "zh": "需要 Python 3.10–3.12 与 Git；克隆需要参考音频对应的文字，音频明显长于文字稿时会自动裁剪；数字会转成中文读法，长文本自动分段合成。单次最长约 30 秒（含参考音频）。可用 LONGCAT_MODEL=meituan-longcat/LongCat-AudioDiT-3.5B 安装更大的版本（~15 GB）。"
+    }
   },
   {
     "id": "dots",
     "dir": "dots",
     "name": "dots.tts SOAR (Q8_0)",
-    "description": "2B 连续 AR + 48kHz AudioVAE，Seed-TTS 上 SOTA 级克隆；通过 audio.cpp 原生 Metal/CUDA 运行时推理，无需 Python。",
-    "description_en": "A 2B continuous-AR model with a 48 kHz AudioVAE, SOTA-level cloning on Seed-TTS. Runs on audio.cpp's native Metal/CUDA runtime — no Python needed.",
+    "description": {
+      "en": "A 2B continuous-AR model with a 48 kHz AudioVAE, SOTA-level cloning on Seed-TTS. Runs on audio.cpp's native Metal/CUDA runtime — no Python needed.",
+      "zh": "2B 连续 AR + 48kHz AudioVAE，Seed-TTS 上 SOTA 级克隆；通过 audio.cpp 原生 Metal/CUDA 运行时推理，无需 Python。"
+    },
     "size": "~3.1 GB",
     "languages": [
       "zh",
@@ -141,15 +163,19 @@
     ],
     "script": "download-dots.sh",
     "env": {},
-    "note": "下载 audio.cpp 运行时与 3GB GGUF；默认仅凭声音克隆（文字稿不准确也稳），也可选声纹+文字；长文本自动分段。macOS 走 Metal，其它平台走 CPU。M4 Pro 实测 RTF 约 1.3–1.9。",
-    "note_en": "Downloads the audio.cpp runtime and a 3 GB GGUF. Clones from the voice alone by default (robust even with an inaccurate transcript), with an optional voice+text mode; long text is split automatically. Metal on macOS, CPU elsewhere. Measured RTF ~1.3–1.9 on an M4 Pro."
+    "note": {
+      "en": "Downloads the audio.cpp runtime and a 3 GB GGUF. Clones from the voice alone by default (robust even with an inaccurate transcript), with an optional voice+text mode; long text is split automatically. Metal on macOS, CPU elsewhere. Measured RTF ~1.3–1.9 on an M4 Pro.",
+      "zh": "下载 audio.cpp 运行时与 3GB GGUF；默认仅凭声音克隆（文字稿不准确也稳），也可选声纹+文字；长文本自动分段。macOS 走 Metal，其它平台走 CPU。M4 Pro 实测 RTF 约 1.3–1.9。"
+    }
   },
   {
     "id": "cosyvoice",
     "dir": "cosyvoice",
     "name": "CosyVoice3 0.5B (Q8_0)",
-    "description": "FunAudioLLM 的 0.5B 流式 LLM TTS，零样本克隆、跨语种与指令控制；9 种语言 + 粤语，经 audio.cpp 原生 Metal 运行时推理。",
-    "description_en": "FunAudioLLM's 0.5B streaming LLM TTS with zero-shot cloning, cross-lingual synthesis and voice instructions. 9 languages plus Cantonese, on audio.cpp's native Metal runtime.",
+    "description": {
+      "en": "FunAudioLLM's 0.5B streaming LLM TTS with zero-shot cloning, cross-lingual synthesis and voice instructions. 9 languages plus Cantonese, on audio.cpp's native Metal runtime.",
+      "zh": "FunAudioLLM 的 0.5B 流式 LLM TTS，零样本克隆、跨语种与指令控制；9 种语言 + 粤语，经 audio.cpp 原生 Metal 运行时推理。"
+    },
     "size": "~2.3 GB",
     "languages": [
       "zh",
@@ -170,15 +196,19 @@
     ],
     "script": "download-cosyvoice.sh",
     "env": {},
-    "note": "与 dots.tts 共用 audio.cpp 运行时（只下载一次）。三种模板：零样本（需文字稿）、跨语种（只凭声音）、指令（用文字描述语气）。",
-    "note_en": "Shares the audio.cpp runtime with dots.tts (downloaded once). Three templates: zero-shot (needs a transcript), cross-lingual (voice only) and instruct (describe the tone in words)."
+    "note": {
+      "en": "Shares the audio.cpp runtime with dots.tts (downloaded once). Three templates: zero-shot (needs a transcript), cross-lingual (voice only) and instruct (describe the tone in words).",
+      "zh": "与 dots.tts 共用 audio.cpp 运行时（只下载一次）。三种模板：零样本（需文字稿）、跨语种（只凭声音）、指令（用文字描述语气）。"
+    }
   },
   {
     "id": "qwen3tts",
     "dir": "qwen3tts",
     "name": "Qwen3-TTS 0.6B",
-    "description": "官方 qwen-tts 包，跑在独立的 Python venv 中；10 种语言，仅凭声音即可克隆。",
-    "description_en": "The official qwen-tts package in an isolated Python venv. 10 languages, cloning from the voice alone.",
+    "description": {
+      "en": "The official qwen-tts package in an isolated Python venv. 10 languages, cloning from the voice alone.",
+      "zh": "官方 qwen-tts 包，跑在独立的 Python venv 中；10 种语言，仅凭声音即可克隆。"
+    },
     "size": "~2–3 GB（含 venv）",
     "languages": [
       "zh",
@@ -200,15 +230,19 @@
     "env": {
       "QWEN3TTS_VARIANT": "base"
     },
-    "note": "需要 Python 3.10–3.12；脚本会自动创建隔离环境。Apple Silicon 上自动使用 MPS。",
-    "note_en": "Requires Python 3.10–3.12; the script creates the isolated environment automatically. Uses MPS automatically on Apple Silicon."
+    "note": {
+      "en": "Requires Python 3.10–3.12; the script creates the isolated environment automatically. Uses MPS automatically on Apple Silicon.",
+      "zh": "需要 Python 3.10–3.12；脚本会自动创建隔离环境。Apple Silicon 上自动使用 MPS。"
+    }
   },
   {
     "id": "qwen3tts-custom",
     "dir": "qwen3tts-custom",
     "name": "Qwen3-TTS 0.6B (custom voice)",
-    "description": "Qwen3-TTS 预置音色：9 个内置说话人（中英日韩），无需参考音频，并可用自然语言指令调整语气。",
-    "description_en": "Qwen3-TTS preset speakers: nine built-in voices (Chinese/English/Japanese/Korean) with no reference clip needed, plus natural-language tone instructions.",
+    "description": {
+      "en": "Qwen3-TTS preset speakers: nine built-in voices (Chinese/English/Japanese/Korean) with no reference clip needed, plus natural-language tone instructions.",
+      "zh": "Qwen3-TTS 预置音色：9 个内置说话人（中英日韩），无需参考音频，并可用自然语言指令调整语气。"
+    },
     "size": "~2–3 GB（含 venv）",
     "languages": [
       "zh",
@@ -231,15 +265,19 @@
     "env": {
       "QWEN3TTS_VARIANT": "custom"
     },
-    "note": "与克隆版共用同一个 Python 环境，重复安装只下载模型权重。需要 Python 3.10–3.12。",
-    "note_en": "Shares one Python environment with the clone variant; reinstalling only downloads weights. Requires Python 3.10–3.12."
+    "note": {
+      "en": "Shares one Python environment with the clone variant; reinstalling only downloads weights. Requires Python 3.10–3.12.",
+      "zh": "与克隆版共用同一个 Python 环境，重复安装只下载模型权重。需要 Python 3.10–3.12。"
+    }
   },
   {
     "id": "qwen3tts-design",
     "dir": "qwen3tts-design",
     "name": "Qwen3-TTS 1.7B (voice design)",
-    "description": "用自然语言描述来创造音色（声音设计），例如「一位温柔的年轻女性，语速稍慢」。无需参考音频。",
-    "description_en": "Create a voice from a natural-language description (voice design), e.g. \"a gentle young woman speaking slightly slowly\". No reference clip needed.",
+    "description": {
+      "en": "Create a voice from a natural-language description (voice design), e.g. \"a gentle young woman speaking slightly slowly\". No reference clip needed.",
+      "zh": "用自然语言描述来创造音色（声音设计），例如「一位温柔的年轻女性，语速稍慢」。无需参考音频。"
+    },
     "size": "~4–5 GB（含 venv）",
     "languages": [
       "zh",
@@ -262,7 +300,9 @@
     "env": {
       "QWEN3TTS_VARIANT": "design"
     },
-    "note": "1.7B 模型，合成时必须填写音色描述。需要 Python 3.10–3.12。",
-    "note_en": "The 1.7B model; a voice description is required to synthesize. Requires Python 3.10–3.12."
+    "note": {
+      "en": "The 1.7B model; a voice description is required to synthesize. Requires Python 3.10–3.12.",
+      "zh": "1.7B 模型，合成时必须填写音色描述。需要 Python 3.10–3.12。"
+    }
   }
 ]

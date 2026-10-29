@@ -34,7 +34,7 @@ BACKEND="$(lv_audiocpp_backend)"
 
 # 2. Weights (Q8_0 GGUF) from Hugging Face, in parallel ranged requests.
 lv_hf_download_file audio-cpp/audio.cpp-gguf "$PACKAGE" "$GGUF" 8 \
-  "下载模型权重（Q8_0，约 3 GB）"
+  "Downloading model weights (Q8_0, ~3 GB)"
 
 # 3. Manifest.
 case "$MODEL_KIND" in
@@ -61,4 +61,4 @@ EOF
 
 echo
 echo "dots.tts installed at $DEST"
-echo "Reload the 模型 page (or restart the server) to pick it up."
+echo "Reload the Models page (or restart the server) to pick it up."

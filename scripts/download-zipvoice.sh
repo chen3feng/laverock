@@ -19,20 +19,20 @@ if [ -f "$MODELS_DIR/$MODEL/encoder.int8.onnx" ]; then
 else
   # The tarball expands to the $MODEL directory under MODELS_DIR.
   lv_extract_tarball "$URL" "$TMP/model.tar.bz2" "$MODELS_DIR" \
-    "下载主模型（1/3）· 约 104 MB"
+    "Downloading main model (1/3) · ~104 MB"
 fi
 
 # The int8 archive omits the shared vocoder and the English lexicon;
 # both are separate upstream artifacts.
 cd "$MODELS_DIR/$MODEL"
 if [ ! -f vocos_24khz.onnx ]; then
-  lv_stage "下载声码器（2/3）"
+  lv_stage_key stage_download_vocoder
   lv_download \
     https://github.com/k2-fsa/sherpa-onnx/releases/download/vocoder-models/vocos_24khz.onnx \
     vocos_24khz.onnx
 fi
 if [ ! -f lexicon-en-us.txt ]; then
-  lv_stage "下载英文词典（3/3）"
+  lv_stage_key stage_download_lexicon
   lv_download \
     https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/lexicon-en-us.txt \
     lexicon-en-us.txt
@@ -54,7 +54,7 @@ if [ ! -f lexicon-en-us.clean.txt ]; then
 fi
 cd - >/dev/null
 
-lv_stage "写入引擎清单"
+lv_stage_key stage_write_manifest
 cat > "$MODELS_DIR/$MODEL/engine.json" <<EOF
 {
   "id": "$MODEL",

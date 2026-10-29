@@ -38,7 +38,7 @@ mkdir -p "$TOOLS"
 
 # 1. Official implementation (contains the `audiodit` package).
 if [ ! -d "$SRC/.git" ]; then
-  lv_stage "拉取 LongCat-AudioDiT 源码"
+  lv_stage_key stage_fetch_source
   git clone --depth 1 --progress https://github.com/meituan-longcat/LongCat-AudioDiT.git "$SRC"
 fi
 
@@ -46,7 +46,7 @@ fi
 #    pip, and pre-installs CUDA torch on Windows+NVIDIA; VPY points at its
 #    interpreter (also used by the HF helpers for JSON parsing via LV_PY).
 lv_prepare_python_venv "$VENV" "$PYTHON"
-lv_stage "安装依赖（PyTorch 与 transformers 5，约 1–2 GB）"
+lv_stage_key stage_install_deps
 "$VPY" -m pip install -r "$SRC/requirements.txt"
 # The UMT5 tokenizer ships a SentencePiece model; transformers can fall
 # back to it when converting, so keep the library available.
@@ -58,18 +58,18 @@ lv_stage "安装依赖（PyTorch 与 transformers 5，约 1–2 GB）"
 #    metadata HEAD negotiation rejects hf-mirror redirects, and a single
 #    flaky-proxy reset used to abort the multi-GB stream. The helper resumes
 #    per file and skips files already present with the right size.
-lv_stage "下载模型权重（${SIZE_NOTE}）"
+lv_stage_key stage_download_weights "note=${SIZE_NOTE}"
 lv_hf_download_repo "$MODEL" "$WEIGHTS" 8
 # An interrupted earlier attempt can leave multi-GB partials behind.
 find "$WEIGHTS/.cache" -name "*.incomplete" -delete 2>/dev/null || true
-lv_stage "下载 UMT5 分词器"
+lv_stage_key stage_download_tokenizer
 # Only the four tokenizer files: the umt5-base repo also ships multi-GB
 # encoder weights that LongCat does not load.
 lv_hf_download_repo google/umt5-base "$TOKENIZER" 8 \
   tokenizer.json tokenizer_config.json special_tokens_map.json spiece.model
 
 # 4. Runner plus the audiodit package next to it.
-lv_stage "安装运行脚本"
+lv_stage_key stage_install_runner
 cp "$SCRIPT_DIR/longcat_runner.py" "$DEST/longcat_runner.py"
 rm -rf "$DEST/audiodit"
 cp -R "$SRC/audiodit" "$DEST/audiodit"
@@ -99,21 +99,21 @@ cat > "$DEST/engine.json" <<EOF
     "env": { "PYTHONIOENCODING": "utf-8" }
   },
   "parameters": [
-    { "name": "num_steps", "label": "采样步数 (NFE)", "type": "int",
+    { "name": "num_steps", "label": {"en": "Sampling steps (NFE)", "zh": "采样步数"}, "type": "int",
       "min": 1, "max": 32, "step": 1, "default": 16,
-      "hint": "扩散 ODE 步数；16 已足够，越多越慢" },
-    { "name": "cfg", "label": "引导强度", "type": "float",
+      "hint": {"en": "Diffusion ODE steps; 16 is enough, more is slower.", "zh": "扩散 ODE 步数；16 已足够，越多越慢"} },
+    { "name": "cfg", "label": {"en": "Guidance strength", "zh": "引导强度"}, "type": "float",
       "min": 0.0, "max": 10.0, "step": 0.1, "default": 4.0,
-      "hint": "越高越贴近参考音色，过高可能失真" },
-    { "name": "guidance_method", "label": "引导方式", "type": "choice",
+      "hint": {"en": "Higher follows the reference more closely; too high may distort.", "zh": "越高越贴近参考音色，过高可能失真"} },
+    { "name": "guidance_method", "label": {"en": "Guidance method", "zh": "引导方式"}, "type": "choice",
       "options": [
-        { "label": "APG（自适应投影，推荐）", "value": "apg" },
-        { "label": "CFG（传统无分类器引导）", "value": "cfg" }
+        { "label": {"en": "APG (adaptive projection, recommended)", "zh": "自适应投影（推荐）"}, "value": "apg" },
+        { "label": {"en": "CFG (classic classifier-free guidance)", "zh": "传统无分类器引导"}, "value": "cfg" }
       ],
-      "default": "apg", "hint": "APG 通常更自然、伪影更少" },
-    { "name": "seed", "label": "随机种子", "type": "int",
+      "default": "apg", "hint": {"en": "APG is usually more natural with fewer artifacts.", "zh": "APG 通常更自然、伪影更少"} },
+    { "name": "seed", "label": {"en": "Random seed", "zh": "随机种子"}, "type": "int",
       "min": 0, "max": 2147483647, "default": 1024,
-      "hint": "相同种子 + 文本得到可复现的声音" }
+      "hint": {"en": "Same seed + text gives reproducible speech.", "zh": "相同种子 + 文本得到可复现的声音"} }
   ],
   "defaults": { "speed": 1.0, "num_steps": 16 }
 }
@@ -121,4 +121,4 @@ EOF
 
 echo
 echo "LongCat-AudioDiT ($MODEL) installed at $DEST"
-echo "Restart the server (or press reload in the 模型 page) to pick it up."
+echo "Restart the server (or press reload on the Models page) to pick it up."
