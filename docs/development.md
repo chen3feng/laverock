@@ -10,8 +10,9 @@ use the app, the [README](../README.md) is enough.
 - Rust stable (edition 2021) and Cargo.
 - Linux only: the Tauri webview dependencies — `libwebkit2gtk-4.1-dev`,
   `libappindicator3-dev`, `librsvg2-dev`, `patchelf`, `libgtk-3-dev`.
-- A C++ toolchain and CMake are only needed for engines you build at install
-  time (MOSS-TTS), not for the app itself.
+- A C++ toolchain and CMake are not needed for the app. Only a source build
+  of the MOSS-TTS runtime on a platform without a prebuilt package
+  (`MOSS_RUNTIME_BUILD=1`) needs them.
 
 ## Running from source
 

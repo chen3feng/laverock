@@ -1,0 +1,274 @@
+name: MOSS-TTS runner
+
+# Build llama-moss-tts from OpenMOSS/llama.cpp once per platform and publish
+# the binaries on a rolling "mosstts-runner" GitHub release. scripts/
+# download-mosstts.sh fetches these instead of compiling on the user's
+# machine; the local cmake build remains as a fallback for unreleased
+# platforms.
+#
+# No code in this repo links against llama.cpp — only the CLI binary is
+# redistributed (MIT, LICENSE travels inside every archive).
+
+on:
+  workflow_dispatch:
+    inputs:
+      upstream_ref:
+        description: "OpenMOSS/llama.cpp ref (branch/tag/full SHA) to build"
+        required: true
+        # Tested SHA (moss-tts-firstclass). Bump together with the default
+        # MOSS_LLAMA_REF in scripts/download-mosstts.sh when moving forward.
+        default: "b785003ba497794ecfa337c3e47f01af79489888"
+      reason:
+        description: "Why this rebuild (recorded in the release notes)"
+        required: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: mosstts-runner
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: build (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macos-arm64
+            os: macos-latest
+            exe: ""
+            archive: tar.gz
+            # Embed the Metal kernel library so the archive stays one file.
+            args: >-
+              -DGGML_METAL=ON
+              -DGGML_METAL_EMBED_LIBRARY=ON
+              -DGGML_NATIVE=OFF
+              -DLLAMA_CURL=OFF
+              -DLLAMA_OPENSSL=OFF
+              -DLLAMA_BUILD_SERVER=OFF
+              -DLLAMA_BUILD_TESTS=OFF
+              -DLLAMA_BUILD_EXAMPLES=OFF
+              -DBUILD_SHARED_LIBS=OFF
+              -DCMAKE_OSX_DEPLOYMENT_TARGET=13.3
+          - name: macos-x64
+            os: macos-15-intel
+            exe: ""
+            archive: tar.gz
+            # Same as the voxcpm2 runner: Metal is off on Intel CI runners
+            # (intermittent failures without a GPU there).
+            args: >-
+              -DGGML_METAL=OFF
+              -DGGML_NATIVE=OFF
+              -DLLAMA_CURL=OFF
+              -DLLAMA_OPENSSL=OFF
+              -DLLAMA_BUILD_SERVER=OFF
+              -DLLAMA_BUILD_TESTS=OFF
+              -DLLAMA_BUILD_EXAMPLES=OFF
+              -DBUILD_SHARED_LIBS=OFF
+              -DCMAKE_OSX_DEPLOYMENT_TARGET=13.3
+          - name: linux-x64
+            os: ubuntu-22.04
+            exe: ""
+            archive: tar.gz
+            # Build on 22.04 for the older glibc. Static, NATIVE off, and the
+            # SIMD tiers explicitly pinned to the x86-64 (SSE2) floor:
+            # GGML_NATIVE=OFF alone does NOT do this — GGML_AVX2/GGML_FMA
+            # default ON regardless, so an unspecified build SIGILLs on
+            # pre-Haswell CPUs. OpenMP off so the binary needs no libgomp.
+            args: >-
+              -DGGML_NATIVE=OFF
+              -DGGML_AVX=OFF
+              -DGGML_AVX2=OFF
+              -DGGML_FMA=OFF
+              -DGGML_F16C=OFF
+              -DLLAMA_CURL=OFF
+              -DLLAMA_OPENSSL=OFF
+              -DLLAMA_BUILD_SERVER=OFF
+              -DLLAMA_BUILD_TESTS=OFF
+              -DLLAMA_BUILD_EXAMPLES=OFF
+              -DGGML_OPENMP=OFF
+              -DBUILD_SHARED_LIBS=OFF
+          - name: windows-x64
+            os: windows-latest
+            exe: ".exe"
+            archive: zip
+            # Static baseline x86-64; GGML_STATIC links the MSVC runtime in
+            # so no VC redist is needed. As on Linux, pin the SIMD floor to
+            # SSE2 explicitly so the runner starts on pre-Haswell CPUs.
+            args: >-
+              -DGGML_NATIVE=OFF
+              -DGGML_AVX=OFF
+              -DGGML_AVX2=OFF
+              -DGGML_FMA=OFF
+              -DGGML_F16C=OFF
+              -DLLAMA_CURL=OFF
+              -DLLAMA_OPENSSL=OFF
+              -DLLAMA_BUILD_SERVER=OFF
+              -DLLAMA_BUILD_TESTS=OFF
+              -DLLAMA_BUILD_EXAMPLES=OFF
+              -DGGML_STATIC=ON
+              -DGGML_OPENMP=OFF
+              -DBUILD_SHARED_LIBS=OFF
+
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Install build tools (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake git
+
+      - name: Checkout OpenMOSS/llama.cpp
+        shell: bash
+        run: |
+          set -euo pipefail
+          ref="${{ inputs.upstream_ref }}"
+          git clone --depth 1 https://github.com/OpenMOSS/llama.cpp.git upstream
+          if [ "$ref" != "master" ]; then
+            git -C upstream fetch --depth 1 origin "$ref"
+            git -C upstream checkout FETCH_HEAD
+          fi
+          git -C upstream rev-parse HEAD > upstream-commit.txt
+          echo "building $(cat upstream-commit.txt) ($ref)"
+
+      - name: Configure
+        shell: bash
+        run: cmake -S upstream -B build ${{ matrix.args }}
+
+      - name: Build
+        shell: bash
+        run: |
+          set -euo pipefail
+          nproc=4
+          command -v nproc >/dev/null && nproc=$(nproc)
+          [ -n "${NUMBER_OF_PROCESSORS:-}" ] && nproc="$NUMBER_OF_PROCESSORS"
+          cmake --build build --config Release --target llama-moss-tts -j "$nproc"
+
+      - name: Pack
+        shell: bash
+        run: |
+          set -euo pipefail
+          bin="$(find build -name 'llama-moss-tts${{ matrix.exe }}' -type f | head -1)"
+          [ -n "$bin" ] || { echo "llama-moss-tts not found under build/"; exit 1; }
+          mkdir -p stage
+          cp "$bin" "stage/llama-moss-tts${{ matrix.exe }}"
+          cp upstream/LICENSE stage/LICENSE
+          cp upstream-commit.txt stage/COMMIT
+          # Static build: one self-contained binary, no companion libraries.
+          echo "stage contents:"; ls -la stage
+
+      - name: Linkage audit
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The artifact must not depend on anything beyond what ships with
+          # the OS (a previous build silently linked Homebrew OpenSSL and
+          # still passed the smoke test on the runner).
+          case "${{ matrix.name }}" in
+            macos*)
+              otool -L stage/llama-moss-tts
+              if otool -L stage/llama-moss-tts | grep -Eq '/opt/homebrew|/usr/local|@rpath'; then
+                echo "::error::non-system shared-library dependency"; exit 1
+              fi ;;
+            linux-x64)
+              ldd stage/llama-moss-tts
+              if ldd stage/llama-moss-tts | grep -q 'not found'; then
+                echo "::error::unresolved shared-library dependency"; exit 1
+              fi
+              ldd stage/llama-moss-tts | awk '{print $1}' \
+                | grep -Ev '^((/lib64/|/lib/)?ld-linux[^ ]*|linux-vdso[^ ]*|lib(c|m|dl|rt|pthread)\.so[^ ]*|libstdc\+\+\.so[^ ]*|libgcc_s\.so[^ ]*)$' \
+                | grep . && { echo "::error::unexpected shared-library dependency"; exit 1; } || true ;;
+            windows-x64)
+              # vcomp140.dll would mean OpenMP crept back in; the UCRT set is
+              # expected with GGML_STATIC linking the MSVC runtime.
+              (dumpbin //dependents stage/llama-moss-tts.exe 2>/dev/null || true) | tee deps.txt
+              ! grep -qi 'vcomp.*\.dll' deps.txt ;;
+          esac
+
+      - name: Smoke test
+        shell: bash
+        run: |
+          set -euo pipefail
+          # --help exits non-zero by design; assert on the usage banner.
+          if [ "${{ matrix.archive }}" = "zip" ]; then
+            ./stage/llama-moss-tts.exe --help > help.txt 2>&1 || true
+          else
+            (cd stage && ./llama-moss-tts --help) > help.txt 2>&1 || true
+          fi
+          cat help.txt
+          grep -q -- '--audio-decoder-model' help.txt
+
+      - name: Archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ matrix.archive }}" = "tar.gz" ]; then
+            tar -C stage -czf "llama-moss-tts-${{ matrix.name }}.tar.gz" .
+          else
+            powershell -NoProfile -Command \
+              "Compress-Archive -Path (Resolve-Path stage/*) -DestinationPath llama-moss-tts-${{ matrix.name }}.zip -Force"
+          fi
+          ls -la "llama-moss-tts-${{ matrix.name }}.${{ matrix.archive }}"
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: llama-moss-tts-${{ matrix.name }}
+          path: llama-moss-tts-${{ matrix.name }}.${{ matrix.archive }}
+          if-no-files-found: error
+
+  publish:
+    name: publish rolling release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          path: assets
+          merge-multiple: true
+
+      - name: Write checksum manifest
+        run: |
+          set -euo pipefail
+          # One fixed-width line per file so the shell script can parse the
+          # manifest with sed (no jq/python on a bare user machine).
+          commit="$(tar -xzOf assets/llama-moss-tts-linux-x64.tar.gz ./COMMIT | tr -d '[:space:]')"
+          entries=""
+          for f in $(ls assets/llama-moss-tts-* | sort); do
+            name="$(basename "$f")"
+            sha="$(sha256sum "$f" | cut -d' ' -f1)"
+            size="$(stat -c%s "$f")"
+            entries+="    \"$name\": {\"sha256\": \"$sha\", \"size\": $size},"$'\n'
+          done
+          entries="${entries%$'\n'}"; entries="${entries%,}"
+          {
+            echo '{'
+            echo "  \"upstream\": \"$commit\","
+            echo '  "files": {'
+            printf '%s\n' "$entries"
+            echo '  }'
+            echo '}'
+          } > assets/mosstts-runner.json
+          python3 -m json.tool assets/mosstts-runner.json
+
+      - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
+        with:
+          tag_name: mosstts-runner
+          name: MOSS-TTS runner (prebuilt llama-moss-tts)
+          prerelease: true
+          make_latest: 'false'
+          files: assets/*
+          body: |
+            Prebuilt [`llama-moss-tts`](https://github.com/OpenMOSS/llama.cpp)
+            binaries used by `scripts/download-mosstts.sh`. Not an end-user
+            download — install MOSS-TTS from the in-app model catalog instead.
+
+            - Source: `OpenMOSS/llama.cpp` @ `${{ inputs.upstream_ref }}`
+            - Upstream commit recorded in each archive's `COMMIT` and in
+              `mosstts-runner.json`
+            - Reason: ${{ inputs.reason }}

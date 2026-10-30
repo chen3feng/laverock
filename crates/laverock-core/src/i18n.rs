@@ -277,6 +277,10 @@ messages! {
         { en: "Verifying the prebuilt voxcpm2-cli", zh: "校验 voxcpm2-cli 预编译版本" },
     StageVoxReady = "stage_vox_ready"
         { en: "Prebuilt voxcpm2-cli is ready", zh: "voxcpm2-cli 预编译版本就绪" },
+    StageVerifyMoss = "stage_verify_moss"
+        { en: "Verifying the prebuilt llama-moss-tts", zh: "校验 llama-moss-tts 预编译版本" },
+    StageMossReady = "stage_moss_ready"
+        { en: "Prebuilt llama-moss-tts is ready", zh: "llama-moss-tts 预编译版本就绪" },
     StageDownloadSize = "stage_download_size"
         { en: "Downloading {name} · {size}", zh: "下载 {name} · {size}" },
 }
