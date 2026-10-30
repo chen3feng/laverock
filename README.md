@@ -72,6 +72,7 @@ Requirements, per-engine notes and manual install scripts are in
 | Document | Contents |
 | --- | --- |
 | [Models](docs/models.md) | catalog, capabilities, speed, requirements, manual installation, credits |
+| [Voice quality](docs/quality.md) | how natural each engine sounds, how closely it clones, how well it holds up |
 | [HTTP API](docs/api.md) | REST endpoints, examples, OpenAI-compatible API |
 | [Phone remote](docs/remote.md) | pairing, LAN security, HTTPS, installing as an app |
 | [Configuration](docs/configuration.md) | environment variables, data directories, proxy and mirrors, interface language |
