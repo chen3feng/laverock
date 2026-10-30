@@ -267,7 +267,9 @@ fn scan(root: &Path) -> Result<Vec<Manifest>> {
     Ok(manifests)
 }
 
-#[cfg(test)]
+// Unix-only: the test needs a symlink, and creating one is not the subject
+// here (Windows would need a privilege or a developer mode).
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
 
@@ -279,7 +281,6 @@ mod tests {
 
     /// `models/` may hold symlinks to a shared weight store (the dev and
     /// desktop installs do); they must register like real directories.
-    #[cfg(unix)]
     #[test]
     fn scan_follows_symlinked_engine_dirs() {
         let base = std::env::temp_dir().join(format!("laverock-scan-{}", std::process::id()));
