@@ -9,6 +9,7 @@ mod audiocpp;
 mod chatterbox;
 pub mod i18n;
 mod kokoro;
+mod legacy_i18n;
 mod longcat;
 mod manager;
 mod manifest;
