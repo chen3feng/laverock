@@ -123,9 +123,10 @@ bfloat16，Apple MPS 用 float32（codec 上 float16 会产生 NaN），其余�
 23 种语言，不需要文字稿。默认中文，可在引擎参数中选择目标语言。
 
 **MOSS-TTS-Delay** —— 多语言零样本 TTS / 克隆模型，由原生 llama.cpp 二进制作
-推理，运行时无需 Python。安装脚本从源码编译该运行时并把音频 tokenizer 转成 GGUF；
-权重来自 ModelScope，无需登录 Hugging Face。克隆可选。引擎会把长文本拆成按句
-切分的片段合成，因为解码器在超长输入下会退化。
+推理，运行时无需 Python。安装脚本直接下载预编译运行时（macOS arm64/x64、Linux
+x64、Windows x64 各有一份，其他平台或设置 `MOSS_RUNTIME_BUILD=1` 时才回退到本地编译），并一次性把音频 tokenizer
+转成 GGUF；权重来自 ModelScope，无需登录 Hugging Face。克隆可选。引擎会把长文本
+拆成按句切分的片段合成，因为解码器在超长输入下会退化。
 
 **SenseVoice** —— 可选的本地语音识别，覆盖中英日韩粤。安装后，录音或上传的参考
 音频会自动转写并填入文字稿栏；「转写」按钮可以手动重跑。

@@ -227,7 +227,13 @@ fn scan(root: &Path) -> Result<Vec<Manifest>> {
     if root.is_dir() {
         for entry in fs::read_dir(root)? {
             let entry = entry?;
-            if !entry.file_type()?.is_dir() {
+            // `DirEntry::file_type` describes the link itself, so a model
+            // directory symlinked into place would be skipped. `fs::metadata`
+            // follows it, which is what "is this a model directory" means.
+            if !fs::metadata(entry.path())
+                .map(|m| m.is_dir())
+                .unwrap_or(false)
+            {
                 continue;
             }
             let manifest_path = entry.path().join("engine.json");
@@ -259,4 +265,39 @@ fn scan(root: &Path) -> Result<Vec<Manifest>> {
 
     manifests.sort_by(|a, b| a.id.cmp(&b.id));
     Ok(manifests)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const MANIFEST: &str = r#"{
+        "id": "zipvoice",
+        "kind": "zipvoice",
+        "name": "ZipVoice"
+    }"#;
+
+    /// `models/` may hold symlinks to a shared weight store (the dev and
+    /// desktop installs do); they must register like real directories.
+    #[cfg(unix)]
+    #[test]
+    fn scan_follows_symlinked_engine_dirs() {
+        let base = std::env::temp_dir().join(format!("laverock-scan-{}", std::process::id()));
+        let store = base.join("store").join("zipvoice");
+        let models = base.join("models");
+        fs::create_dir_all(&store).expect("store");
+        fs::create_dir_all(&models).expect("models");
+        fs::write(store.join("engine.json"), MANIFEST).expect("manifest");
+        std::os::unix::fs::symlink(&store, models.join("zipvoice")).expect("symlink");
+        // A dangling link and a plain file are not engines.
+        std::os::unix::fs::symlink(base.join("missing"), models.join("dangling"))
+            .expect("dangling");
+        fs::write(models.join("notes.txt"), "not an engine").expect("file");
+
+        let found = scan(&models).expect("scan");
+        assert_eq!(found.len(), 1, "found: {:?}", found.iter().map(|m| &m.id));
+        assert_eq!(found[0].id, "zipvoice");
+
+        fs::remove_dir_all(&base).ok();
+    }
 }

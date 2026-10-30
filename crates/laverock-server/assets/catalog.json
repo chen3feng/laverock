@@ -456,8 +456,8 @@
     "dir": "mosstts",
     "name": "MOSS-TTS (native llama.cpp)",
     "description": {
-      "en": "MOSS-TTS-Delay (OpenMOSS) is a multilingual zero-shot TTS and voice-clone model driven by a native llama.cpp binary — no Python at inference time. The installer builds that runtime from source and converts the audio tokenizer to GGUF.",
-      "zh": "MOSS-TTS-Delay（OpenMOSS）是多语言零样本 TTS / 声音克隆模型，由原生 llama.cpp 二进制作推理，运行时无需 Python。安装脚本会从源码编译该运行时，并把音频 tokenizer 转成 GGUF。"
+      "en": "MOSS-TTS-Delay (OpenMOSS) is a multilingual zero-shot TTS and voice-clone model driven by a native llama.cpp binary — no Python at inference time. The installer downloads that runtime prebuilt (macOS arm64/x64, Linux x64, Windows x64) and converts the audio tokenizer to GGUF once.",
+      "zh": "MOSS-TTS-Delay（OpenMOSS）是多语言零样本 TTS / 声音克隆模型，由原生 llama.cpp 二进制作推理，运行时无需 Python。安装脚本下载预编译运行时（macOS arm64/x64、Linux x64、Windows x64），并一次性把音频 tokenizer 转成 GGUF。"
     },
     "size": "~10 GB（安装峰值约 16 GB）",
     "languages": [
@@ -472,8 +472,8 @@
     "script": "download-mosstts.sh",
     "env": {},
     "note": {
-      "en": "Builds a C++ runtime, so the machine needs cmake and a C++ compiler (macOS: Xcode/CommandLineTools; Linux: gcc). Voice cloning is optional. Weights come from ModelScope, so no Hugging Face login is needed.",
-      "zh": "需要现场编译 C++ 运行时，因此机器要有 cmake 和 C++ 编译器（macOS：Xcode/CommandLineTools；Linux：gcc）。克隆参考音频可选。权重来自 ModelScope，无需登录 Hugging Face。"
+      "en": "The runtime is downloaded prebuilt, so no C++ toolchain is needed; only the one-time tokenizer conversion uses Python 3. Voice cloning is optional. Weights come from ModelScope, so no Hugging Face login is needed.",
+      "zh": "运行时直接下载预编译版本，不需要 C++ 工具链；只有一次性转换分词器需要 Python 3。克隆参考音频可选。权重来自 ModelScope，无需登录 Hugging Face。"
     }
   }
 ]

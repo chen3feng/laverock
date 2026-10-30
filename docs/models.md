@@ -145,10 +145,13 @@ Chinese; pick the target language in the engine parameters.
 
 **MOSS-TTS-Delay** — a multilingual zero-shot TTS/clone model driven by a
 native llama.cpp binary, with no Python at inference time. The installer
-builds that runtime from source and converts the audio tokenizer to GGUF;
-weights come from ModelScope, so no Hugging Face login is needed. Cloning is
-optional. The engine synthesizes long text in sentence-sized pieces, because
-the decoder degrades on very long inputs.
+downloads that runtime prebuilt (one build per platform is published for
+macOS arm64/x64, Linux x64 and Windows x64) and converts the audio tokenizer
+to GGUF once; it falls back to compiling the runtime locally only on other
+platforms, or with `MOSS_RUNTIME_BUILD=1`. Weights come from ModelScope, so
+no Hugging Face login is needed. Cloning is optional. The engine synthesizes
+long text in sentence-sized pieces, because the decoder degrades on very long
+inputs.
 
 **SenseVoice** — optional on-device speech recognition covering zh/en/ja/
 ko/yue. Once installed, a recorded or uploaded reference clip is transcribed
