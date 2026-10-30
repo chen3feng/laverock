@@ -73,6 +73,10 @@ cp "$SCRIPT_DIR/chatterbox_runner.py" "$DEST/chatterbox_runner.py"
 # 4. Manifest (absolute paths are allowed and used as-is).
 PY="$(lv_native_path "$VPY")"
 RUNNER="$DEST/chatterbox_runner.py"
+# Rust resolves manifest paths itself, so MSYS /e/.. mounts must be emitted
+# as E:/..; only the venv interpreter used to be converted.
+RUNNER_NATIVE="$(lv_native_path "$RUNNER")"
+WEIGHTS_NATIVE="$(lv_native_path "$WEIGHTS")"
 cat > "$DEST/engine.json" <<EOF
 {
   "id": "$ENGINE_ID",
@@ -82,8 +86,8 @@ cat > "$DEST/engine.json" <<EOF
   "capabilities": ["tts", "clone", "multilingual"],
   "chatterbox": {
     "python": "$PY",
-    "script": "$RUNNER",
-    "model": "$WEIGHTS",
+    "script": "$RUNNER_NATIVE",
+    "model": "$WEIGHTS_NATIVE",
     "t3": "$T3",
     "device": "auto",
     "env": { "PYTHONIOENCODING": "utf-8" }
