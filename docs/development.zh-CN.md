@@ -1,0 +1,129 @@
+# 开发
+
+[English](development.md) | 中文 · [← 返回首页](../README.zh-CN.md)
+
+这一页面向构建与扩展 Laverock 的开发者。如果你只是想使用应用，
+看 [README](../README.zh-CN.md) 就够了。
+
+## 环境要求
+
+- Rust stable（edition 2021）与 Cargo。
+- 仅 Linux：Tauri 的 WebView 依赖 —— `libwebkit2gtk-4.1-dev`、
+  `libappindicator3-dev`、`librsvg2-dev`、`patchelf`、`libgtk-3-dev`。
+- C++ 工具链与 CMake 只在安装时需要现场编译的引擎（MOSS-TTS）才需要，
+  应用本身不需要。
+
+## 从源码运行
+
+```sh
+cargo run -p laverock-server     # 然后打开 http://127.0.0.1:8787
+```
+
+服务端从 `crates/laverock-server/assets/` 提供内嵌的 Web 界面。默认环境下它使用
+`./data` 与 `./models`，因此一个源码检出会拥有自己的声音、历史和模型。
+
+桌面外壳：
+
+```sh
+./scripts/run-desktop.sh
+```
+
+脚本会构建 `laverock-desktop` 与 `laverock-server`。在 macOS 上它把二进制包进
+一个最小 `.app` 并做 ad-hoc 签名，因为麦克风访问（`getUserMedia`）需要带
+`NSMicrophoneUsageDescription` 的 bundle 和独立的 TCC 身份——从终端直接启动裸
+二进制会被归到终端名下，通常无声地被拒绝。
+
+外壳会托管服务端：如果 `127.0.0.1:8787` 没有响应，它会自行启动
+`laverock-server`（并把数据、模型、工具目录传给它），然后打开同一套 Web 界面的
+窗口。关窗只是隐藏；托盘菜单提供显示/隐藏、开机自启、打开数据目录和退出。
+`LAVEROCK_SERVER_BIN` 可指定具体的服务端二进制，`LAVEROCK_URL` 可连接其它机器
+上的服务端。
+
+## 架构
+
+```text
+laverock-core     引擎 trait + 清单注册表 + ONNX/GGUF 运行时
+laverock-server   轻量 HTTP 控制面 + 内嵌单页应用 + 模型安装器
+laverock-desktop  Tauri 外壳：托盘、开机自启、服务托管
+```
+
+`laverock-core` 把引擎目录转换成由清单 `kind` 选出的 `SpeechEngine` 实现。ONNX
+引擎（ZipVoice、Kokoro、SenseVoice）在进程内使用官方
+[sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) Rust crate 运行；GGUF 引擎
+通过 audio.cpp 或 llama.cpp 二进制执行；Python 引擎由 `scripts/` 中的运行器以
+子进程方式驱动，各自运行在独立 venv 中。
+
+服务端负责声音、历史、设置、配对和模型目录。`assets/index.html` 里的单页应用是
+纯 HTML/CSS/JS，没有构建步骤，改完刷新即可。
+
+## 新增模型
+
+受支持类型的模型不需要改代码：创建 `<models>/<id>/engine.json`，把其中的路径指向
+该目录里的文件即可。受支持的 `kind` 有 `zipvoice`、`voxcpm2`、`qwen3tts`、
+`longcat`、`dots`、`cosyvoice`、`kokoro`、`ming3tts`、`chatterbox`、`mosstts`
+和 `stt`。
+
+```json
+{
+  "id": "kokoro-int8-multi-lang-v1_0",
+  "kind": "kokoro",
+  "name": "Kokoro 82M 多语言 (INT8)",
+  "languages": ["zh", "en", "ja"],
+  "capabilities": ["tts", "preset-voices"],
+  "kokoro": {
+    "model": "model.int8.onnx",
+    "voices": "voices.bin",
+    "tokens": "tokens.txt",
+    "data_dir": "espeak-ng-data",
+    "length_scale": 1.0,
+    "num_threads": 4
+  },
+  "defaults": { "speed": 1.0, "num_steps": 4 },
+  "parameters": [
+    {
+      "name": "voice",
+      "label": { "en": "Voice", "zh": "音色" },
+      "type": "choice",
+      "options": [{ "label": "Heart (af_heart)", "value": "3" }],
+      "default": "3"
+    }
+  ]
+}
+```
+
+- `capabilities` 决定界面行为（`clone`、`preset-voices`、`voice-design`、
+  `instruct`、`multilingual`、`stt`）。
+- `parameters` 就是整套控件：`name`、`label`、`type`（`float` / `int` / `bool` /
+  `choice`）、`min`、`max`、`step`、`options`（label/value 对）、`default` 和
+  `hint`。合成页据此生成控件，服务端按同一份列表校验提交值。未声明时使用各类型
+  的内置参数。
+- `label`、`hint`、`name` 与目录介绍使用 `{"en": …, "zh": …}` 对象，双语文案才能
+  随界面切换；手写的第三方清单也可以直接写字符串。
+- `Manifest::problem()` 会在用户遇到合成错误之前标记安装的结构性问题（例如来自
+  旧运行器的安装）。
+
+要让模型出现在界面的可安装目录中，在
+`crates/laverock-server/assets/catalog.json` 里加一条记录，包含 `id`、`dir`、
+本地化的 `name`/`description`/`note`、`size`、`languages`、`capabilities` 和
+负责安装的 `script`。
+
+## 安装脚本
+
+模型安装脚本位于 `scripts/download-*.sh`，界面与命令行共用。它们可重复执行，
+读取 `LAVEROCK_MODELS_DIR`、`LAVEROCK_TOOLS_DIR`、`HF_ENDPOINT`、`PIP_INDEX_URL`
+和代理变量，并输出服务端用于进度条解析的进度行。公共辅助函数（下载、venv、
+Python 探测）在 `scripts/laverock-lib.sh` 中。各引擎的变体见
+[模型](models.zh-CN.md#安装)。
+
+## 测试
+
+```sh
+cargo fmt --all -- --check
+cargo clippy --all-targets --all-features -- -D warnings
+cargo test --workspace
+./scripts/check-shell.sh          # bash 3.2 兼容性 + shellcheck
+```
+
+CI 会在 macOS、Linux、Windows 上运行以上检查，然后在 Ubuntu 上用较小的 ZipVoice
+模型启动服务端并执行 `scripts/smoke-test.sh`。推送 `v*` 标签（或手动触发 Release
+workflow）会构建 macOS 与 Windows 安装包并附加到 release。
