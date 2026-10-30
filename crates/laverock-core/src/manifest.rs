@@ -152,7 +152,7 @@ impl Manifest {
         let missing = |section: &str| Some(Localized::Text(format!("missing [{section}] section")));
         let empty_audio_cpp =
             |cfg: &AudioCppManifest| cfg.binary.trim().is_empty() && cfg.model.trim().is_empty();
-        match self.kind {
+        let structural = match self.kind {
             EngineKind::Dots => match &self.dots {
                 None => missing("dots"),
                 Some(c) if empty_audio_cpp(c) => legacy(),
@@ -192,15 +192,35 @@ impl Manifest {
                 .flatten(),
             EngineKind::MossTts => self.mosstts.is_none().then(|| missing("mosstts")).flatten(),
             EngineKind::Stt => self.stt.is_none().then(|| missing("stt")).flatten(),
+        };
+        if structural.is_some() {
+            return structural;
         }
+        // A manifest written before the bilingual pass whose labels we cannot
+        // translate is not broken, but its English UI would show Chinese.
+        if crate::legacy_i18n::any_untranslated(self.kind, &self.parameters) {
+            return Some(
+                (
+                    "Some parameter labels have no English text; reinstall from the catalog to get bilingual labels.",
+                    "部分参数标签没有英文，从模型目录重新安装即可获得双语标签",
+                )
+                    .into(),
+            );
+        }
+        None
     }
 
     /// Declared parameters, or the built-in set for this engine kind.
+    ///
+    /// Declared parameters from an install predating the bilingual pass get
+    /// their English text filled in on the way out; see `legacy_i18n`.
     pub fn parameters_or_defaults(&self) -> Vec<ParamSpec> {
         if self.parameters.is_empty() {
             Self::default_parameters(self.kind)
         } else {
-            self.parameters.clone()
+            let mut params = self.parameters.clone();
+            crate::legacy_i18n::localize(self.kind, &mut params);
+            params
         }
     }
 
