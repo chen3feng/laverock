@@ -733,12 +733,12 @@ async fn create_capture(
     let wav = wav
         .filter(|b| !b.is_empty())
         .ok_or_else(|| ApiError::bad_request("missing required field: audio"))?;
-    Ok(Json(
-        state
-            .profiles
-            .captures()
-            .create(&name, &prompt_text, &wav, true)?,
-    ))
+    Ok(Json(state.profiles.captures().create(
+        &name,
+        &prompt_text,
+        &wav,
+        true,
+    )?))
 }
 
 /// `POST /api/captures/{id}` — multipart: `name` and/or `prompt_text`.

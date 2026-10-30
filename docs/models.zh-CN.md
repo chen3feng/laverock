@@ -24,6 +24,7 @@ Laverock 的安装包不含模型权重：包里是应用本身，模型按需�
 ./scripts/download-cosyvoice.sh    # CosyVoice3 0.5B，2.3 GB GGUF（共用运行时）
 ./scripts/download-ming3tts.sh     # Ming-3.0-tts 0.5B，venv + 约 3 GB 权重
 ./scripts/download-chatterbox.sh   # Chatterbox 多语种，venv + 约 5 GB
+./scripts/download-indextts2.sh    # IndexTTS-2，3.6 GB Q8_0 GGUF（共用运行时）
 ./scripts/download-mosstts.sh      # MOSS-TTS-Delay，预编译 llama.cpp 运行时 + 约 10 GB 权重
 
 # 变体
@@ -65,6 +66,7 @@ DOTS_MODEL=dots.tts-mf ./scripts/download-dots.sh         # 4 步 MeanFlow 导�
 | `ming3tts-multilingual` | Ming-3.0-tts 0.5B | 克隆、多语种 | 同上 | 共用 |
 | `ming3tts-ip` | Ming-3.0-tts 0.5B | 预置音色 | 中英 | 共用 |
 | `chatterbox` | Chatterbox Multilingual | 克隆 | 23 种语言 | 约 5 GB（含 venv） |
+| `indextts2` | IndexTTS-2 Q8_0 | 克隆 | 中、英 | 约 3.6 GB |
 | `mosstts` | MOSS-TTS-Delay | 克隆、多语种 | 20 种语言 | 约 10 GB（安装峰值约 16 GB） |
 
 四个 Ming 条目共用同一份权重、同一个 venv 和同一份运行时，只有第一个需要完整
@@ -90,8 +92,9 @@ DOTS_MODEL=dots.tts-mf ./scripts/download-dots.sh         # 4 步 MeanFlow 导�
 不支持克隆：在引擎参数里选择内置音色。纯 ONNX，无需 Python 或编译工具链。
 
 **VoxCPM2** —— 30 种语言，支持零样本克隆与声音设计。通过 audio.cpp 原生运行时
-推理（Windows 带 NVIDIA 显卡时使用 CUDA），与 dots.tts、CosyVoice3 共用。参考
-音频超过 14 秒时会从开头自动截断到静音点，建议使用 3–10 秒的干净人声。
+推理（Windows 带 NVIDIA 显卡时使用 CUDA），与 dots.tts、CosyVoice3 共用，并常驻
+在服务进程里。参考音频超过 14 秒时会从开头自动截断到静音点，建议使用 3–10 秒的
+干净人声。M4 Pro 上 RTF 0.62，加载后内存约 6.5 GB。
 
 **LongCat-AudioDiT** —— 直接工作在波形潜空间的 flow-matching 扩散模型，每次请求
 可调 NFE 步数与引导强度（APG / CFG）。CUDA 上 fp16、其它平台 fp32；1B 版本约需
@@ -101,13 +104,15 @@ DOTS_MODEL=dots.tts-mf ./scripts/download-dots.sh         # 4 步 MeanFlow 导�
 
 **dots.tts** —— 2B 连续 AR 模型，flow-matching 头部驱动 48 kHz AudioVAE，经
 audio.cpp 运行（macOS 用 Metal，其它平台 CPU）。克隆默认的 x-vector 模式只需
-参考音频，文字稿不准确也不影响；文字稿准确时「声纹 + 文字」相似度更高。
-M4 Pro 上 Q8_0 检查点实测：RTF 1.4（见「速度」），峰值内存约 6 GB。
+参考音频，文字稿不准确也不影响；文字稿准确时「声纹 + 文字」相似度更高。模型常驻
+在服务进程里，多次请求之间不必重新加载权重。M4 Pro 上 Q8_0 检查点实测：
+RTF 1.39（见「速度」），加载后内存约 6.2 GB。
 
-**CosyVoice3** —— 0.5B 流式 LLM TTS，与 dots.tts 共用 audio.cpp 运行时。
-三种模板：零样本克隆（参考音频 + 准确文字稿，相似度最高）、跨语种克隆（仅凭声音，
-文字稿不可靠时使用）和指令控制（例如「用温和的语气，语速稍慢」）。Top-K 与流解码
-步数可逐次调整。
+**CosyVoice3** —— 0.5B 流式 LLM TTS，与 dots.tts 共用 audio.cpp 运行时，和四个
+audio.cpp 引擎一样跑在常驻服务里。三种模板：零样本克隆（参考音频 + 准确文字稿，
+相似度最高）、跨语种克隆（仅凭声音，文字稿不可靠时使用）和指令控制（例如「用温和
+的语气，语速稍慢」）。Top-K 与流解码步数可逐次调整。M4 Pro 上 RTF 0.30，加载后
+内存约 3.3 GB。
 
 **Qwen3-TTS** —— 官方 `qwen-tts` 包运行在独立 venv 中。自动选择设备：CUDA 用
 bfloat16，Apple MPS 用 float32（codec 上 float16 会产生 NaN），其余走 CPU。
@@ -121,6 +126,17 @@ bfloat16，Apple MPS 用 float32（codec 上 float16 会产生 NaN），其余�
 
 **Chatterbox** —— Resemble AI 的 0.5B 多语种克隆模型：克隆一段参考音频即可说
 23 种语言，不需要文字稿。默认中文，可在引擎参数中选择目标语言。
+
+**IndexTTS-2** —— bilibili 的中英文零样本克隆模型：GPT 式 token 模型以参考音频
+（截取前 15 秒）为条件，流匹配声码器输出 22.05 kHz 音频。长文本由模型内部在
+句末切成若干段，段与段之间插入约 0.2 秒静音后拼接（audio.cpp 的
+`interval_silence_ms`），因此不会出现请求过长导致的退化。不使用文字稿。它运行
+在与 dots.tts、CosyVoice3、VoxCPM2 共用的 audio.cpp 原生运行时上，不安装 Python
+环境。文本语言自动判断（含汉字按中文，否则按英文），也可逐次指定；Q8_0 包为
+3.6 GB，需要更高精度时可用 `INDEXTTS_PACKAGE` 改装 f16 或原始精度包。解码默认
+用束搜索，在引擎参数里改成贪心可以快约 25%，读出的文字不变。它和其他 audio.cpp
+引擎一样运行在常驻服务里，只有重启后的第一个请求才需要加载 3.6 GB 权重。
+M4 Pro 上 Q8_0 检查点实测 RTF 1.47，加载后内存约 4.1 GB（见「速度」）。
 
 **MOSS-TTS-Delay** —— 多语言零样本 TTS / 克隆模型，由原生 llama.cpp 二进制作
 推理，运行时无需 Python。安装脚本直接下载预编译运行时（macOS arm64/x64、Linux
@@ -140,9 +156,9 @@ GPU），48 GB 统一内存，macOS 27.0.1。
 | --- | --- | --- | --- |
 | LongCat-AudioDiT 1B | 0.17 | 8.6 s | 10.3 s |
 | ZipVoice | 0.17 | 0.9 s | 2.6 s |
-| CosyVoice3 | 0.30 | 4.1 s | 7.0 s |
+| CosyVoice3 | 0.30 | 0.6 s | 3.6 s |
 | MOSS-TTS | 0.33 | 2.4 s | 5.7 s |
-| VoxCPM2 | 0.60 | 1.9 s | 7.9 s |
+| VoxCPM2 | 0.62 | 0.0 s | 6.2 s |
 | Kokoro-82M | 0.64 | 0.7 s | 7.0 s |
 | Ming 3.0 声音设计 | 0.98 | 4.0 s | 13.8 s |
 | Ming 3.0 多语种 | 0.99 | 3.8 s | 13.6 s |
@@ -151,14 +167,20 @@ GPU），48 GB 统一内存，macOS 27.0.1。
 | Qwen3-TTS 0.6B 克隆 | 1.00 | 4.3 s | 14.3 s |
 | Qwen3-TTS 0.6B 预置音色 | 1.00 | 3.9 s | 13.9 s |
 | Qwen3-TTS 1.7B 声音设计 | 1.20 | 4.1 s | 16.1 s |
-| dots.tts SOAR | 1.40 | 1.9 s | 16.0 s |
+| dots.tts SOAR | 1.39 | 0.0 s | 13.7 s |
+| IndexTTS-2 Q8_0 | 1.47 | 1.1 s | 15.8 s |
 | Chatterbox | 3.88 | 9.8 s | 48.6 s |
 
 RTF 是生成耗时除以音频时长，小于 1 表示快于实时。固定开销是请求在产出第一个
-采样之前花掉的时间——启动引擎进程、每次请求都重新加载权重的引擎的加载时间，
-以及读取参考音频。因此单次请求耗时约为「固定开销 + RTF × 音频时长」，第三列
+采样之前花掉的时间——启动引擎进程、读取参考音频，以及不保留状态的引擎每次
+重新加载权重的时间。因此单次请求耗时约为「固定开销 + RTF × 音频时长」，第三列
 就是按 10 秒语音算出来的结果。固定开销大而 RTF 低的引擎（LongCat、CosyVoice3）
 适合读长文，只说一句话则很浪费。
+
+四个 audio.cpp 引擎（dots、CosyVoice3、VoxCPM2、IndexTTS-2）现在共用一个常驻
+的 `audiocpp_server` 进程，首次使用时启动、之后模型常驻，表中的固定开销是热态
+数据。应用刚启动后的第一个请求、以及闲置 15 分钟（服务会释放权重）之后的下一个
+请求，要额外付一次约 3–11 秒的加载时间。
 
 测试方法：通过本机回环调用服务端接口，用两段中文——一句约生成 2 秒语音，一段
 约生成 10–13 秒。每个引擎先发一次预热请求并丢弃，然后短句与长段交替请求至少
@@ -173,7 +195,7 @@ MOSS-TTS 与 Ming 声音设计多测了几个点并改用中位数斜率（最�
 | 功能 | 要求 |
 | --- | --- |
 | ONNX 引擎（ZipVoice、Kokoro、SenseVoice） | 除应用外无额外要求 |
-| audio.cpp 引擎（dots、CosyVoice、VoxCPM2） | 下载预编译运行时 |
+| audio.cpp 引擎（dots、CosyVoice、VoxCPM2、IndexTTS-2） | 下载预编译 CLI 与常驻服务 |
 | Python 引擎（Qwen3-TTS、LongCat、Ming、Chatterbox） | Python 3.10–3.12；脚本自动创建隔离 venv |
 | MOSS-TTS | 下载预编译运行时；一次性转换分词器需要 Python 3 |
 | Windows 上应用内安装 | Git for Windows 提供的 `bash` |
@@ -211,6 +233,10 @@ Ming-3.0-tts 由蚂蚁集团发布；许可条款见其模型卡片。
 
 Chatterbox 由 [Resemble AI](https://github.com/resemble-ai/chatterbox) 以 MIT
 发布。
+
+IndexTTS-2 由 [bilibili](https://github.com/index-tts/index-tts) 以 bilibili
+Model Use License 发布：可免费使用；月活超过 1 亿或年收入超过 10 亿元人民币需
+另行申请授权，且不得用于改进其他 AI 模型。GGUF 导出与原生运行时来自 audio.cpp。
 
 MOSS-TTS-Delay 由 [OpenMOSS](https://github.com/OpenMOSS) 以 Apache-2.0 发布；
 原生运行时由 OpenMOSS 的 llama.cpp 分支构建。

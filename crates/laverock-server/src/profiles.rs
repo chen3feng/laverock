@@ -14,8 +14,8 @@
 
 use crate::captures::{self, CaptureMeta, CaptureStore, CombinedReference};
 use crate::reference::{
-    self, clip_facts, is_valid_id, new_id, prepare, sha256_hex, write_atomic,
-    PreparedReference, ReferenceFacts, MAX_REFERENCE_BYTES,
+    self, clip_facts, is_valid_id, new_id, prepare, sha256_hex, write_atomic, PreparedReference,
+    ReferenceFacts, MAX_REFERENCE_BYTES,
 };
 use laverock_core::i18n::{self, Key};
 use laverock_core::{decode_wav, CoreError, Result};
@@ -613,7 +613,12 @@ impl ProfileStore {
 
         let mut zip = ZipWriter::new(std::io::Cursor::new(Vec::new()));
         let opts = SimpleFileOptions::default().compression_method(CompressionMethod::Stored);
-        start_file(&mut zip, "manifest.json", opts, &serde_json::to_vec_pretty(&manifest)?)?;
+        start_file(
+            &mut zip,
+            "manifest.json",
+            opts,
+            &serde_json::to_vec_pretty(&manifest)?,
+        )?;
         start_file(&mut zip, "reference.wav", opts, &combined.wav)?;
         write_takes(&mut zip, opts, "", &takes)?;
         let cursor = zip
@@ -758,7 +763,12 @@ impl ProfileStore {
                 opts,
                 &serde_json::to_vec_pretty(&manifest)?,
             )?;
-            start_file(&mut zip, &format!("{dir}/reference.wav"), opts, &combined.wav)?;
+            start_file(
+                &mut zip,
+                &format!("{dir}/reference.wav"),
+                opts,
+                &combined.wav,
+            )?;
             write_takes(&mut zip, opts, &format!("{dir}/"), &takes)?;
             index.push(entry);
         }
@@ -1228,9 +1238,7 @@ mod tests {
     fn silent_reference_is_rejected() {
         let (store, dir) = temp_store();
         let wav = encode_wav(&vec![0.0f32; 24_000], 24_000).expect("encode");
-        let err = store
-            .create("Test", "text", &wav)
-            .expect_err("silent");
+        let err = store.create("Test", "text", &wav).expect_err("silent");
         assert!(matches!(err, CoreError::UserError(_)), "{err}");
         fs::remove_dir_all(&dir).ok();
     }
@@ -1314,10 +1322,7 @@ mod tests {
 
         // What the engine gets is exactly the migrated take.
         let combined = store.reference(&meta.id, 15.0).expect("reference");
-        let (_, wav) = store
-            .captures()
-            .get(&migrated.captures[0])
-            .expect("take");
+        let (_, wav) = store.captures().get(&migrated.captures[0]).expect("take");
         assert_eq!(combined.wav, wav);
         assert_eq!(combined.text, "text");
         // The take library shows it as one voice's worth of audio.
@@ -1406,7 +1411,9 @@ mod tests {
         let zip = store.export_zip(&voice.id).expect("export");
 
         store.delete(&voice.id).expect("delete voice");
-        let report = store.import_archive(&zip, ImportStrategy::Skip).expect("import");
+        let report = store
+            .import_archive(&zip, ImportStrategy::Skip)
+            .expect("import");
         assert_eq!(report.imported, 1);
         let imported = store
             .list()
@@ -1423,8 +1430,14 @@ mod tests {
     fn dedupe_repoints_voices_at_the_surviving_take() {
         let (store, dir) = temp_store();
         let wav = take(2.0, 220.0);
-        let first = store.captures().create("a", "文字", &wav, false).expect("a");
-        let second = store.captures().create("b", "文字", &wav, false).expect("b");
+        let first = store
+            .captures()
+            .create("a", "文字", &wav, false)
+            .expect("a");
+        let second = store
+            .captures()
+            .create("b", "文字", &wav, false)
+            .expect("b");
         let voice = store
             .create_from_captures("Duo", std::slice::from_ref(&second.id))
             .expect("create");

@@ -72,7 +72,8 @@ files under `web/`, run the script, then rebuild the server; CI runs
 A model of an already supported kind needs no code: create
 `<models>/<id>/engine.json` and point its paths at the files in that
 directory. Supported kinds are `zipvoice`, `voxcpm2`, `qwen3tts`, `longcat`,
-`dots`, `cosyvoice`, `kokoro`, `ming3tts`, `chatterbox`, `mosstts` and `stt`.
+`dots`, `cosyvoice`, `kokoro`, `ming3tts`, `chatterbox`, `indextts2`, `mosstts`
+and `stt`.
 
 ```json
 {

@@ -64,8 +64,8 @@ CI 会执行 `build-web.py --check`，产物落后于源码的 PR 合不进去�
 
 受支持类型的模型不需要改代码：创建 `<models>/<id>/engine.json`，把其中的路径指向
 该目录里的文件即可。受支持的 `kind` 有 `zipvoice`、`voxcpm2`、`qwen3tts`、
-`longcat`、`dots`、`cosyvoice`、`kokoro`、`ming3tts`、`chatterbox`、`mosstts`
-和 `stt`。
+`longcat`、`dots`、`cosyvoice`、`kokoro`、`ming3tts`、`chatterbox`、
+`indextts2`、`mosstts` 和 `stt`。
 
 ```json
 {

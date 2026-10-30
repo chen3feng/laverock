@@ -12,7 +12,7 @@
 # The runtime is installed once under <tools>/audiocpp and shared with
 # the CosyVoice engine.
 #
-# Disk: GGUF 3.0 GB (Q8_0), plus a one-time ~35 MB runtime.
+# Disk: GGUF 3.0 GB (Q8_0), plus a one-time ~80 MB runtime.
 set -euo pipefail
 
 # shellcheck source=laverock-lib.sh

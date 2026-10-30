@@ -12,7 +12,7 @@ generation history and a phone remote that joins over your local network.
 - **Voice cloning and preset voices** — save 3–10 s of speech as a named
   voice, then have any cloning engine read new text in it. Engines without a
   reference clip are covered by preset-voice and voice-design modes.
-- **15 models behind one interface** — from a 135 MB ONNX model that runs in
+- **16 models behind one interface** — from a 135 MB ONNX model that runs in
   real time on CPU to 2B diffusion and LLM systems. Install, update and
   remove them from the app, with live download progress.
 - **Recording library and voices** — every recording becomes a take,
@@ -63,6 +63,7 @@ configure.
 | Qwen3-TTS 0.6B / 1.7B | clone, preset, voice design | 10 | 2–5 GB |
 | Ming-3.0-tts 0.5B | clone, preset, voice design, multilingual | 7 | ~3 GB |
 | Chatterbox Multilingual | clone | 23 | ~5 GB |
+| IndexTTS-2 | clone | zh, en | ~3.6 GB |
 | MOSS-TTS-Delay | clone | 20 | ~10 GB |
 | SenseVoice Small (optional) | speech recognition | 5 | ~234 MB |
 

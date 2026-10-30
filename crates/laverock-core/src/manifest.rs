@@ -28,6 +28,9 @@ pub enum EngineKind {
     Ming3Tts,
     #[serde(rename = "chatterbox")]
     Chatterbox,
+    /// IndexTTS-2 (bilibili) run by audio.cpp's `index_tts2` family.
+    #[serde(rename = "indextts2")]
+    IndexTts2,
     /// MOSS-TTS-Delay (OpenMOSS) run by a native llama.cpp binary.
     #[serde(rename = "mosstts")]
     MossTts,
@@ -77,6 +80,7 @@ impl EngineKind {
             EngineKind::Kokoro => "kokoro",
             EngineKind::Ming3Tts => "ming3tts",
             EngineKind::Chatterbox => "chatterbox",
+            EngineKind::IndexTts2 => "indextts2",
             EngineKind::MossTts => "mosstts",
             EngineKind::Stt => "stt",
         }
@@ -111,6 +115,8 @@ pub struct Manifest {
     pub ming3tts: Option<Ming3TtsManifest>,
     #[serde(default)]
     pub chatterbox: Option<ChatterboxManifest>,
+    #[serde(default)]
+    pub indextts2: Option<AudioCppManifest>,
     #[serde(default)]
     pub mosstts: Option<MossTtsManifest>,
     /// STT configuration when `kind == "stt"`.
@@ -189,6 +195,11 @@ impl Manifest {
                 .chatterbox
                 .is_none()
                 .then(|| missing("chatterbox"))
+                .flatten(),
+            EngineKind::IndexTts2 => self
+                .indextts2
+                .is_none()
+                .then(|| missing("indextts2"))
                 .flatten(),
             EngineKind::MossTts => self.mosstts.is_none().then(|| missing("mosstts")).flatten(),
             EngineKind::Stt => self.stt.is_none().then(|| missing("stt")).flatten(),
@@ -326,6 +337,11 @@ impl Manifest {
             // Every mode ships its own parameter lists via the manifest.
             EngineKind::Ming3Tts => Vec::new(),
             EngineKind::Chatterbox => Vec::new(),
+            // Autoregressive GPT + flow-matching vocoder; text is split
+            // into segments internally, and emotion guidance needs an
+            // emotion reference clip we do not collect. The installer
+            // ships a text-language choice; nothing else is tunable.
+            EngineKind::IndexTts2 => Vec::new(),
             // MOSS-TTS ships a language choice via the manifest.
             EngineKind::MossTts => Vec::new(),
             // Flow-matching ODE: NFE steps, guidance strength/method, seed.
@@ -1270,5 +1286,39 @@ mod tests {
         let params = manifest.parameters_or_defaults();
         let names: Vec<&str> = params.iter().map(|p| p.name.as_str()).collect();
         assert_eq!(names, ["speed"]);
+    }
+
+    #[test]
+    fn indextts2_manifest_parses_with_defaults() {
+        let raw = r#"{
+            "id": "indextts2",
+            "kind": "indextts2",
+            "name": "IndexTTS-2",
+            "indextts2": {
+                "binary": "/tools/audiocpp/audiocpp_cli",
+                "model": "index-tts2-q8_0.gguf"
+            }
+        }"#;
+        let manifest: Manifest = serde_json::from_str(raw).expect("valid manifest");
+        assert_eq!(manifest.kind, EngineKind::IndexTts2);
+        let c = manifest.indextts2.as_ref().expect("indextts2 section");
+        assert_eq!(c.backend, "best");
+        assert_eq!(c.seed, 42);
+        assert_eq!(c.language, None);
+        assert_eq!(manifest.reference_limit_secs(), 15.0);
+        assert_eq!(manifest.problem(), None);
+        // The engine has no tunable request parameters.
+        assert!(manifest.parameters_or_defaults().is_empty());
+
+        // A section without the audio.cpp paths is a broken install.
+        let broken: Manifest = serde_json::from_str(
+            r#"{"id":"indextts2","kind":"indextts2","name":"i","indextts2":{}}"#,
+        )
+        .expect("manifest with an empty section");
+        assert!(broken.problem().is_none()); // present, so structurally fine
+        assert!(broken
+            .indextts2
+            .as_ref()
+            .is_some_and(|c| c.binary.is_empty() && c.model.is_empty()));
     }
 }

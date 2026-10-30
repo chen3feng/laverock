@@ -194,6 +194,9 @@ impl EngineManager {
             EngineKind::Kokoro => Arc::new(KokoroEngine::build(&dir, &manifest)?),
             EngineKind::Ming3Tts => Arc::new(Ming3TtsEngine::build(&dir, &manifest)?),
             EngineKind::Chatterbox => Arc::new(ChatterboxEngine::build(&dir, &manifest)?),
+            EngineKind::IndexTts2 => {
+                Arc::new(AudioCppEngine::build(&dir, &manifest, Family::IndexTts2)?)
+            }
             EngineKind::MossTts => Arc::new(MossTtsEngine::build(&dir, &manifest)?),
             // STT models are discovered by the transcriber, not built as
             // synthesis engines.

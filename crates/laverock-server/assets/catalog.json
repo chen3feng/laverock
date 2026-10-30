@@ -452,6 +452,30 @@
     }
   },
   {
+    "id": "indextts2",
+    "dir": "indextts2",
+    "name": "IndexTTS-2 (voice clone)",
+    "description": {
+      "en": "IndexTTS-2 (bilibili) is a zero-shot voice-clone TTS for Chinese and English, pairing a GPT-style token model with a flow-matching vocoder. A reference clip of 15 s or less is enough; timbre similarity and prosody are strong. It runs on the shared audio.cpp native runtime with a Q8_0 GGUF, so no Python environment is needed.",
+      "zh": "IndexTTS-2（bilibili）是面向中英文的零样本声音克隆模型，由 GPT 式 token 模型与流匹配声码器组成。15 秒以内的参考音频即可克隆，音色相似度和韵律表现都不错。通过共享的 audio.cpp 原生运行时加载 Q8_0 GGUF，无需 Python 环境。"
+    },
+    "size": "~3.6 GB",
+    "languages": [
+      "zh",
+      "en"
+    ],
+    "capabilities": [
+      "tts",
+      "clone"
+    ],
+    "script": "download-indextts2.sh",
+    "env": {},
+    "note": {
+      "en": "No Python: the installer downloads the prebuilt audio.cpp runtime and a Q8_0 GGUF, shared with the dots.tts, CosyVoice and VoxCPM2 engines. The transcript of the reference clip is not used; the text language is auto-detected or set in the engine parameters.",
+      "zh": "无需 Python：安装脚本下载预编译的 audio.cpp 运行时与 Q8_0 GGUF，与 dots.tts、CosyVoice、VoxCPM2 共用。不使用参考音频的文字稿；文本语言自动判断，也可在引擎参数中选择。"
+    }
+  },
+  {
     "id": "mosstts",
     "dir": "mosstts",
     "name": "MOSS-TTS (native llama.cpp)",
