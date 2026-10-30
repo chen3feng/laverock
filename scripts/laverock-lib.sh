@@ -230,8 +230,12 @@ lv_audiocpp_bin() {
       return 1 ;;
   esac
 
+  # The resident server beside the CLI keeps weights loaded between
+  # requests; an install that only has the CLI is refreshed so both are
+  # present.
   local bin="$dir/audiocpp_cli" exe="$dir/audiocpp_cli.exe"
-  if [ -x "$bin" ] || [ -x "$exe" ]; then
+  local srv="$dir/audiocpp_server" sexe="$dir/audiocpp_server.exe"
+  if { [ -x "$bin" ] || [ -x "$exe" ]; } && { [ -x "$srv" ] || [ -x "$sexe" ]; }; then
     if [ -x "$bin" ]; then lv_native_path "$bin"; else lv_native_path "$exe"; fi
     return 0
   fi
@@ -246,11 +250,21 @@ lv_audiocpp_bin() {
   fi
   if [ -n "$legacy" ]; then
     ldir="$(dirname "$legacy")"
+    # Without the server binary the copy would silently lose the resident
+    # path, so only reuse a legacy install that carries both.
+    if [ ! -f "$ldir/audiocpp_server" ] && [ ! -f "$ldir/audiocpp_server.exe" ]; then
+      legacy=""
+    fi
+  fi
+  if [ -n "$legacy" ]; then
+    ldir="$(dirname "$legacy")"
     mkdir -p "$dir"
     cp "$legacy" "$dir/"
+    [ -f "$ldir/audiocpp_server" ] && cp "$ldir/audiocpp_server" "$dir/"
+    [ -f "$ldir/audiocpp_server.exe" ] && cp "$ldir/audiocpp_server.exe" "$dir/"
     cp "$ldir"/*.dll "$dir/" 2>/dev/null || true
     [ -f "$ldir/LICENSE" ] && cp "$ldir/LICENSE" "$dir/"
-    chmod +x "$dir/audiocpp_cli" "$exe" 2>/dev/null || true
+    chmod +x "$dir/audiocpp_cli" "$exe" "$dir/audiocpp_server" "$dir/audiocpp_server.exe" 2>/dev/null || true
     lv_native_path "$dir/$(basename "$legacy")"
     return 0
   fi
@@ -278,10 +292,16 @@ lv_audiocpp_bin() {
     fi
   else
     tar -xzf "$tmp/runtime.tar.gz" -C "$tmp/ex"
-    cp "$tmp/ex/audiocpp_cli" "$dir/" 2>/dev/null || true
+    if [ ! -f "$tmp/ex/audiocpp_cli" ] || [ ! -f "$tmp/ex/audiocpp_server" ]; then
+      echo "audio.cpp archive is incomplete (missing audiocpp_cli or audiocpp_server); rerun the installer" >&2
+      rm -rf "$tmp"
+      return 1
+    fi
+    cp "$tmp/ex/audiocpp_cli" "$dir/"
+    cp "$tmp/ex/audiocpp_server" "$dir/"
     [ -f "$tmp/ex/LICENSE" ] && cp "$tmp/ex/LICENSE" "$dir/"
   fi
-  chmod +x "$dir/audiocpp_cli" "$exe" 2>/dev/null || true
+  chmod +x "$dir/audiocpp_cli" "$exe" "$dir/audiocpp_server" "$dir/audiocpp_server.exe" 2>/dev/null || true
   rm -rf "$tmp"
 
   if [ -x "$bin" ]; then lv_native_path "$bin"; else lv_native_path "$exe"; fi
@@ -801,24 +821,47 @@ lv_download() {
   local url="$1" dest="$2" resume="${3:-1}"
   local total have
   total="$(lv_content_length "$url")"
-  have="$(lv_filesize "$dest")"
   lv_stage_key stage_downloading "name=$(basename "$dest")"
 
-  local args=(-sSL --fail --retry 3 --retry-delay 2 -o "$dest")
-  if [ "$resume" = "1" ] && [ "$have" -gt 0 ]; then
-    args+=(-C -)
-  fi
-  curl "${args[@]}" "$url" &
-  local cpid=$!
-
-  while kill -0 "$cpid" 2>/dev/null; do
-    sleep 1
-    local size; size="$(lv_filesize "$dest")"
-    if [ "${total:-0}" -gt 0 ]; then
-      lv_progress "$(awk -v s="$size" -v t="$total" 'BEGIN { printf "%.1f", s * 100 / t }')"
-    else
-      lv_stage_key stage_download_size "name=$(basename "$dest")" "size=$(awk -v s="$size" 'BEGIN { printf "%.0f MB", s / 1048576 }')"
+  # A proxy that drops the connection mid-stream leaves a short file that
+  # curl still reports as success, and a truncated archive extracts to
+  # something plausible-looking but incomplete. Compare against the
+  # advertised length and resume until it matches.
+  local attempt=0
+  while :; do
+    have="$(lv_filesize "$dest")"
+    if [ "${total:-0}" -gt 0 ] && [ "$have" -ge "$total" ]; then
+      return 0
     fi
+    local args=(-sSL --fail --retry 3 --retry-delay 2 -o "$dest")
+    if [ "$resume" = "1" ] && [ "$have" -gt 0 ]; then
+      args+=(-C -)
+    fi
+    curl "${args[@]}" "$url" &
+    local cpid=$!
+
+    while kill -0 "$cpid" 2>/dev/null; do
+      sleep 1
+      local size; size="$(lv_filesize "$dest")"
+      if [ "${total:-0}" -gt 0 ]; then
+        lv_progress "$(awk -v s="$size" -v t="$total" 'BEGIN { printf "%.1f", s * 100 / t }')"
+      else
+        lv_stage_key stage_download_size "name=$(basename "$dest")" "size=$(awk -v s="$size" 'BEGIN { printf "%.0f MB", s / 1048576 }')"
+      fi
+    done
+    wait "$cpid" || true
+
+    have="$(lv_filesize "$dest")"
+    if [ "${total:-0}" -le 0 ]; then
+      [ "$have" -gt 0 ] && return 0
+    elif [ "$have" -ge "$total" ]; then
+      return 0
+    fi
+    attempt=$((attempt + 1))
+    if [ "$attempt" -ge 3 ]; then
+      echo "download incomplete after $attempt attempts: $url ($have of $total bytes)" >&2
+      return 1
+    fi
+    echo "download stopped at $have of $total bytes; resuming" >&2
   done
-  wait "$cpid"
 }

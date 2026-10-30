@@ -91,6 +91,43 @@ def step_cap(text: str) -> int:
     return max(120, round(est_seconds * 12.5 * 2) + 80)
 
 
+# Long input is synthesized in sentence-sized chunks. The talker drifts
+# into a near-silent loop when a single request is too long: a 1700-char
+# script produced 13.5 minutes of audio whose first 30 s were the only
+# audible part. Around 400 characters per chunk stays in the range that
+# generates cleanly (a 900-char request was still fine, but 400 keeps
+# each wait short and the progress readout moving).
+MAX_CHUNK_CHARS = 400
+# A breath between chunks, so sentences do not run into each other.
+CHUNK_GAP_SECS = 0.15
+
+
+def chunk_text(text: str, limit: int = MAX_CHUNK_CHARS) -> list[str]:
+    """Split text after sentence punctuation into pieces of at most `limit`."""
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    pieces = re.findall(r"[^。！？!?；;…\n]*[。！？!?；;…]|[^。！？!?；;…\n]+", text)
+    chunks: list[str] = []
+    buf = ""
+    for piece in pieces:
+        if not piece.strip():
+            continue
+        # A run-on sentence longer than the limit is cut mid-way.
+        while len(piece) > limit:
+            if buf.strip():
+                chunks.append(buf.strip())
+                buf = ""
+            chunks.append(piece[:limit].strip())
+            piece = piece[limit:]
+        if buf.strip() and len(buf) + len(piece) > limit:
+            chunks.append(buf.strip())
+            buf = piece
+        else:
+            buf += piece
+    if buf.strip():
+        chunks.append(buf.strip())
+    return chunks
+
+
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser()
     p.add_argument("--model", required=True)
@@ -170,46 +207,68 @@ def main() -> int:
         model = Qwen3TTSModel.from_pretrained(args.model, **load_kwargs)
 
     attach_step_counter(model)
-    emit("stage", "Generating speech")
-    gen_limit = {"max_new_tokens": step_cap(args.text)}
-    if args.mode == "clone":
-        if not args.ref_audio:
-            print("clone mode requires --ref-audio", file=sys.stderr)
-            return 2
-        wavs, sr = model.generate_voice_clone(
-            text=args.text,
-            language=args.language,
-            ref_audio=args.ref_audio,
-            ref_text=args.ref_text or None,
-            x_vector_only_mode=not bool(args.ref_text),
-            non_streaming_mode=True,
-            **gen_limit,
-        )
-    elif args.mode == "custom_voice":
-        if not args.speaker:
-            print("custom_voice mode requires --speaker", file=sys.stderr)
-            return 2
-        wavs, sr = model.generate_custom_voice(
-            text=args.text,
-            speaker=args.speaker,
-            language=args.language,
-            instruct=args.instruct or None,
-            non_streaming_mode=True,
-            **gen_limit,
-        )
-    else:
-        wavs, sr = model.generate_voice_design(
-            text=args.text,
-            instruct=args.instruct or "",
-            language=args.language,
-            non_streaming_mode=True,
-            **gen_limit,
-        )
+    if args.mode == "clone" and not args.ref_audio:
+        print("clone mode requires --ref-audio", file=sys.stderr)
+        return 2
+    if args.mode == "custom_voice" and not args.speaker:
+        print("custom_voice mode requires --speaker", file=sys.stderr)
+        return 2
 
-    if not wavs:
-        print("model returned no audio", file=sys.stderr)
-        return 3
-    write_wav(args.out, wavs[0], sr)
+    import numpy as np
+
+    chunks = chunk_text(args.text)
+    if not chunks:
+        print("text is empty", file=sys.stderr)
+        return 2
+    parts = []
+    sr = None
+    for i, chunk in enumerate(chunks, 1):
+        stage = f"Generating speech ({i}/{len(chunks)})" if len(chunks) > 1 else "Generating speech"
+        emit("stage", stage)
+        gen_limit = {"max_new_tokens": step_cap(chunk)}
+        if args.mode == "clone":
+            wavs, sr = model.generate_voice_clone(
+                text=chunk,
+                language=args.language,
+                ref_audio=args.ref_audio,
+                ref_text=args.ref_text or None,
+                x_vector_only_mode=not bool(args.ref_text),
+                non_streaming_mode=True,
+                **gen_limit,
+            )
+        elif args.mode == "custom_voice":
+            wavs, sr = model.generate_custom_voice(
+                text=chunk,
+                speaker=args.speaker,
+                language=args.language,
+                instruct=args.instruct or None,
+                non_streaming_mode=True,
+                **gen_limit,
+            )
+        else:
+            wavs, sr = model.generate_voice_design(
+                text=chunk,
+                instruct=args.instruct or "",
+                language=args.language,
+                non_streaming_mode=True,
+                **gen_limit,
+            )
+        if not wavs:
+            print(f"model returned no audio for chunk {i}", file=sys.stderr)
+            return 3
+        parts.append(np.asarray(wavs[0], dtype=np.float32).reshape(-1))
+
+    if len(parts) == 1:
+        samples = parts[0]
+    else:
+        gap = np.zeros(int(sr * CHUNK_GAP_SECS), dtype=np.float32)
+        joined = []
+        for part in parts:
+            if joined:
+                joined.append(gap)
+            joined.append(part)
+        samples = np.concatenate(joined)
+    write_wav(args.out, samples, sr)
     return 0
 
 

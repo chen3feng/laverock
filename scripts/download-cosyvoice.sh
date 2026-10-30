@@ -9,7 +9,7 @@
 #
 #   COSYVOICE_PRECISION=q8_0|f32   q8_0 (~2.3 GB, default) or f32 (~7 GB)
 #
-# Disk: Q8_0 2.3 GB (the runtime is downloaded once, ~35 MB).
+# Disk: Q8_0 2.3 GB (the runtime is downloaded once, ~80 MB).
 set -euo pipefail
 
 # shellcheck source=laverock-lib.sh

@@ -87,6 +87,8 @@ pub struct EngineInfo {
     pub loaded: bool,
     pub defaults: serde_json::Value,
     pub parameters: Vec<ParamSpec>,
+    /// How much of a voice's reference audio this engine uses.
+    pub reference_limit_secs: f32,
 }
 
 pub struct EngineManager {
@@ -146,6 +148,7 @@ impl EngineManager {
                 loaded: loaded.contains_key(&m.id),
                 defaults: serde_json::to_value(&m.defaults).unwrap_or(serde_json::json!({})),
                 parameters: m.parameters_or_defaults(),
+                reference_limit_secs: m.reference_limit_secs(),
             })
             .collect()
     }
@@ -191,6 +194,9 @@ impl EngineManager {
             EngineKind::Kokoro => Arc::new(KokoroEngine::build(&dir, &manifest)?),
             EngineKind::Ming3Tts => Arc::new(Ming3TtsEngine::build(&dir, &manifest)?),
             EngineKind::Chatterbox => Arc::new(ChatterboxEngine::build(&dir, &manifest)?),
+            EngineKind::IndexTts2 => {
+                Arc::new(AudioCppEngine::build(&dir, &manifest, Family::IndexTts2)?)
+            }
             EngineKind::MossTts => Arc::new(MossTtsEngine::build(&dir, &manifest)?),
             // STT models are discovered by the transcriber, not built as
             // synthesis engines.
@@ -213,6 +219,12 @@ impl EngineManager {
 
     pub fn manifest_defaults(&self, id: &str) -> Result<crate::manifest::SynthDefaults> {
         Ok(self.manifest(id)?.defaults)
+    }
+
+    /// Longest reference clip the engine uses (see
+    /// [`Manifest::reference_limit_secs`]).
+    pub fn reference_limit_secs(&self, id: &str) -> Result<f32> {
+        Ok(self.manifest(id)?.reference_limit_secs())
     }
 
     pub fn root(&self) -> &Path {

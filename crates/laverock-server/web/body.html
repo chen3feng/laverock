@@ -12,9 +12,13 @@
       <svg viewBox="0 0 24 24"><path d="M11 5 6 9H2v6h4l5 4V5Z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M18.5 5.5a9 9 0 0 1 0 13"/></svg>
       <span data-i18n="nav.synthesize">合成</span>
     </a>
+    <a href="#/captures" data-page="captures">
+      <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="4" rx="1"/><rect x="3" y="10" width="18" height="4" rx="1"/><rect x="3" y="16" width="18" height="4" rx="1"/></svg>
+      <span data-i18n="nav.captures">素材库</span>
+    </a>
     <a href="#/voices" data-page="voices">
       <svg viewBox="0 0 24 24"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><path d="M12 19v3"/></svg>
-      <span data-i18n="nav.voices">语音素材</span>
+      <span data-i18n="nav.voices">声音</span>
     </a>
     <a href="#/models" data-page="models">
       <svg viewBox="0 0 24 24"><path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/></svg>
@@ -111,10 +115,43 @@
       <audio id="previewer" hidden></audio>
     </section>
 
+    <!-- ================= 素材库 ================= -->
+    <section id="page-captures" class="page">
+      <div class="page-head" style="display:flex;align-items:flex-end;justify-content:space-between;gap:12px;flex-wrap:wrap">
+        <div><h1 data-i18n="captures.title">素材库</h1><p class="sub" data-i18n="captures.sub">每次录音都是一条素材：可以试听、重新转写，勾选多段就能拼成一个声音。</p></div>
+        <div style="display:flex;gap:8px">
+          <button id="dedupeCapturesBtn" class="ghost" type="button" data-i18n="captures.dedupe">去重</button>
+          <button id="newCaptureBtn" type="button" data-i18n="captures.new">＋ 添加素材</button>
+        </div>
+      </div>
+
+      <div class="card" id="newCaptureCard" hidden>
+        <label data-i18n="captures.audio">录音或上传 WAV</label>
+        <div id="libraryCapture"></div>
+        <div class="hint" data-i18n="captures.hint">录音会在浏览器内转成 24kHz 单声道 WAV；安装了 SenseVoice 会自动转写。</div>
+        <div class="actions" style="margin-top:16px">
+          <button id="newCaptureSave" type="button" data-i18n="captures.save">加入素材库</button>
+          <button class="ghost" id="newCaptureCancel" type="button" data-i18n="cancel">取消</button>
+          <span class="hint" id="newCaptureHint"></span>
+        </div>
+      </div>
+
+      <div class="capture-bar" id="captureBar" hidden>
+        <span id="captureSelected"></span>
+        <span class="hint" id="captureLimit"></span>
+        <button id="capturesToVoice" type="button" data-i18n="captures.toVoice">用选中的素材新建声音</button>
+      </div>
+
+      <div class="grid" id="captureGrid"></div>
+      <div class="empty" id="capturesEmpty" data-i18n="captures.empty" hidden>
+        还没有素材。点击「添加素材」录音或上传一段参考音频。
+      </div>
+    </section>
+
     <!-- ================= 语音素材 ================= -->
     <section id="page-voices" class="page">
       <div class="page-head" style="display:flex;align-items:flex-end;justify-content:space-between;gap:12px;flex-wrap:wrap">
-        <div><h1 data-i18n="voices.title">语音素材</h1><p class="sub" data-i18n="voices.sub">保存的参考声音可以复用到任何克隆引擎。</p></div>
+        <div><h1 data-i18n="voices.title">声音库</h1><p class="sub" data-i18n="voices.sub">保存的声音可以复用到任何克隆引擎，也可以由素材库里的多段录音组成。</p></div>
         <div style="display:flex;gap:8px">
           <button id="exportVoicesBtn" class="ghost" type="button" data-i18n="voice.exportBatch">⬇ 批量导出</button>
           <button id="importVoiceBtn" class="ghost" type="button" data-i18n="voice.import">⬆ 导入声音</button>
@@ -129,6 +166,7 @@
         <label style="margin-top:14px" data-i18n="voice.ref">参考声音（3–10 秒干净人声）</label>
         <div id="voiceCapture"></div>
         <div class="hint" data-i18n="voice.rec.hint">录音会在浏览器内转成 24kHz 单声道 WAV。</div>
+        <div class="hint"><a href="#/captures" data-i18n="voice.from_library">要用多段录音拼成一个声音？去素材库勾选后新建。</a></div>
         <div style="margin-top:14px">
           <label for="newPromptText" data-i18n="voice.prompt">参考音频对应文字（ZipVoice 必填）</label>
           <input type="text" id="newPromptText" data-i18n-ph="voice.prompt.ph" placeholder="录音里说了什么就填什么" />

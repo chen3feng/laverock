@@ -104,12 +104,9 @@ pub async fn get_model(
 enum VoiceTarget {
     /// `(param name, param value, optional speed override)`.
     Preset { name: String, value: String },
-    /// Saved profile with its reference bytes and transcript.
-    Profile {
-        wav: Vec<u8>,
-        prompt_text: String,
-        engine_hint: Option<String>,
-    },
+    /// Saved profile; its takes are joined once the engine, and so its
+    /// reference limit, is known.
+    Profile { id: String },
     /// Voice-design engines take their description from `instruct`.
     DesignOnly,
 }
@@ -156,24 +153,14 @@ fn resolve_voice(
     voice: &str,
 ) -> Result<VoiceTarget, (StatusCode, String, String)> {
     match profiles.get(voice) {
-        Ok((meta, wav)) => Ok(VoiceTarget::Profile {
-            wav,
-            prompt_text: meta.prompt_text,
-            engine_hint: meta.engine_id,
-        }),
+        Ok((meta, _)) => Ok(VoiceTarget::Profile { id: meta.id }),
         Err(_) => {
             // Try a case-insensitive name match.
             if let Some(view) = profiles.list().ok().and_then(|ps| {
                 ps.into_iter()
                     .find(|p| p.meta.name.eq_ignore_ascii_case(voice))
             }) {
-                if let Ok((meta, wav)) = profiles.get(&view.meta.id) {
-                    return Ok(VoiceTarget::Profile {
-                        wav,
-                        prompt_text: meta.prompt_text,
-                        engine_hint: meta.engine_id,
-                    });
-                }
+                return Ok(VoiceTarget::Profile { id: view.meta.id });
             }
             Err((
                 StatusCode::BAD_REQUEST,
@@ -304,18 +291,6 @@ pub async fn create_speech(
         }
     };
 
-    // A saved profile may pin a specific engine; honor it when the model
-    // argument was just an alias.
-    if let VoiceTarget::Profile {
-        engine_hint: Some(hint),
-        ..
-    } = &target
-    {
-        if was_alias && state.manager.list().iter().any(|e| &e.id == hint) {
-            engine_id = hint.clone();
-        }
-    }
-
     // The OpenAI API has no sampling-steps concept; use the engine's
     // manifest default (some runners such as dots.tts reject a zero).
     let num_steps = match state.manager.manifest_defaults(&engine_id) {
@@ -338,10 +313,18 @@ pub async fn create_speech(
                 .params
                 .insert(name.clone(), serde_json::Value::String(value.clone()));
         }
-        VoiceTarget::Profile {
-            wav, prompt_text, ..
-        } => {
-            let (samples, sr) = match laverock_core::decode_wav(wav) {
+        VoiceTarget::Profile { id, .. } => {
+            // Join the voice's takes here, where the engine's reference
+            // limit is known; a single take is handed over untouched.
+            let limit = state
+                .manager
+                .reference_limit_secs(&engine_id)
+                .unwrap_or(15.0);
+            let combined = match state.profiles.reference(id, limit) {
+                Ok(c) => c,
+                Err(e) => return core_error(e),
+            };
+            let (samples, sr) = match laverock_core::decode_wav(&combined.wav) {
                 Ok(v) => v,
                 Err(e) => {
                     return oai_error(
@@ -354,7 +337,7 @@ pub async fn create_speech(
             };
             request.prompt_samples = samples;
             request.prompt_sr = sr;
-            request.prompt_text = Some(prompt_text.clone());
+            request.prompt_text = Some(combined.text);
         }
         VoiceTarget::DesignOnly => {}
     }

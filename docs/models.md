@@ -27,6 +27,7 @@ installs and CI use them directly:
 ./scripts/download-cosyvoice.sh    # CosyVoice3 0.5B, 2.3 GB GGUF (shares the runtime)
 ./scripts/download-ming3tts.sh     # Ming-3.0-tts 0.5B, venv + ~3 GB weights
 ./scripts/download-chatterbox.sh   # Chatterbox multilingual, venv + ~5 GB
+./scripts/download-indextts2.sh    # IndexTTS-2, 3.6 GB Q8_0 GGUF (shares the runtime)
 ./scripts/download-mosstts.sh      # MOSS-TTS-Delay, prebuilt llama.cpp runtime + ~10 GB weights
 
 # Variants
@@ -71,6 +72,7 @@ endpoint call the model.
 | `ming3tts-multilingual` | Ming-3.0-tts 0.5B | clone, multilingual | same | shared |
 | `ming3tts-ip` | Ming-3.0-tts 0.5B | preset voices | zh, en | shared |
 | `chatterbox` | Chatterbox Multilingual | clone | 23 languages | ~5 GB incl. venv |
+| `indextts2` | IndexTTS-2 Q8_0 | clone | zh, en | ~3.6 GB |
 | `mosstts` | MOSS-TTS-Delay | clone, multilingual | 20 languages | ~10 GB (peak ~16 GB) |
 
 The four Ming entries share one checkpoint, one venv and one runtime, so
@@ -100,8 +102,10 @@ from the engine parameters. Pure ONNX — no Python or build toolchain.
 
 **VoxCPM2** — 30 languages with zero-shot cloning and voice design. Runs on
 the audio.cpp native runtime (CUDA with an NVIDIA GPU on Windows), shared
-with dots.tts and CosyVoice3. A reference longer than 14 s is trimmed from
-the start at a silence point; 3–10 s of clean speech works best.
+with dots.tts and CosyVoice3, and stays loaded in the resident server. A
+reference longer than 14 s is trimmed from the start at a silence point;
+3–10 s of clean speech works best. On an M4 Pro: RTF 0.62, about 6.5 GB of
+memory once loaded.
 
 **LongCat-AudioDiT** — a flow-matching diffusion model working directly in a
 waveform latent space, with per-request NFE steps and guidance strength (APG
@@ -115,14 +119,17 @@ into chunks with short pauses.
 audio.cpp (Metal on macOS, CPU elsewhere). Cloning defaults to the x-vector
 mode, which needs only the reference audio, so an approximate transcript does
 not hurt; the voice + text mode gives higher similarity when the transcript
-is accurate. Measured on an M4 Pro with the Q8_0 checkpoint: RTF 1.4 (see
-**Speed**), about 6 GB peak memory.
+is accurate. It runs in the resident server, so the weights survive between
+requests. Measured on an M4 Pro with the Q8_0 checkpoint: RTF 1.39 (see
+**Speed**), about 6.2 GB of memory once loaded.
 
 **CosyVoice3** — 0.5B streaming LLM TTS sharing the audio.cpp runtime with
-dots.tts. Three templates: zero-shot cloning (reference plus an accurate
-transcript, highest similarity), cross-lingual cloning (audio only, for when
-the transcript is unreliable) and instruction control ("用温和的语气，
-语速稍慢"). Top-K and flow-decoder steps are tunable per request.
+dots.tts, and the resident server with all four audio.cpp engines. Three
+templates: zero-shot cloning (reference plus an accurate transcript, highest
+similarity), cross-lingual cloning (audio only, for when the transcript is
+unreliable) and instruction control ("用温和的语气，语速稍慢"). Top-K and
+flow-decoder steps are tunable per request. On an M4 Pro: RTF 0.30, about
+3.3 GB of memory once loaded.
 
 **Qwen3-TTS** — the official `qwen-tts` package in an isolated venv. Device
 selection is automatic: CUDA in bfloat16, Apple MPS in float32 (float16
@@ -142,6 +149,23 @@ and is skipped automatically when absent.
 **Chatterbox** — Resemble AI's 0.5B multilingual clone model: clone a clip
 and speak any of 23 languages. The transcript is not required. Defaults to
 Chinese; pick the target language in the engine parameters.
+
+**IndexTTS-2** — bilibili's Chinese/English zero-shot clone model: a
+GPT-style token model conditions on the reference clip (cut to 15 s) and a
+flow-matching vocoder produces 22.05 kHz audio. Long text is split into
+segments at sentence boundaries internally and the segments are joined with
+about 0.2 s of silence (audio.cpp's `interval_silence_ms`), so there is no
+request-length cliff. The transcript is not used. It runs on the audio.cpp
+native runtime shared with dots.tts, CosyVoice3 and VoxCPM2, so no Python
+environment is installed. The text
+language is auto-detected (Chinese for Han text, English otherwise) or set
+per request; the Q8_0 export is 3.6 GB, and an f16 or original-precision
+package can be installed instead with `INDEXTTS_PACKAGE`. Beam search is the
+default decoding; switching to greedy decoding in the engine parameters
+produces about 25% faster generation with the same text. Like the other
+audio.cpp engines it runs in the resident server, so only the first request
+loads the 3.6 GB of weights. On an M4 Pro the Q8_0 checkpoint runs at
+RTF 1.47 with about 4.1 GB of memory once loaded (see **Speed**).
 
 **MOSS-TTS-Delay** — a multilingual zero-shot TTS/clone model driven by a
 native llama.cpp binary, with no Python at inference time. The installer
@@ -166,9 +190,9 @@ Measured on a MacBook Pro: Apple M4 Pro (14-core CPU — 10 performance and
 | --- | --- | --- | --- |
 | LongCat-AudioDiT 1B | 0.17 | 8.6 s | 10.3 s |
 | ZipVoice | 0.17 | 0.9 s | 2.6 s |
-| CosyVoice3 | 0.30 | 4.1 s | 7.0 s |
+| CosyVoice3 | 0.30 | 0.6 s | 3.6 s |
 | MOSS-TTS | 0.33 | 2.4 s | 5.7 s |
-| VoxCPM2 | 0.60 | 1.9 s | 7.9 s |
+| VoxCPM2 | 0.62 | 0.0 s | 6.2 s |
 | Kokoro-82M | 0.64 | 0.7 s | 7.0 s |
 | Ming 3.0 voice design | 0.98 | 4.0 s | 13.8 s |
 | Ming 3.0 multilingual | 0.99 | 3.8 s | 13.6 s |
@@ -177,16 +201,23 @@ Measured on a MacBook Pro: Apple M4 Pro (14-core CPU — 10 performance and
 | Qwen3-TTS 0.6B cloning | 1.00 | 4.3 s | 14.3 s |
 | Qwen3-TTS 0.6B custom voice | 1.00 | 3.9 s | 13.9 s |
 | Qwen3-TTS 1.7B design | 1.20 | 4.1 s | 16.1 s |
-| dots.tts SOAR | 1.40 | 1.9 s | 16.0 s |
+| dots.tts SOAR | 1.39 | 0.0 s | 13.7 s |
+| IndexTTS-2 Q8_0 | 1.47 | 1.1 s | 15.8 s |
 | Chatterbox | 3.88 | 9.8 s | 48.6 s |
 
 RTF is generation time divided by audio duration, so below 1 is faster than
 real time. The fixed cost is what a request pays before the first sample —
-starting the engine's process, loading weights for the engines that keep
-nothing between requests, and reading the reference clip. A request therefore
+starting the engine's process, reading the reference clip, and, for engines
+that keep nothing between requests, loading the weights. A request therefore
 takes `fixed cost + RTF × audio duration`; the third column applies that to
 10 s of speech. Engines with a large fixed cost and a low RTF (LongCat,
 CosyVoice3) are good for long passages and wasteful for one-liners.
+
+The four audio.cpp engines (dots, CosyVoice3, VoxCPM2, IndexTTS-2) now share
+a resident `audiocpp_server` process, started on first use: the model stays
+loaded and the table's fixed cost is the warm steady state. The first request
+after launching the app (or after 15 idle minutes, when the server releases
+the weights) pays a one-off load of roughly 3–11 s depending on the model.
 
 Method: requests go to the local server over loopback, with two Chinese texts
 — a sentence that produces about 2 s of speech and a paragraph that produces
@@ -206,7 +237,7 @@ its RTF is a median over runs that disagree.
 | Feature | Requirement |
 | --- | --- |
 | ONNX engines (ZipVoice, Kokoro, SenseVoice) | none beyond the app |
-| audio.cpp engines (dots, CosyVoice, VoxCPM2) | prebuilt runtime is downloaded |
+| audio.cpp engines (dots, CosyVoice, VoxCPM2, IndexTTS-2) | prebuilt CLI and resident server are downloaded |
 | Python engines (Qwen3-TTS, LongCat, Ming, Chatterbox) | Python 3.10–3.12; the scripts create an isolated venv |
 | MOSS-TTS | prebuilt runtime is downloaded; Python 3 for the one-time tokenizer conversion |
 | In-app installs on Windows | `bash` from Git for Windows |
@@ -248,6 +279,12 @@ terms.
 
 Chatterbox is released by [Resemble AI](https://github.com/resemble-ai/chatterbox)
 under MIT.
+
+IndexTTS-2 is released by [bilibili](https://github.com/index-tts/index-tts)
+under the bilibili Model Use License: free to use, with a separate license
+required above 100 million monthly active users or RMB 1 billion annual
+revenue, and a prohibition on using it to improve other AI models. The GGUF
+export and native runtime come from audio.cpp.
 
 MOSS-TTS-Delay is released by [OpenMOSS](https://github.com/OpenMOSS) under
 Apache-2.0; the native runtime is built from the OpenMOSS llama.cpp fork.

@@ -9,19 +9,23 @@
 //!   continuation cloning, APG/CFG guidance.
 //! * `cosyvoice` — CosyVoice3: 0.5B streaming LLM TTS with zero-shot,
 //!   cross-lingual and instruction templates.
+//! * `indextts2` — IndexTTS-2: GPT-style token model + flow-matching
+//!   vocoder, cloned from a reference clip (zh/en).
 
 use crate::i18n::{self, Key};
 use crate::{
     decode_wav, encode_wav, trim_reference, Audio, CoreError, Manifest, ProgressEvent, Result,
     SpeechEngine, SynthRequest, VOXCPM2_MAX_REFERENCE_SECS,
 };
-use serde_json::Value;
+use serde_json::{json, Map, Value};
 use std::{
     borrow::Cow,
     io::{BufRead, BufReader, Read},
+    net::TcpListener,
     path::{Path, PathBuf},
-    process::{Command, Stdio},
+    process::{Child, Command, Stdio},
     sync::Mutex,
+    time::{Duration, Instant},
 };
 
 /// Characters per CosyVoice3 long-form chunk. Its 0.5B LLM starts
@@ -32,12 +36,21 @@ use std::{
 /// 100 keeps every chunk inside the model's stable range.
 const COSYVOICE_TEXT_CHUNK_CHARS: i64 = 100;
 
+/// How long a resident `audiocpp_server` keeps its weights after the last
+/// request. The process itself stays up, so a follow-up request is warm.
+const RESIDENT_IDLE_UNLOAD_MS: u64 = 15 * 60 * 1000;
+/// Startup budget for the resident server: process spawn plus listener.
+const RESIDENT_START_TIMEOUT: Duration = Duration::from_secs(30);
+/// A generation can legitimately run for minutes on long text.
+const RESIDENT_READ_TIMEOUT: Duration = Duration::from_secs(15 * 60);
+
 /// Which audio.cpp model family an engine wraps.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Family {
     Dots,
     CosyVoice,
     VoxCpm2,
+    IndexTts2,
 }
 
 impl Family {
@@ -47,6 +60,7 @@ impl Family {
             Family::Dots => "dots_tts",
             Family::CosyVoice => "cosyvoice3",
             Family::VoxCpm2 => "voxcpm2",
+            Family::IndexTts2 => "index_tts2",
         }
     }
 
@@ -55,6 +69,7 @@ impl Family {
             Family::Dots => "dots.tts",
             Family::CosyVoice => "CosyVoice3",
             Family::VoxCpm2 => "VoxCPM2",
+            Family::IndexTts2 => "IndexTTS-2",
         }
     }
 }
@@ -72,6 +87,23 @@ pub struct AudioCppEngine {
     reference_duration: Option<f32>,
     env: Vec<(String, String)>,
     run_lock: Mutex<()>,
+    /// `audiocpp_server` beside the CLI; `None` keeps the one-shot path.
+    server_bin: Option<PathBuf>,
+    /// The server started for this model, kept across requests.
+    resident: Mutex<Option<ResidentServer>>,
+}
+
+/// A running `audiocpp_server` and the config file it was started with.
+struct ResidentServer {
+    child: Child,
+    port: u16,
+    dir: PathBuf,
+}
+
+impl Drop for AudioCppEngine {
+    fn drop(&mut self) {
+        self.stop_resident();
+    }
 }
 
 impl AudioCppEngine {
@@ -80,6 +112,7 @@ impl AudioCppEngine {
             Family::Dots => manifest.dots.as_ref(),
             Family::CosyVoice => manifest.cosyvoice.as_ref(),
             Family::VoxCpm2 => manifest.voxcpm2.as_ref(),
+            Family::IndexTts2 => manifest.indextts2.as_ref(),
         };
         let cfg = section.ok_or_else(|| {
             CoreError::Load(format!(
@@ -116,13 +149,32 @@ impl AudioCppEngine {
             )));
         }
 
+        // The resident server ships beside the CLI in the same release
+        // archive. Installers from before it was copied simply lack it,
+        // and the engine keeps working through the one-shot CLI.
+        let server_name = if cfg!(windows) {
+            "audiocpp_server.exe"
+        } else {
+            "audiocpp_server"
+        };
+        let server_bin = binary
+            .with_file_name(server_name)
+            .is_file()
+            .then(|| binary.with_file_name(server_name));
+
+        // The server rejects the CLI's `best`; resolve it once here.
+        let backend = match &server_bin {
+            Some(bin) => resolve_server_backend(bin, &cfg.backend),
+            None => cfg.backend.clone(),
+        };
+
         Ok(Self {
             id: manifest.id.clone(),
             name: manifest.name.clone(),
             family,
             binary,
             model,
-            backend: cfg.backend.clone(),
+            backend,
             language: cfg.language.clone().unwrap_or_default(),
             guidance: cfg.guidance,
             seed: cfg.seed,
@@ -133,6 +185,8 @@ impl AudioCppEngine {
                 .map(|(k, v)| (k.clone(), v.clone()))
                 .collect(),
             run_lock: Mutex::new(()),
+            server_bin,
+            resident: Mutex::new(None),
         })
     }
 
@@ -172,13 +226,18 @@ impl SpeechEngine for AudioCppEngine {
 
     fn synthesize(&self, req: &SynthRequest) -> Result<Audio> {
         let has_prompt = !req.prompt_samples.is_empty();
-        if !has_prompt && matches!(self.family, Family::Dots | Family::CosyVoice) {
+        if !has_prompt
+            && matches!(
+                self.family,
+                Family::Dots | Family::CosyVoice | Family::IndexTts2
+            )
+        {
             return Err(CoreError::UserError(
                 i18n::Message::new(Key::ReferenceAudioRequired).arg("engine", self.family.label()),
             ));
         }
         match self.family {
-            Family::Dots | Family::VoxCpm2 => (),
+            Family::Dots | Family::VoxCpm2 | Family::IndexTts2 => (),
             Family::CosyVoice => {
                 let template = self.param_str(req, "template", "zero_shot");
                 if template == "zero_shot" && self.prompt_text(req).is_none() {
@@ -238,6 +297,31 @@ impl SpeechEngine for AudioCppEngine {
         };
 
         let seed = self.param_i64(req, "seed", self.seed);
+
+        // The resident server keeps the weights loaded between requests,
+        // which saves the model load on every call. Any failure falls back
+        // to the one-shot CLI below, so a missing or broken server binary
+        // only costs speed.
+        if self.server_bin.is_some() {
+            match self.synthesize_resident(req, ref_wav.as_deref(), seed) {
+                Ok(audio) => {
+                    let _ = std::fs::remove_dir_all(&tmp);
+                    return Ok(audio);
+                }
+                // Bad input (a missing transcript, an empty instruction)
+                // would fail the same way on the CLI; report it as-is.
+                Err(e @ CoreError::UserError(_)) => return Err(e),
+                Err(e) => {
+                    tracing::warn!(
+                        target: "audiocpp",
+                        family = self.family.cli_name(),
+                        "resident server failed, falling back to audiocpp_cli: {e}"
+                    );
+                    self.stop_resident();
+                }
+            }
+        }
+
         let mut cmd = Command::new(&self.binary);
         cmd.arg("--task")
             .arg(self.task(req))
@@ -378,6 +462,8 @@ impl AudioCppEngine {
                     "clon"
                 }
             }
+            // IndexTTS-2 has no preset voices: cloning is the only path.
+            Family::IndexTts2 => "clon",
         }
     }
 
@@ -424,6 +510,27 @@ impl AudioCppEngine {
                     cmd.arg("--language").arg(code);
                 }
             }
+            Family::IndexTts2 => {
+                // The language label helps the text front-end read mixed
+                // zh/en text. "auto" (the default) lets audio.cpp pick zh
+                // when the text contains Han characters and en otherwise,
+                // so it is passed as no option at all.
+                if let Some(code) = self.language_tag(req).filter(|c| c != "auto") {
+                    cmd.arg("--language").arg(code);
+                }
+                // Beam search (the model default of 3) reads noticeably
+                // better but costs ~20% more GPT decode time; greedy
+                // decoding (1) is the fast path.
+                let beams = match req.params.get("num_beams") {
+                    Some(Value::String(raw)) => raw.trim().parse::<u32>().ok(),
+                    Some(value) => value.as_u64().map(|n| n as u32),
+                    None => None,
+                }
+                .unwrap_or(3)
+                .clamp(1, 8);
+                cmd.arg("--request-option")
+                    .arg(format!("num_beams={beams}"));
+            }
             Family::CosyVoice => {
                 let template = self.param_str(req, "template", "zero_shot");
                 cmd.arg("--request-option")
@@ -462,6 +569,345 @@ impl AudioCppEngine {
     }
 }
 
+/// Pick a concrete backend when the manifest says `best`, which only the
+/// CLI understands. `audiocpp_server --version` lists the compiled-in
+/// backends, so this follows the same binary the server will run.
+fn resolve_server_backend(bin: &Path, backend: &str) -> String {
+    if backend != "best" {
+        return backend.to_string();
+    }
+    let output = Command::new(bin).arg("--version").output();
+    let text = output
+        .map(|o| {
+            let mut text = String::from_utf8_lossy(&o.stdout).into_owned();
+            text.push_str(&String::from_utf8_lossy(&o.stderr));
+            text
+        })
+        .unwrap_or_default();
+    let available: Vec<String> = text
+        .lines()
+        .find_map(|line| line.trim().strip_prefix("backends:"))
+        .map(|list| list.split(',').map(|b| b.trim().to_string()).collect())
+        .unwrap_or_default();
+    for candidate in ["cuda", "metal", "vulkan", "hip", "cpu"] {
+        if available.iter().any(|b| b == candidate) {
+            return candidate.to_string();
+        }
+    }
+    // No parsed list: the platform's usual accelerator, else CPU.
+    if cfg!(target_os = "macos") {
+        "metal".to_string()
+    } else {
+        "cpu".to_string()
+    }
+}
+
+impl AudioCppEngine {
+    /// Tasks this family can run. Each one becomes a separate entry in the
+    /// server config, because a session is bound to its task; VoxCPM2 and
+    /// CosyVoice3 switch between cloning and plain/instruction TTS.
+    fn server_tasks(&self) -> &'static [&'static str] {
+        match self.family {
+            Family::Dots => &["tts"],
+            Family::VoxCpm2 | Family::CosyVoice => &["clon", "tts"],
+            Family::IndexTts2 => &["clon"],
+        }
+    }
+
+    /// The config entry (and request `model` value) for one task.
+    fn resident_id(&self, task: &str) -> String {
+        format!("laverock-{task}")
+    }
+
+    /// `server.json` for a server hosting this one model. Keeping
+    /// `max_loaded_models` at 1 bounds memory when a family alternates
+    /// between tasks: the other session is evicted and reloaded.
+    fn server_config(&self, port: u16) -> Value {
+        let model = self.model.to_string_lossy().to_string();
+        let models: Vec<Value> = self
+            .server_tasks()
+            .iter()
+            .map(|task| {
+                json!({
+                    "id": self.resident_id(task),
+                    "family": self.family.cli_name(),
+                    "path": model,
+                    "task": task,
+                    "mode": "offline",
+                })
+            })
+            .collect();
+        json!({
+            "host": "127.0.0.1",
+            "port": port,
+            "backend": self.backend,
+            "lazy_load": true,
+            "max_loaded_models": 1,
+            "models": models,
+        })
+    }
+
+    /// The OpenAI-shaped speech request for this call. The option names are
+    /// the CLI's long flags without the dashes, so both paths stay in sync.
+    fn resident_body(
+        &self,
+        req: &SynthRequest,
+        ref_wav: Option<&Path>,
+        seed: i64,
+    ) -> Result<Value> {
+        let mut options = Map::new();
+        let mut reference_text: Option<String> = None;
+        match self.family {
+            Family::Dots => {
+                let clone_mode = self.param_str(req, "clone_mode", "xvector");
+                if clone_mode == "continuation" {
+                    match self.prompt_text(req) {
+                        Some(text) => reference_text = Some(text.to_string()),
+                        None => {
+                            return Err(CoreError::UserError(i18n::Message::new(
+                                Key::TranscriptRequired,
+                            )))
+                        }
+                    }
+                }
+                let guidance = req
+                    .params
+                    .get("guidance")
+                    .and_then(Value::as_f64)
+                    .map(|v| v as f32)
+                    .or(self.guidance);
+                if let Some(guidance) = guidance {
+                    options.insert("guidance_scale".into(), json!(guidance));
+                }
+                if let Some(code) = self.language_tag(req) {
+                    options.insert("language".into(), json!(code));
+                }
+                options.insert("num_inference_steps".into(), json!(req.num_steps));
+            }
+            Family::VoxCpm2 => {
+                let guidance = req
+                    .params
+                    .get("guidance")
+                    .and_then(Value::as_f64)
+                    .map(|v| v as f32)
+                    .or(self.guidance);
+                if let Some(guidance) = guidance {
+                    options.insert("guidance_scale".into(), json!(guidance));
+                }
+                options.insert("num_inference_steps".into(), json!(req.num_steps));
+            }
+            Family::CosyVoice => {
+                let template = self.param_str(req, "template", "zero_shot");
+                options.insert("template_name".into(), json!(template));
+                options.insert("top_k".into(), json!(self.param_i64(req, "top_k", 25)));
+                options.insert("text_chunk_size".into(), json!(COSYVOICE_TEXT_CHUNK_CHARS));
+                if template == "zero_shot" {
+                    reference_text = self.prompt_text(req).map(str::to_string);
+                }
+                if template == "instruct" {
+                    options.insert(
+                        "instruct".into(),
+                        json!(self.param_str(req, "instruct", "")),
+                    );
+                }
+            }
+            Family::IndexTts2 => {
+                if let Some(code) = self.language_tag(req).filter(|c| c != "auto") {
+                    options.insert("language".into(), json!(code));
+                }
+                let beams = match req.params.get("num_beams") {
+                    Some(Value::String(raw)) => raw.trim().parse::<u32>().ok(),
+                    Some(value) => value.as_u64().map(|n| n as u32),
+                    None => None,
+                }
+                .unwrap_or(3)
+                .clamp(1, 8);
+                options.insert("num_beams".into(), json!(beams));
+            }
+        }
+
+        let mut body = json!({
+            "model": self.resident_id(self.task(req)),
+            "input": req.text,
+            "seed": seed,
+            "options": Value::Object(options),
+        });
+        if let Some(path) = ref_wav {
+            body["voice_ref"] = json!(path.to_string_lossy());
+        }
+        if let Some(text) = reference_text {
+            body["reference_text"] = json!(text);
+        }
+        Ok(body)
+    }
+
+    /// Port for a new server: bind and release, so the kernel hands out an
+    /// unused one. A concurrent process could take it in between; the
+    /// spawn/health failure then falls back to the CLI.
+    fn free_port() -> Result<u16> {
+        let listener = TcpListener::bind(("127.0.0.1", 0))
+            .map_err(|e| CoreError::Synth(format!("cannot pick a server port: {e}")))?;
+        let port = listener
+            .local_addr()
+            .map_err(|e| CoreError::Synth(format!("cannot read the server port: {e}")))?
+            .port();
+        drop(listener);
+        Ok(port)
+    }
+
+    /// Start the server if it is not running and wait until it answers.
+    fn ensure_server(&self) -> Result<u16> {
+        let mut guard = self.resident.lock().expect("resident lock poisoned");
+        if let Some(server) = guard.as_mut() {
+            match server.child.try_wait() {
+                Ok(None) => return Ok(server.port),
+                _ => {
+                    // Exited or unreadable: drop the handle and start over.
+                    *guard = None;
+                }
+            }
+        }
+
+        let bin = self
+            .server_bin
+            .as_ref()
+            .ok_or_else(|| CoreError::Synth("audiocpp_server is not installed".into()))?;
+        let port = Self::free_port()?;
+        let dir = std::env::temp_dir().join(format!(
+            "laverock-acsrv-{}-{}",
+            self.family.cli_name(),
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).map_err(CoreError::from)?;
+        let config = dir.join("server.json");
+        std::fs::write(&config, self.server_config(port).to_string()).map_err(CoreError::from)?;
+
+        let mut cmd = Command::new(bin);
+        cmd.arg("--config")
+            .arg(&config)
+            .arg("--no-ui")
+            .arg("--backend")
+            .arg(&self.backend)
+            .arg("--host")
+            .arg("127.0.0.1")
+            .arg("--port")
+            .arg(port.to_string())
+            .arg("--max-loaded-models")
+            .arg("1")
+            .arg("--idle-unload-ms")
+            .arg(RESIDENT_IDLE_UNLOAD_MS.to_string())
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        for (key, value) in &self.env {
+            cmd.env(key, value);
+        }
+        let mut child = cmd
+            .spawn()
+            .map_err(|e| CoreError::Synth(format!("cannot start audiocpp_server: {e}")))?;
+
+        let agent = ureq::AgentBuilder::new()
+            .timeout_connect(Duration::from_millis(300))
+            .timeout_read(Duration::from_millis(500))
+            .build();
+        let url = format!("http://127.0.0.1:{port}/health");
+        let deadline = Instant::now() + RESIDENT_START_TIMEOUT;
+        loop {
+            match child.try_wait() {
+                Ok(Some(status)) => {
+                    let _ = std::fs::remove_dir_all(&dir);
+                    return Err(CoreError::Synth(format!(
+                        "audiocpp_server exited during startup ({status})"
+                    )));
+                }
+                Ok(None) => {}
+                Err(e) => {
+                    let _ = child.kill();
+                    let _ = std::fs::remove_dir_all(&dir);
+                    return Err(CoreError::Synth(format!(
+                        "cannot check audiocpp_server: {e}"
+                    )));
+                }
+            }
+            if agent.get(&url).call().is_ok() {
+                *guard = Some(ResidentServer { child, port, dir });
+                return Ok(port);
+            }
+            if Instant::now() >= deadline {
+                let _ = child.kill();
+                let _ = child.wait();
+                let _ = std::fs::remove_dir_all(&dir);
+                return Err(CoreError::Synth(
+                    "audiocpp_server did not become ready in time".into(),
+                ));
+            }
+            std::thread::sleep(Duration::from_millis(150));
+        }
+    }
+
+    fn stop_resident(&self) {
+        let Ok(mut guard) = self.resident.lock() else {
+            return;
+        };
+        if let Some(mut server) = guard.take() {
+            let _ = server.child.kill();
+            let _ = server.child.wait();
+            let _ = std::fs::remove_dir_all(&server.dir);
+        }
+    }
+
+    fn synthesize_resident(
+        &self,
+        req: &SynthRequest,
+        ref_wav: Option<&Path>,
+        seed: i64,
+    ) -> Result<Audio> {
+        let port = self.ensure_server()?;
+        if let Some(cb) = &req.progress {
+            cb(ProgressEvent::Stage(format!(
+                "正在合成（{} 常驻运行时）",
+                self.family.label()
+            )));
+        }
+        let body = self.resident_body(req, ref_wav, seed)?;
+        let agent = ureq::AgentBuilder::new()
+            .timeout_connect(Duration::from_secs(3))
+            .timeout_read(RESIDENT_READ_TIMEOUT)
+            .build();
+        let url = format!("http://127.0.0.1:{port}/v1/audio/speech");
+        let response = agent
+            .post(&url)
+            .set("Content-Type", "application/json")
+            .send_string(&body.to_string());
+        let mut bytes = Vec::new();
+        match response {
+            Ok(resp) => {
+                resp.into_reader()
+                    .read_to_end(&mut bytes)
+                    .map_err(|e| CoreError::Synth(format!("cannot read the server audio: {e}")))?;
+            }
+            Err(ureq::Error::Status(code, resp)) => {
+                let mut text = String::new();
+                let _ = resp.into_reader().read_to_string(&mut text);
+                return Err(CoreError::Synth(format!(
+                    "audiocpp_server HTTP {code}: {}",
+                    text.trim()
+                )));
+            }
+            Err(e) => {
+                return Err(CoreError::Synth(format!(
+                    "audiocpp_server request failed: {e}"
+                )))
+            }
+        }
+        let (samples, sample_rate) = decode_wav(&bytes)?;
+        Ok(Audio {
+            samples,
+            sample_rate,
+        })
+    }
+}
+
 /// Join relative paths onto the model directory; absolute paths pass through.
 fn resolve_path(dir: &Path, value: &str) -> PathBuf {
     let path = Path::new(value);
@@ -481,6 +927,7 @@ mod tests {
         let (section, id) = match kind {
             "dots" => ("dots", "dots"),
             "voxcpm2" => ("voxcpm2", "voxcpm2"),
+            "indextts2" => ("indextts2", "indextts2"),
             _ => ("cosyvoice", "cosyvoice"),
         };
         let json = serde_json::json!({
@@ -522,6 +969,7 @@ mod tests {
         let family = match kind {
             "dots" => super::Family::Dots,
             "voxcpm2" => super::Family::VoxCpm2,
+            "indextts2" => super::Family::IndexTts2,
             _ => super::Family::CosyVoice,
         };
         AudioCppEngine::build(dir, &m, family).expect("engine")
@@ -585,6 +1033,144 @@ mod tests {
             .windows(2)
             .any(|w| w == ["--reference-text", "ref words"]));
         assert!(args.windows(2).any(|w| w == ["--guidance-scale", "1.5"]));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn indextts2_clones_with_language() {
+        let dir = args_dir("indextts2");
+        let args = run(&dir, "indextts2", &[]);
+        assert!(args.windows(2).any(|w| w == ["--family", "index_tts2"]));
+        assert!(args.windows(2).any(|w| w == ["--task", "clon"]));
+        assert!(args.iter().any(|a| a == "--voice-ref"));
+        // No transcript: IndexTTS-2 clones from the audio alone.
+        assert!(!args.iter().any(|a| a == "--reference-text"));
+        // Beam search stays the default; the fast path is opt-in.
+        assert!(args
+            .windows(2)
+            .any(|w| w == ["--request-option", "num_beams=3"]));
+        let _ = std::fs::remove_dir_all(&dir);
+
+        let dir = args_dir("indextts2-fast");
+        let args = run(&dir, "indextts2", &[("num_beams", serde_json::json!("1"))]);
+        assert!(args
+            .windows(2)
+            .any(|w| w == ["--request-option", "num_beams=1"]));
+        let _ = std::fs::remove_dir_all(&dir);
+
+        // A per-request language overrides the manifest default.
+        let dir = args_dir("indextts2-lang");
+        let args = run(&dir, "indextts2", &[("language", serde_json::json!("en"))]);
+        assert!(args.windows(2).any(|w| w == ["--language", "en"]));
+        let _ = std::fs::remove_dir_all(&dir);
+
+        // "auto" is audio.cpp's own default; passing it would be redundant.
+        let dir = args_dir("indextts2-auto");
+        let args = run(
+            &dir,
+            "indextts2",
+            &[("language", serde_json::json!("auto"))],
+        );
+        assert!(!args.iter().any(|a| a == "--language"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn indextts2_requires_reference() {
+        let dir = args_dir("indextts2-ref");
+        let engine = fixture(&dir, "indextts2");
+        let mut req = request(&[]);
+        req.prompt_samples.clear();
+        let err = engine.synthesize(&req).unwrap_err();
+        assert!(err.to_string().contains("reference clip"), "{err}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn best_backend_follows_the_server_build() {
+        let dir = args_dir("backend-probe");
+        let probe = dir.join("probe.sh");
+        std::fs::write(&probe, "#!/bin/sh\necho 'backends: cpu,metal'\n").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut perms = std::fs::metadata(&probe).unwrap().permissions();
+            perms.set_mode(0o755);
+            std::fs::set_permissions(&probe, perms).unwrap();
+        }
+        assert_eq!(resolve_server_backend(&probe, "best"), "metal");
+        assert_eq!(resolve_server_backend(&probe, "cpu"), "cpu");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn resident_server_is_detected_beside_the_cli() {
+        let dir = args_dir("resident-bin");
+        let engine = fixture(&dir, "cosyvoice");
+        assert!(engine.server_bin.is_none(), "fixture has no server");
+        std::fs::write(dir.join("audiocpp_server"), b"x").unwrap();
+        let engine = fixture(&dir, "cosyvoice");
+        assert_eq!(
+            engine.server_bin.as_deref(),
+            Some(dir.join("audiocpp_server").as_path())
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn resident_server_config_and_body() {
+        let dir = args_dir("resident");
+        let engine = fixture(&dir, "indextts2");
+        let config = engine.server_config(1234);
+        assert_eq!(config["port"], 1234);
+        assert_eq!(config["max_loaded_models"], 1);
+        let models = config["models"].as_array().expect("models");
+        assert_eq!(models.len(), 1);
+        assert_eq!(models[0]["id"], "laverock-clon");
+        assert_eq!(models[0]["family"], "index_tts2");
+        assert_eq!(models[0]["task"], "clon");
+
+        let body = engine
+            .resident_body(
+                &request(&[
+                    ("num_beams", serde_json::json!("1")),
+                    ("language", serde_json::json!("en")),
+                ]),
+                Some(Path::new("/tmp/ref.wav")),
+                7,
+            )
+            .expect("body");
+        assert_eq!(body["model"], "laverock-clon");
+        assert_eq!(body["voice_ref"], "/tmp/ref.wav");
+        assert_eq!(body["seed"], 7);
+        assert_eq!(body["options"]["num_beams"], 1);
+        assert_eq!(body["options"]["language"], "en");
+        // The transcript is not part of IndexTTS-2's contract.
+        assert!(body.get("reference_text").is_none());
+
+        // Families that switch tasks get one config entry per task.
+        let engine = fixture(&dir, "cosyvoice");
+        let config = engine.server_config(1);
+        let tasks: Vec<&str> = config["models"]
+            .as_array()
+            .expect("models")
+            .iter()
+            .map(|m| m["task"].as_str().expect("task"))
+            .collect();
+        assert_eq!(tasks, ["clon", "tts"]);
+        let body = engine
+            .resident_body(
+                &request(&[
+                    ("template", serde_json::json!("instruct")),
+                    ("instruct", serde_json::json!("warm")),
+                ]),
+                None,
+                1,
+            )
+            .expect("body");
+        assert_eq!(body["model"], "laverock-tts");
+        assert_eq!(body["options"]["template_name"], "instruct");
+        assert_eq!(body["options"]["instruct"], "warm");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

@@ -19,14 +19,22 @@ describes the loopback listener.
 | GET | `/api/health` | service status |
 | GET | `/api/engines` | registered engines and their defaults |
 | POST | `/api/engines/:id/synthesize` | multipart `text` plus either `profile_id` or (`prompt` WAV + `prompt_text`); optional engine parameters → WAV |
-| GET | `/api/profiles` | saved voices with duration and size |
-| POST | `/api/profiles` | multipart `name`, `prompt_text`, `prompt` (WAV) → saved voice |
+| GET | `/api/profiles` | saved voices with duration, size and take count |
+| POST | `/api/profiles` | multipart `name`, `prompt_text`, `prompt` (WAV), or repeated `capture` ids → saved voice |
 | POST | `/api/profiles/:id` | multipart `name`, `prompt_text`, optional `prompt` → edit a saved voice |
-| GET | `/api/profiles/:id/audio` | reference clip of a saved voice |
-| DELETE | `/api/profiles/:id` | delete a saved voice |
+| POST | `/api/profiles/:id/captures` | JSON `{captures: [id, …]}` → replace the takes behind a voice |
+| GET | `/api/profiles/:id/audio` | reference clip a voice would hand an engine (`?engine=` sets the take limit) |
+| DELETE | `/api/profiles/:id` | delete a saved voice (its takes stay in the library) |
 | GET | `/api/profiles/:id/export` | portable `.lvvoice.zip` (manifest + WAV) |
 | POST | `/api/profiles/export` | JSON `{ids: [...]}` → one `.lvvoices.zip` batch archive |
 | POST | `/api/profiles/import` | multipart `file`: single or batch `.lvvoice(s).zip`; `strategy=skip` (default), `copy` or `overwrite` |
+| GET | `/api/captures` | recording library: takes with transcript, issues and duplicates |
+| POST | `/api/captures` | multipart `audio` (WAV), optional `name` and `prompt_text` → new take |
+| POST | `/api/captures/:id` | multipart `name` and/or `prompt_text` → edit a take |
+| GET | `/api/captures/:id/audio` | the take's audio |
+| POST | `/api/captures/:id/transcribe` | re-run speech recognition on the take |
+| DELETE | `/api/captures/:id` | delete a take (it is removed from the voices using it) |
+| POST | `/api/captures/dedupe` | delete byte-identical takes, repointing voices → `{removed}` |
 | GET | `/api/history` | generated audio, newest first |
 | GET | `/api/history/:id/audio` | generated audio (`?format=mp3` to export) |
 | DELETE | `/api/history/:id` · `/api/history` | delete one or all generations |
@@ -41,6 +49,11 @@ describes the loopback listener.
 | GET | `/api/models` | desktop only: catalog, install state, job log tail (`?lang=en` for English) |
 | POST | `/api/models/:id/install` | desktop only: start a download in the background |
 | POST | `/api/models/reload` | desktop only: re-scan `models/*/engine.json` |
+
+A voice can be built from one or more **takes** in the recording library.
+`POST /api/profiles` with a repeated `capture` field creates such a voice;
+`GET /api/engines` reports `reference_limit_secs`, the length at which the
+joined reference is cut, because each engine only conditions on that much.
 
 Engine parameters (`speed`, `num_steps`, `cfg`, `seed`, …) are declared per
 engine by its manifest and validated server-side against the same list the

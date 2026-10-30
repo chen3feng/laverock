@@ -141,8 +141,22 @@
     display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
     min-height: 38px;
   }
-  .voice-actions { display: flex; gap: 8px; margin-top: auto; }
-  .voice-actions button { flex: 1; }
+  /* Four actions, some with long English labels: grow to fill the row,
+     but wrap instead of spilling outside the card. */
+  .voice-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: auto; }
+  .voice-actions button { flex: 1 1 auto; }
+  /* ---------- recording library ---------- */
+  .voice-top .cap-check { flex: none; display: flex; align-items: center; margin-right: 2px; }
+  .voice-top .cap-check input { width: 16px; height: 16px; margin: 0; accent-color: var(--accent); }
+  .voice-top .cap-check + b { flex: 1; }
+  .muted { color: var(--muted); }
+  .capture-bar {
+    display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 14px;
+    padding: 12px 16px; margin-bottom: 12px; font-size: 13px;
+  }
+  .capture-bar .hint { margin: 0; }
+  .capture-bar button { margin-left: auto; }
   .empty {
     border: 1px dashed var(--line); border-radius: 14px; padding: 34px 20px;
     text-align: center; color: var(--muted); font-size: 13.5px;
@@ -241,9 +255,13 @@
       <svg viewBox="0 0 24 24"><path d="M11 5 6 9H2v6h4l5 4V5Z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M18.5 5.5a9 9 0 0 1 0 13"/></svg>
       <span data-i18n="nav.synthesize">合成</span>
     </a>
+    <a href="#/captures" data-page="captures">
+      <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="4" rx="1"/><rect x="3" y="10" width="18" height="4" rx="1"/><rect x="3" y="16" width="18" height="4" rx="1"/></svg>
+      <span data-i18n="nav.captures">素材库</span>
+    </a>
     <a href="#/voices" data-page="voices">
       <svg viewBox="0 0 24 24"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><path d="M12 19v3"/></svg>
-      <span data-i18n="nav.voices">语音素材</span>
+      <span data-i18n="nav.voices">声音</span>
     </a>
     <a href="#/models" data-page="models">
       <svg viewBox="0 0 24 24"><path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/></svg>
@@ -340,10 +358,43 @@
       <audio id="previewer" hidden></audio>
     </section>
 
+    <!-- ================= 素材库 ================= -->
+    <section id="page-captures" class="page">
+      <div class="page-head" style="display:flex;align-items:flex-end;justify-content:space-between;gap:12px;flex-wrap:wrap">
+        <div><h1 data-i18n="captures.title">素材库</h1><p class="sub" data-i18n="captures.sub">每次录音都是一条素材：可以试听、重新转写，勾选多段就能拼成一个声音。</p></div>
+        <div style="display:flex;gap:8px">
+          <button id="dedupeCapturesBtn" class="ghost" type="button" data-i18n="captures.dedupe">去重</button>
+          <button id="newCaptureBtn" type="button" data-i18n="captures.new">＋ 添加素材</button>
+        </div>
+      </div>
+
+      <div class="card" id="newCaptureCard" hidden>
+        <label data-i18n="captures.audio">录音或上传 WAV</label>
+        <div id="libraryCapture"></div>
+        <div class="hint" data-i18n="captures.hint">录音会在浏览器内转成 24kHz 单声道 WAV；安装了 SenseVoice 会自动转写。</div>
+        <div class="actions" style="margin-top:16px">
+          <button id="newCaptureSave" type="button" data-i18n="captures.save">加入素材库</button>
+          <button class="ghost" id="newCaptureCancel" type="button" data-i18n="cancel">取消</button>
+          <span class="hint" id="newCaptureHint"></span>
+        </div>
+      </div>
+
+      <div class="capture-bar" id="captureBar" hidden>
+        <span id="captureSelected"></span>
+        <span class="hint" id="captureLimit"></span>
+        <button id="capturesToVoice" type="button" data-i18n="captures.toVoice">用选中的素材新建声音</button>
+      </div>
+
+      <div class="grid" id="captureGrid"></div>
+      <div class="empty" id="capturesEmpty" data-i18n="captures.empty" hidden>
+        还没有素材。点击「添加素材」录音或上传一段参考音频。
+      </div>
+    </section>
+
     <!-- ================= 语音素材 ================= -->
     <section id="page-voices" class="page">
       <div class="page-head" style="display:flex;align-items:flex-end;justify-content:space-between;gap:12px;flex-wrap:wrap">
-        <div><h1 data-i18n="voices.title">语音素材</h1><p class="sub" data-i18n="voices.sub">保存的参考声音可以复用到任何克隆引擎。</p></div>
+        <div><h1 data-i18n="voices.title">声音库</h1><p class="sub" data-i18n="voices.sub">保存的声音可以复用到任何克隆引擎，也可以由素材库里的多段录音组成。</p></div>
         <div style="display:flex;gap:8px">
           <button id="exportVoicesBtn" class="ghost" type="button" data-i18n="voice.exportBatch">⬇ 批量导出</button>
           <button id="importVoiceBtn" class="ghost" type="button" data-i18n="voice.import">⬆ 导入声音</button>
@@ -358,6 +409,7 @@
         <label style="margin-top:14px" data-i18n="voice.ref">参考声音（3–10 秒干净人声）</label>
         <div id="voiceCapture"></div>
         <div class="hint" data-i18n="voice.rec.hint">录音会在浏览器内转成 24kHz 单声道 WAV。</div>
+        <div class="hint"><a href="#/captures" data-i18n="voice.from_library">要用多段录音拼成一个声音？去素材库勾选后新建。</a></div>
         <div style="margin-top:14px">
           <label for="newPromptText" data-i18n="voice.prompt">参考音频对应文字（ZipVoice 必填）</label>
           <input type="text" id="newPromptText" data-i18n-ph="voice.prompt.ph" placeholder="录音里说了什么就填什么" />
@@ -574,7 +626,7 @@
 
 <script>
 const $ = (id) => document.getElementById(id);
-const PAGES = ['synthesize', 'voices', 'history', 'models', 'settings'];
+const PAGES = ['synthesize', 'captures', 'voices', 'history', 'models', 'settings'];
 const HF_PRESETS = [
   { value: '', labelKey: 'preset.official.hf' },
   { value: 'https://hf-mirror.com', labelKey: 'preset.cn' },
@@ -590,7 +642,8 @@ const PIP_PRESETS = [
 const I18N = {
   zh: {
     'brand.sub': '本地语音工作室',
-    'nav.synthesize': '合成', 'nav.voices': '语音素材', 'nav.models': '模型',
+    'nav.synthesize': '合成', 'nav.captures': '素材库', 'nav.voices': '声音',
+    'nav.models': '模型',
     'nav.history': '历史', 'nav.settings': '设置', 'state.title': '服务状态',
 
     'synth.title': '合成',
@@ -610,8 +663,46 @@ const I18N = {
     'synth.samples': '候选项',
     'synth.samples_hint': '一次生成多段候选项逐一试听，选中满意的再下载。克隆引擎会通过不同的种子/采样本产生差异。',
 
-    'voices.title': '语音素材',
-    'voices.sub': '保存的参考声音可以复用到任何克隆引擎。',
+    'voices.title': '声音库',
+    'voices.sub': '保存的声音可以复用到任何克隆引擎，也可以由素材库里的多段录音组成。',
+    'voice.from_library': '要用多段录音拼成一个声音？去素材库勾选后新建。',
+    'voices.takes': '{n} 段素材',
+
+    'captures.title': '素材库',
+    'captures.sub': '每次录音都是一条素材：可以试听、重新转写，勾选多段就能拼成一个声音。',
+    'captures.empty': '还没有素材。点击「添加素材」录音或上传一段参考音频。',
+    'captures.new': '＋ 添加素材',
+    'captures.dedupe': '去重',
+    'captures.audio': '录音或上传 WAV',
+    'captures.hint': '录音会在浏览器内转成 24kHz 单声道 WAV；安装了 SenseVoice 会自动转写。',
+    'captures.save': '加入素材库',
+    'captures.saved': '已加入素材库',
+    'captures.toVoice': '用选中的素材新建声音',
+    'captures.voice_name': '声音名称',
+    'captures.voice_name.ph': '给由这些素材组成的声音起个名字',
+    'captures.selected': '已选 {n} 段素材',
+    'captures.limit': '当前引擎只用前 {limit} 秒',
+    'captures.none_selected': '请先勾选素材',
+    'captures.added_voice': '已用 {n} 段素材创建「{name}」',
+    'captures.deduped': '已删除 {n} 条重复素材',
+    'captures.nothing_deduped': '没有发现重复素材',
+    'captures.transcribing': '正在转写…',
+    'captures.transcribed': '已重新转写',
+    'captures.retranscribe': '转写',
+    'captures.rename': '编辑',
+    'captures.deleted': '已删除素材',
+    'captures.delete_confirm': '删除素材「{name}」？用到它的声音会少一段。',
+    'captures.not_transcribed': '尚未转写',
+    'captures.unnamed': '未命名素材',
+    'captures.duplicate': '重复素材',
+    'captures.default_name': '录音 {n}',
+    'captures.load_failed': '读取素材库失败：',
+    'captures.issue.no_transcript': '没有转写；克隆前请补上或重新转写',
+    'captures.issue.short': '偏短（{secs} 秒），建议 3–10 秒',
+    'captures.issue.long': '偏长（{secs} 秒），合成会更慢',
+    'captures.issue.clipped': '有削波（音量过大），克隆效果可能变差',
+    'captures.issue.pause': '中间有 {secs} 秒停顿',
+    'captures.issue.quiet': '音量偏低',
     'voice.new': '＋ 新建声音',
     'voice.name': '声音名称', 'voice.name.ph': '例如：新闻女声',
     'voice.ref': '参考声音（3–10 秒干净人声）',
@@ -813,7 +904,8 @@ const I18N = {
   },
   en: {
     'brand.sub': 'Local voice studio',
-    'nav.synthesize': 'Synthesize', 'nav.voices': 'Voice clips', 'nav.models': 'Models',
+    'nav.synthesize': 'Synthesize', 'nav.captures': 'Library', 'nav.voices': 'Voices',
+    'nav.models': 'Models',
     'nav.history': 'History', 'nav.settings': 'Settings', 'state.title': 'Service status',
 
     'synth.title': 'Synthesize',
@@ -833,8 +925,46 @@ const I18N = {
     'synth.samples': 'Takes',
     'synth.samples_hint': 'Generate several takes at once to audition side by side, then download the one you like. Cloning engines vary them via seed/sampling.',
 
-    'voices.title': 'Voice clips',
-    'voices.sub': 'Saved reference voices work with any cloning engine.',
+    'voices.title': 'Voice library',
+    'voices.sub': 'Saved voices work with any cloning engine, and can be built from several takes in the library.',
+    'voice.from_library': 'Building a voice from several takes? Pick them in the library, then create it.',
+    'voices.takes': '{n} takes',
+
+    'captures.title': 'Recording library',
+    'captures.sub': 'Every recording is a take: listen, re-transcribe, and pick several to build a voice.',
+    'captures.empty': 'No takes yet. Click "Add take" to record or upload a reference clip.',
+    'captures.new': '+ Add take',
+    'captures.dedupe': 'De-duplicate',
+    'captures.audio': 'Record or upload a WAV',
+    'captures.hint': 'Recordings become 24 kHz mono WAV in the browser; SenseVoice transcribes them when installed.',
+    'captures.save': 'Add to library',
+    'captures.saved': 'Added to the library',
+    'captures.toVoice': 'New voice from selected',
+    'captures.voice_name': 'Voice name',
+    'captures.voice_name.ph': 'Name the voice these takes make up',
+    'captures.selected': '{n} selected',
+    'captures.limit': 'this engine uses the first {limit} s',
+    'captures.none_selected': 'Select at least one take',
+    'captures.added_voice': 'Created "{name}" from {n} takes',
+    'captures.deduped': 'Removed {n} duplicate takes',
+    'captures.nothing_deduped': 'No duplicate takes found',
+    'captures.transcribing': 'Transcribing…',
+    'captures.transcribed': 'Transcript updated',
+    'captures.retranscribe': 'Transcribe',
+    'captures.rename': 'Edit',
+    'captures.deleted': 'Take deleted',
+    'captures.delete_confirm': 'Delete the take "{name}"? Voices using it will lose it.',
+    'captures.not_transcribed': 'Not transcribed yet',
+    'captures.unnamed': 'Untitled take',
+    'captures.duplicate': 'Duplicate',
+    'captures.default_name': 'Recording {n}',
+    'captures.load_failed': 'Failed to load the library: ',
+    'captures.issue.no_transcript': 'No transcript; add one or transcribe before cloning',
+    'captures.issue.short': 'Short ({secs} s); 3–10 s works best',
+    'captures.issue.long': 'Long ({secs} s); synthesis will be slower',
+    'captures.issue.clipped': 'Clipped (too loud); cloning may suffer',
+    'captures.issue.pause': '{secs} s pause inside',
+    'captures.issue.quiet': 'Low volume',
     'voice.new': '＋ New voice',
     'voice.name': 'Voice name', 'voice.name.ph': 'e.g. News anchor',
     'voice.ref': 'Reference clip (3–10 s of clean speech)',
@@ -1072,7 +1202,7 @@ async function setLanguage(next, { persist = true } = {}) {
   fillPreset($('hfPreset'), HF_PRESETS);
   fillPreset($('pipPreset'), PIP_PRESETS);
   syncProxyMode();
-  await Promise.all([loadEngines(), loadProfiles(), loadSettingsPage()]);
+  await Promise.all([loadEngines(), loadProfiles(), loadCaptures(), loadSettingsPage()]);
   renderHistory();
   await loadModels();
   if (session && session.lan_enabled) loadDevices();
@@ -1512,6 +1642,261 @@ if (!window.isSecureContext) {
   }
 }
 
+// ---------------------------------------------------------------- recording library
+
+// Takes are independent of voices: any selection of them can become a
+// voice, and deleting one here only removes it from the voices using it.
+// A voice's transcript and warnings come from the server, which measures
+// the takes when they are stored.
+let captureList = [];
+let selectedCaptures = new Set();
+// Transcript produced inside the add-take card, if the user transcribed
+// before saving; otherwise the server transcribes the stored take.
+let libraryTranscript = '';
+
+const captureUrl = (id) => '/api/captures/' + encodeURIComponent(id) + '/audio';
+
+async function loadCaptures() {
+  try {
+    captureList = await api('/api/captures');
+  } catch (e) {
+    toast(t('captures.load_failed') + e.message, true);
+    return;
+  }
+  for (const id of [...selectedCaptures]) {
+    if (!captureList.some((c) => c.id === id)) selectedCaptures.delete(id);
+  }
+  renderCaptures();
+}
+
+function captureIssueText(issue) {
+  const secs = issue.value ? issue.value.toFixed(1) : '';
+  return t('captures.issue.' + issue.code).replace('{secs}', secs);
+}
+
+// How much of the selected takes the chosen engine will actually hear.
+function captureLimitText() {
+  const engine = currentEngine();
+  const limit = engine && engine.reference_limit_secs;
+  if (!limit) return '';
+  const total = captureList
+    .filter((c) => selectedCaptures.has(c.id))
+    .reduce((sum, c) => sum + (c.duration_secs || 0), 0);
+  if (total <= limit) return '';
+  return t('captures.limit').replace('{limit}', limit.toFixed(0));
+}
+
+function syncCaptureBar() {
+  const n = selectedCaptures.size;
+  $('captureBar').hidden = n === 0;
+  if (!n) return;
+  $('captureSelected').textContent = t('captures.selected', { n });
+  $('captureLimit').textContent = captureLimitText();
+}
+
+function renderCaptures() {
+  const grid = $('captureGrid');
+  if (!grid) return;
+  grid.innerHTML = '';
+  $('capturesEmpty').hidden = captureList.length > 0;
+  for (const c of captureList) {
+    const el = document.createElement('div');
+    el.className = 'voice-card capture-card';
+    const name = c.name || t('captures.unnamed');
+    const checked = selectedCaptures.has(c.id) ? ' checked' : '';
+    const transcript = c.prompt_text
+      ? esc(c.prompt_text)
+      : `<span class="muted">${esc(t('captures.not_transcribed'))}</span>`;
+    el.innerHTML = `
+      <div class="voice-top">
+        <label class="cap-check"><input type="checkbox" class="pick"${checked} /></label>
+        <b>${esc(name)}</b>
+        ${c.duplicate_of ? `<span class="chip">${esc(t('captures.duplicate'))}</span>` : ''}
+      </div>
+      <div class="voice-meta">${fmtDur(c.duration_secs)} · ${fmtBytes(c.bytes)} · ${fmtDate(c.created_at)}</div>
+      ${c.issues.map((i) => `<div class="voice-warn">⚠ ${esc(captureIssueText(i))}</div>`).join('')}
+      <div class="voice-text">${transcript}</div>
+      <div class="voice-actions">
+        <button class="ghost small play" type="button">${previewId === c.id ? t('stop') : t('preview')}</button>
+        <button class="ghost small tr" type="button"${transcribeAvailable ? '' : ' disabled'}>${t('captures.retranscribe')}</button>
+        <button class="ghost small edit" type="button">${t('captures.rename')}</button>
+        <button class="ghost small danger del" type="button">${t('ui.delete')}</button>
+      </div>`;
+    el.querySelector('.pick').onchange = (e) => {
+      if (e.target.checked) selectedCaptures.add(c.id);
+      else selectedCaptures.delete(c.id);
+      syncCaptureBar();
+    };
+    el.querySelector('.play').onclick = () => togglePreview(c.id, captureUrl(c.id));
+    el.querySelector('.tr').onclick = () => transcribeCapture(c);
+    el.querySelector('.edit').onclick = () => editCapture(c);
+    el.querySelector('.del').onclick = () => deleteCapture(c);
+    grid.appendChild(el);
+  }
+  syncCaptureBar();
+}
+
+async function transcribeCapture(c) {
+  if (!transcribeAvailable) {
+    toast(t('ui.install_the_sensevoice_speech_to'), true);
+    return;
+  }
+  toast(t('captures.transcribing'));
+  try {
+    await api('/api/captures/' + encodeURIComponent(c.id) + '/transcribe', { method: 'POST' });
+    toast(t('captures.transcribed'));
+  } catch (e) {
+    toast(t('ui.transcription_failed') + e.message, true);
+  }
+  // Voices built from this take got a new transcript too.
+  await Promise.all([loadCaptures(), loadProfiles()]);
+}
+
+async function editCapture(c) {
+  const res = await showDialog({
+    title: t('captures.rename'),
+    okText: t('ui.save'),
+    fields: [
+      { name: 'name', label: t('ui.name'), type: 'text', value: c.name },
+      {
+        name: 'prompt_text',
+        label: t('ui.reference_transcript'),
+        type: 'textarea',
+        value: c.prompt_text,
+        hint: t('ui.required_for_zipvoice_may_be'),
+      },
+    ],
+  });
+  if (!res) return;
+  const fd = new FormData();
+  fd.append('name', res.values.name || c.name);
+  fd.append('prompt_text', res.values.prompt_text);
+  try {
+    await api('/api/captures/' + encodeURIComponent(c.id), { method: 'POST', body: fd });
+    await Promise.all([loadCaptures(), loadProfiles()]);
+  } catch (e) {
+    toast(t('ui.failed') + e.message, true);
+  }
+}
+
+async function deleteCapture(c) {
+  const name = c.name || t('captures.unnamed');
+  if (!(await confirmAction(t('captures.delete_confirm').replace('{name}', name)))) return;
+  try {
+    await api('/api/captures/' + encodeURIComponent(c.id), { method: 'DELETE' });
+    toast(t('captures.deleted'));
+  } catch (e) {
+    toast(t('ui.failed') + e.message, true);
+  }
+  await Promise.all([loadCaptures(), loadProfiles()]);
+}
+
+async function dedupeCaptures() {
+  try {
+    const report = await api('/api/captures/dedupe', { method: 'POST' });
+    toast(report.removed
+      ? t('captures.deduped', { n: report.removed })
+      : t('captures.nothing_deduped'));
+  } catch (e) {
+    toast(t('ui.failed') + e.message, true);
+  }
+  await Promise.all([loadCaptures(), loadProfiles()]);
+}
+
+// Add the clip recorded or picked in the card as a take, transcribing it
+// on the server when nothing did so in the browser.
+async function saveCapture() {
+  if (!libraryCapture.blob) {
+    toast(t('ui.choose_or_record_a_reference'), true);
+    return;
+  }
+  const fd = new FormData();
+  fd.append('audio', libraryCapture.blob, libraryCapture.filename || 'take.wav');
+  fd.append('name', t('captures.default_name', { n: captureList.length + 1 }));
+  if (libraryTranscript) fd.append('prompt_text', libraryTranscript);
+  let meta;
+  try {
+    meta = await api('/api/captures', { method: 'POST', body: fd });
+  } catch (e) {
+    toast(t('ui.failed') + e.message, true);
+    return;
+  }
+  if (!libraryTranscript && transcribeAvailable) {
+    try {
+      await api('/api/captures/' + encodeURIComponent(meta.id) + '/transcribe', { method: 'POST' });
+    } catch (_) {
+      // The take is stored either way; it can be transcribed later.
+    }
+  }
+  toast(t('captures.saved'));
+  $('newCaptureCard').hidden = true;
+  libraryCapture.clear();
+  libraryTranscript = '';
+  await loadCaptures();
+}
+
+// Turn the ticked takes into one voice, in the order the library lists
+// them. The server joins the audio up to the engine's reference limit.
+async function capturesToVoice() {
+  const ids = captureList.filter((c) => selectedCaptures.has(c.id)).map((c) => c.id);
+  if (!ids.length) {
+    toast(t('captures.none_selected'), true);
+    return;
+  }
+  const first = captureList.find((c) => c.id === ids[0]);
+  const res = await showDialog({
+    title: t('captures.toVoice'),
+    okText: t('ui.save'),
+    fields: [{
+      name: 'name',
+      label: t('captures.voice_name'),
+      type: 'text',
+      value: first ? first.name : '',
+      placeholder: t('captures.voice_name.ph'),
+    }],
+  });
+  if (!res) return;
+  const fd = new FormData();
+  fd.append('name', res.values.name || t('captures.default_name', { n: captureList.length }));
+  // Repeated fields: order is the voice's take order.
+  for (const id of ids) fd.append('capture', id);
+  try {
+    const voice = await api('/api/profiles', { method: 'POST', body: fd });
+    toast(t('captures.added_voice', { name: voice.name, n: ids.length }));
+    selectedCaptures.clear();
+  } catch (e) {
+    toast(t('ui.failed') + e.message, true);
+    return;
+  }
+  await Promise.all([loadCaptures(), loadProfiles()]);
+}
+
+const libraryCapture = new Capture($('libraryCapture'));
+libraryCapture.onTranscribed = (text) => {
+  libraryTranscript = text;
+};
+// A different clip invalidates the transcript from the previous one.
+libraryCapture.onChange = () => {
+  libraryTranscript = '';
+};
+if (!window.isSecureContext) {
+  libraryCapture.rec.disabled = true;
+  libraryCapture.rec.title = t('ui.microphone_access_requires_https_or');
+}
+
+$('newCaptureBtn').onclick = () => {
+  $('newCaptureCard').hidden = false;
+  $('newCaptureHint').textContent = '';
+};
+$('newCaptureCancel').onclick = () => {
+  $('newCaptureCard').hidden = true;
+  libraryCapture.clear();
+  libraryTranscript = '';
+};
+$('newCaptureSave').onclick = saveCapture;
+$('dedupeCapturesBtn').onclick = dedupeCaptures;
+$('capturesToVoice').onclick = capturesToVoice;
+
 // ---------------------------------------------------------------- profiles
 
 function selectedProfile() {
@@ -1675,6 +2060,14 @@ function voiceWarnings(p) {
   return out;
 }
 
+// A voice previews what the selected engine would hear, so the engine
+// travels with the request and its reference limit applies.
+function profilePreviewUrl(id) {
+  const engine = currentEngine();
+  const url = `/api/profiles/${encodeURIComponent(id)}/audio`;
+  return engine ? `${url}?engine=${encodeURIComponent(engine.id)}` : url;
+}
+
 function renderVoices() {
   const grid = $('voicesGrid');
   grid.innerHTML = '';
@@ -1683,8 +2076,10 @@ function renderVoices() {
     const el = document.createElement('div');
     el.className = 'voice-card';
     const warns = voiceWarnings(p);
+    // A voice is engine-agnostic: the engine is picked at synthesis, so
+    // the engine it was first saved with is not shown as a binding.
     el.innerHTML = `
-      <div class="voice-top"><b>${esc(p.name)}</b>${p.engine_id ? `<span class="chip">${esc(p.engine_id)}</span>` : ''}</div>
+      <div class="voice-top"><b>${esc(p.name)}</b>${p.capture_count > 1 ? `<span class="chip">${esc(t('voices.takes', { n: p.capture_count }))}</span>` : ''}</div>
       <div class="voice-meta">${fmtDur(p.duration_secs)} · ${fmtBytes(p.bytes)} · ${fmtDate(p.created_at)}</div>
       ${warns.map((w) => `<div class="voice-warn">⚠ ${esc(w)}</div>`).join('')}
       <div class="voice-text">${esc(p.prompt_text)}</div>
@@ -1694,7 +2089,7 @@ function renderVoices() {
         <button class="ghost small export" type="button">${t("ui.export")}</button>
         <button class="ghost small danger del" type="button">${t("ui.delete")}</button>
       </div>`;
-    el.querySelector('.play').onclick = () => togglePreview(p.id);
+    el.querySelector('.play').onclick = () => togglePreview(p.id, profilePreviewUrl(p.id));
     el.querySelector('.edit').onclick = () => editProfile(p);
     el.querySelector('.export').onclick = () => exportProfile(p);
     el.querySelector('.del').onclick = () => deleteProfile(p);
@@ -1702,24 +2097,29 @@ function renderVoices() {
   }
 }
 
-function togglePreview(id) {
+// `key` identifies what is playing (a voice or a take id); `url` is what
+// to play. A voice previews the clip the selected engine would hear, so
+// the engine's reference limit applies here too.
+function togglePreview(key, url) {
   const audio = $('previewer');
-  if (previewId === id) {
+  if (previewId === key) {
     audio.pause();
     audio.removeAttribute('src');
     previewId = null;
   } else {
-    previewId = id;
-    audio.src = `/api/profiles/${encodeURIComponent(id)}/audio`;
+    previewId = key;
+    audio.src = url;
     audio.play().catch(() => {});
   }
   renderVoices();
+  if (typeof renderCaptures === 'function') renderCaptures();
   syncProfileUI();
 }
 
 $('previewer').addEventListener('ended', () => {
   previewId = null;
   renderVoices();
+  if (typeof renderCaptures === 'function') renderCaptures();
   syncProfileUI();
 });
 
@@ -1823,7 +2223,7 @@ async function importProfile(file, strategy) {
   }
 }
 
-async function createProfile(name, promptText, blob, engineId) {
+async function createProfile(name, promptText, blob) {
   if (!blob) throw new Error(t("ui.choose_or_record_a_reference"));
   if (!name) throw new Error(t("ui.please_name_the_voice"));
   if (!promptText) throw new Error(t("ui.please_fill_in_the_reference"));
@@ -1831,7 +2231,6 @@ async function createProfile(name, promptText, blob, engineId) {
   fd.append('name', name);
   fd.append('prompt_text', promptText);
   fd.append('prompt', blob, blob.name || 'reference.wav');
-  if (engineId) fd.append('engine_id', engineId);
   const res = await apiFetch('/api/profiles', { method: 'POST', body: fd });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
@@ -1842,7 +2241,7 @@ async function createProfile(name, promptText, blob, engineId) {
 
 $('preview').onclick = () => {
   const p = selectedProfile();
-  if (p) togglePreview(p.id);
+  if (p) togglePreview(p.id, profilePreviewUrl(p.id));
 };
 
 $('saveprofile').onclick = async () => {
@@ -1853,7 +2252,6 @@ $('saveprofile').onclick = async () => {
       $('profilename').value.trim(),
       $('prompt_text').value.trim(),
       synthCapture.blob,
-      $('engine').value,
     );
     $('profilename').value = '';
     $('savehint').textContent = t('ui.saved_for_picker', { name: meta.name });
@@ -2006,7 +2404,6 @@ $('newSave').onclick = async () => {
       $('newName').value.trim(),
       $('newPromptText').value.trim(),
       voiceCapture.blob,
-      $('engine').value,
     );
     $('newName').value = '';
     $('newPromptText').value = '';
@@ -3149,6 +3546,7 @@ function showPage(page) {
     clearInterval(modelsTimer);
     modelsTimer = null;
   }
+  if (page === 'captures') loadCaptures();
   if (page === 'voices') loadProfiles();
   if (page === 'history') loadHistory();
   if (page === 'models') loadModels();
@@ -3166,7 +3564,7 @@ async function loadHealth() {
     $('connState').classList.remove('off');
     mp3Supported = !!h.mp3;
     transcribeAvailable = !!h.transcribe;
-    for (const cap of [synthCapture, voiceCapture]) cap.syncTranscribeButton();
+    for (const cap of [synthCapture, voiceCapture, libraryCapture]) cap.syncTranscribeButton();
   } catch (_) {
     $('connState').classList.add('off');
   }

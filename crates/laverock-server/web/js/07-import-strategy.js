@@ -42,7 +42,6 @@ $('newSave').onclick = async () => {
       $('newName').value.trim(),
       $('newPromptText').value.trim(),
       voiceCapture.blob,
-      $('engine').value,
     );
     $('newName').value = '';
     $('newPromptText').value = '';

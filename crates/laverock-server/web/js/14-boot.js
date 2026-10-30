@@ -13,6 +13,7 @@ function showPage(page) {
     clearInterval(modelsTimer);
     modelsTimer = null;
   }
+  if (page === 'captures') loadCaptures();
   if (page === 'voices') loadProfiles();
   if (page === 'history') loadHistory();
   if (page === 'models') loadModels();
@@ -30,7 +31,7 @@ async function loadHealth() {
     $('connState').classList.remove('off');
     mp3Supported = !!h.mp3;
     transcribeAvailable = !!h.transcribe;
-    for (const cap of [synthCapture, voiceCapture]) cap.syncTranscribeButton();
+    for (const cap of [synthCapture, voiceCapture, libraryCapture]) cap.syncTranscribeButton();
   } catch (_) {
     $('connState').classList.add('off');
   }

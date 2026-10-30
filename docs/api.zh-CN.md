@@ -17,14 +17,22 @@ Cookie）；以下均指回环监听。
 | GET | `/api/health` | 服务状态 |
 | GET | `/api/engines` | 已注册引擎及其默认参数 |
 | POST | `/api/engines/:id/synthesize` | multipart：`text` 加 `profile_id` 或（`prompt` WAV + `prompt_text`），可附引擎参数 → WAV |
-| GET | `/api/profiles` | 已保存声音及时长、大小 |
-| POST | `/api/profiles` | multipart：`name`、`prompt_text`、`prompt`（WAV）→ 保存声音 |
+| GET | `/api/profiles` | 已保存声音及时长、大小、素材段数 |
+| POST | `/api/profiles` | multipart：`name`、`prompt_text`、`prompt`（WAV），或重复的 `capture` id → 保存声音 |
 | POST | `/api/profiles/:id` | multipart：`name`、`prompt_text`、可选 `prompt` → 编辑声音 |
-| GET | `/api/profiles/:id/audio` | 某条已保存声音的参考音频 |
-| DELETE | `/api/profiles/:id` | 删除已保存声音 |
+| POST | `/api/profiles/:id/captures` | JSON `{captures: [id, …]}` → 替换该声音引用的素材 |
+| GET | `/api/profiles/:id/audio` | 该声音交给引擎的参考音频（`?engine=` 决定按哪个引擎的上限拼接） |
+| DELETE | `/api/profiles/:id` | 删除已保存声音（其素材留在素材库） |
 | GET | `/api/profiles/:id/export` | 导出便携 `.lvvoice.zip`（清单 + WAV） |
 | POST | `/api/profiles/export` | JSON `{ids: [...]}` → 打包为单个 `.lvvoices.zip` |
 | POST | `/api/profiles/import` | multipart `file`：单个或批量 `.lvvoice(s).zip`；`strategy=skip`（默认）/`copy`/`overwrite` |
+| GET | `/api/captures` | 素材库：转写、检查项与重复标记 |
+| POST | `/api/captures` | multipart：`audio`（WAV）、可选 `name` 与 `prompt_text` → 新素材 |
+| POST | `/api/captures/:id` | multipart：`name` / `prompt_text` → 编辑素材 |
+| GET | `/api/captures/:id/audio` | 素材音频 |
+| POST | `/api/captures/:id/transcribe` | 对素材重新做语音识别 |
+| DELETE | `/api/captures/:id` | 删除素材（引用它的声音同步去掉这一段） |
+| POST | `/api/captures/dedupe` | 删除内容完全相同的素材并重指向声音 → `{removed}` |
 | GET | `/api/history` | 已生成音频，最新在前 |
 | GET | `/api/history/:id/audio` | 生成的音频（`?format=mp3` 导出 MP3） |
 | DELETE | `/api/history/:id` · `/api/history` | 删除单条 / 全部生成记录 |
@@ -39,6 +47,10 @@ Cookie）；以下均指回环监听。
 | GET | `/api/models` | 仅桌面：目录、安装状态、任务日志尾部（`?lang=en` 返回英文介绍） |
 | POST | `/api/models/:id/install` | 仅桌面：后台开始下载 |
 | POST | `/api/models/reload` | 仅桌面：重新扫描 `models/*/engine.json` |
+
+一条声音可以由素材库中的一段或多段**素材**组成：`POST /api/profiles` 重复传
+`capture` 字段即可；`GET /api/engines` 返回的 `reference_limit_secs` 是拼接时的
+长度上限，因为每个引擎只在那段长度内取条件。
 
 引擎参数（`speed`、`num_steps`、`cfg`、`seed` 等）由各引擎的清单声明，服务端按
 同一份列表校验，界面也用同一份列表生成控件；`GET /api/engines` 可查看。引擎 id

@@ -21,12 +21,14 @@
 /// for. Kept small because each take is a full inference run.
 pub(crate) const MAX_SAMPLES: u32 = 4;
 
+mod captures;
 mod export;
 mod history;
 mod models;
 mod openai_compat;
 mod profiles;
 mod proxy;
+mod reference;
 mod remote;
 mod settings;
 
@@ -519,8 +521,10 @@ async fn create_profile(
 ) -> Result<Json<profiles::ProfileMeta>, ApiError> {
     let mut name = None;
     let mut prompt_text = None;
-    let mut engine_id = None;
     let mut wav: Option<Vec<u8>> = None;
+    // Takes from the recording library, in order. When present they are
+    // the voice's audio and `prompt` is not needed.
+    let mut capture_ids: Vec<String> = Vec::new();
 
     while let Some(field) = multipart
         .next_field()
@@ -544,16 +548,19 @@ async fn create_profile(
                         .map_err(|e| ApiError::bad_request(format!("bad prompt_text: {e}")))?,
                 )
             }
-            Some("engine_id") => {
+            Some("capture") | Some("captures") => {
                 let raw = field
                     .text()
                     .await
-                    .map_err(|e| ApiError::bad_request(format!("bad engine_id: {e}")))?;
-                if !raw.trim().is_empty() {
-                    engine_id = Some(raw);
-                }
+                    .map_err(|e| ApiError::bad_request(format!("bad capture ids: {e}")))?;
+                capture_ids.extend(
+                    raw.split(',')
+                        .map(str::trim)
+                        .filter(|id| !id.is_empty())
+                        .map(str::to_string),
+                );
             }
-            Some("prompt") => {
+            Some("prompt") | Some("audio") => {
                 wav = Some(
                     field
                         .bytes()
@@ -567,18 +574,18 @@ async fn create_profile(
     }
 
     let name = name.ok_or_else(|| ApiError::bad_request("missing required field: name"))?;
+    if !capture_ids.is_empty() {
+        return Ok(Json(
+            state.profiles.create_from_captures(&name, &capture_ids)?,
+        ));
+    }
     let prompt_text =
         prompt_text.ok_or_else(|| ApiError::bad_request("missing required field: prompt_text"))?;
     let wav = wav
         .filter(|b| !b.is_empty())
         .ok_or_else(|| ApiError::bad_request("missing required field: prompt (WAV reference)"))?;
 
-    Ok(Json(state.profiles.create(
-        &name,
-        &prompt_text,
-        engine_id,
-        &wav,
-    )?))
+    Ok(Json(state.profiles.create(&name, &prompt_text, &wav)?))
 }
 
 async fn update_profile(
@@ -645,17 +652,197 @@ async fn delete_profile(
     Ok(StatusCode::NO_CONTENT)
 }
 
+/// The reference clip a voice would hand an engine: the takes joined,
+/// cut at the limit of the engine named in `?engine=`, if any.
 async fn profile_audio(
     State(state): State<AppState>,
     Path(id): Path<String>,
+    Query(q): Query<ProfileAudioQuery>,
 ) -> Result<Response, ApiError> {
-    let (_, wav) = state.profiles.get(&id)?;
+    let limit = q
+        .engine
+        .as_deref()
+        .and_then(|engine| state.manager.reference_limit_secs(engine).ok())
+        .unwrap_or(15.0);
+    let combined = state.profiles.reference(&id, limit)?;
+    Ok((
+        StatusCode::OK,
+        [(header::CONTENT_TYPE, "audio/wav".to_string())],
+        combined.wav,
+    )
+        .into_response())
+}
+
+#[derive(serde::Deserialize)]
+struct ProfileAudioQuery {
+    engine: Option<String>,
+}
+
+// ---------------------------------------------------------------- captures
+
+// The recording library: independent takes that voices are built from.
+// A take is audio + transcript + measurements; the client can re-run
+// speech recognition on it, listen to it, or delete it without touching
+// the voices it fed.
+
+async fn list_captures(
+    State(state): State<AppState>,
+) -> Result<Json<Vec<captures::CaptureView>>, ApiError> {
+    Ok(Json(state.profiles.captures().list()?))
+}
+
+/// `POST /api/captures` — multipart: `audio` (required), `name`,
+/// `prompt_text`. The transcript may be empty; transcribe afterwards.
+async fn create_capture(
+    State(state): State<AppState>,
+    mut multipart: Multipart,
+) -> Result<Json<captures::CaptureMeta>, ApiError> {
+    let mut name = String::new();
+    let mut prompt_text = String::new();
+    let mut wav: Option<Vec<u8>> = None;
+    while let Some(field) = multipart
+        .next_field()
+        .await
+        .map_err(|e| ApiError::bad_request(format!("malformed multipart: {e}")))?
+    {
+        match field.name() {
+            Some("name") => {
+                name = field
+                    .text()
+                    .await
+                    .map_err(|e| ApiError::bad_request(format!("bad name: {e}")))?;
+            }
+            Some("prompt_text") => {
+                prompt_text = field
+                    .text()
+                    .await
+                    .map_err(|e| ApiError::bad_request(format!("bad prompt_text: {e}")))?;
+            }
+            Some("audio") | Some("prompt") => {
+                wav = Some(
+                    field
+                        .bytes()
+                        .await
+                        .map_err(|e| ApiError::bad_request(format!("bad audio upload: {e}")))?
+                        .to_vec(),
+                );
+            }
+            _ => {}
+        }
+    }
+    let wav = wav
+        .filter(|b| !b.is_empty())
+        .ok_or_else(|| ApiError::bad_request("missing required field: audio"))?;
+    Ok(Json(state.profiles.captures().create(
+        &name,
+        &prompt_text,
+        &wav,
+        true,
+    )?))
+}
+
+/// `POST /api/captures/{id}` — multipart: `name` and/or `prompt_text`.
+async fn update_capture(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    mut multipart: Multipart,
+) -> Result<Json<captures::CaptureMeta>, ApiError> {
+    let mut name = None;
+    let mut prompt_text = None;
+    while let Some(field) = multipart
+        .next_field()
+        .await
+        .map_err(|e| ApiError::bad_request(format!("malformed multipart: {e}")))?
+    {
+        match field.name() {
+            Some("name") => {
+                name = Some(
+                    field
+                        .text()
+                        .await
+                        .map_err(|e| ApiError::bad_request(format!("bad name: {e}")))?,
+                );
+            }
+            Some("prompt_text") => {
+                prompt_text = Some(
+                    field
+                        .text()
+                        .await
+                        .map_err(|e| ApiError::bad_request(format!("bad prompt_text: {e}")))?,
+                );
+            }
+            _ => {}
+        }
+    }
+    let meta = state
+        .profiles
+        .captures()
+        .update(&id, name.as_deref(), prompt_text.as_deref())?;
+    Ok(Json(meta))
+}
+
+async fn delete_capture(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<StatusCode, ApiError> {
+    state.profiles.delete_capture(&id)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn capture_audio(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Response, ApiError> {
+    let (_, wav) = state.profiles.captures().get(&id)?;
     Ok((
         StatusCode::OK,
         [(header::CONTENT_TYPE, "audio/wav".to_string())],
         wav,
     )
         .into_response())
+}
+
+/// Re-run speech recognition on a stored take. Voices built from it get
+/// their transcript refreshed too.
+async fn transcribe_capture(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Json<captures::CaptureMeta>, ApiError> {
+    let (_, wav) = state.profiles.captures().get(&id)?;
+    let transcriber = state.transcriber.clone();
+    let text = tokio::task::spawn_blocking(move || transcriber.transcribe(&wav))
+        .await
+        .map_err(|e| ApiError {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            message: format!("transcribe task panicked: {e}"),
+        })??;
+    if text.trim().is_empty() {
+        return Err(ApiError::bad_request("no speech recognized"));
+    }
+    Ok(Json(state.profiles.set_capture_transcript(&id, &text)?))
+}
+
+/// Delete takes whose audio is byte-identical to an older take, and
+/// repoint the voices that used them.
+async fn dedupe_captures(
+    State(state): State<AppState>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let removed = state.profiles.dedupe_captures()?;
+    Ok(Json(serde_json::json!({ "removed": removed })))
+}
+
+#[derive(serde::Deserialize)]
+struct CapturesBody {
+    captures: Vec<String>,
+}
+
+/// Replace the takes a saved voice is built from, in order.
+async fn set_profile_captures(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(body): Json<CapturesBody>,
+) -> Result<Json<profiles::ProfileMeta>, ApiError> {
+    Ok(Json(state.profiles.set_captures(&id, &body.captures)?))
 }
 
 /// Download a portable `.lvvoice.zip` archive of a saved voice.
@@ -1085,9 +1272,23 @@ async fn synthesize(
     // A saved voice takes precedence over an ad-hoc upload. Reference audio
     // is optional at the API level: preset/voice-design engines do not need
     // one, and each engine reports what it requires.
+    //
+    // A voice built from several takes is joined here, cut at the engine's
+    // own reference limit — that is the clip the engine conditions on.
     let (prompt_bytes, prompt_text) = if let Some(id) = profile_id {
-        let (meta, wav) = state.profiles.get(&id)?;
-        (Some(wav), Some(meta.prompt_text))
+        let limit = state
+            .manager
+            .reference_limit_secs(&engine_id)
+            .unwrap_or(15.0);
+        let combined = state.profiles.reference(&id, limit)?;
+        if combined.dropped > 0 {
+            tracing::info!(
+                "voice {id}: {} of {} takes used ({limit} s limit for {engine_id})",
+                combined.used,
+                combined.used + combined.dropped
+            );
+        }
+        (Some(combined.wav), Some(combined.text))
     } else {
         let text = prompt_text
             .map(|t| t.trim().to_string())
@@ -1445,6 +1646,12 @@ async fn main() {
 
     let manager = Arc::new(EngineManager::open(&models_dir).expect("scan models dir"));
     let profiles = Arc::new(ProfileStore::open(&data_dir).expect("open data dir"));
+    // Voices saved before the recording library existed become one-take
+    // voices. Idempotent, but only pay for it when there is something to do.
+    let migrated = profiles.migrate_captures();
+    if migrated > 0 {
+        tracing::info!("migrated {migrated} saved voices into the recording library");
+    }
     let history = Arc::new(history::HistoryStore::open(&data_dir).expect("open history"));
     let remote = Arc::new(RemoteState::open(&data_dir).expect("open remote state"));
     let scripts_dir = models::resolve_scripts_dir();
@@ -1495,6 +1702,15 @@ async fn main() {
             delete(delete_profile).post(update_profile),
         )
         .route("/api/profiles/{id}/audio", get(profile_audio))
+        .route("/api/profiles/{id}/captures", post(set_profile_captures))
+        .route("/api/captures", get(list_captures).post(create_capture))
+        .route("/api/captures/dedupe", post(dedupe_captures))
+        .route(
+            "/api/captures/{id}",
+            post(update_capture).delete(delete_capture),
+        )
+        .route("/api/captures/{id}/audio", get(capture_audio))
+        .route("/api/captures/{id}/transcribe", post(transcribe_capture))
         .route("/api/profiles/{id}/export", get(export_profile))
         .route("/api/profiles/export", post(export_profiles_batch))
         .route("/api/history", get(list_history).delete(clear_history))

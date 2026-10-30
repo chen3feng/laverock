@@ -12,12 +12,13 @@ generation history and a phone remote that joins over your local network.
 - **Voice cloning and preset voices** — save 3–10 s of speech as a named
   voice, then have any cloning engine read new text in it. Engines without a
   reference clip are covered by preset-voice and voice-design modes.
-- **15 models behind one interface** — from a 135 MB ONNX model that runs in
+- **16 models behind one interface** — from a 135 MB ONNX model that runs in
   real time on CPU to 2B diffusion and LLM systems. Install, update and
   remove them from the app, with live download progress.
-- **Voice library** — record in the app or upload a clip, transcribe it
-  automatically with on-device speech recognition, edit it later, and export
-  or import voices as `.lvvoice.zip`.
+- **Recording library and voices** — every recording becomes a take,
+  transcribed automatically with on-device speech recognition. A voice is
+  one take or several joined together, and voices export or import as
+  `.lvvoice.zip`.
 - **History** — every generation is kept, playable and downloadable as WAV
   or MP3, newest first.
 - **Phone remote** — turn on LAN access, scan a QR code, and use the same UI
@@ -40,9 +41,10 @@ use Metal on Apple Silicon or CUDA on NVIDIA GPUs when available.
    is the smallest and fastest on CPU; Kokoro (~135 MB) is the lightest way
    to try preset voices. The packages ship without weights, so this is the
    one download you need.
-3. On **Voice clips**, record or upload a reference voice (or choose a
-   preset voice, depending on the engine). On **Synthesize**, pick the
-   engine and voice, type the text, and generate.
+3. On **Library**, record a take or upload a clip; it is transcribed for
+   you. On **Voices**, tick the takes you want and save them as one voice
+   (or choose a preset voice, depending on the engine). On **Synthesize**,
+   pick the engine and voice, type the text, and generate.
 
 The app keeps models, voices and history in the system application-data
 directory and supervises its own local server, so there is nothing else to
@@ -61,6 +63,7 @@ configure.
 | Qwen3-TTS 0.6B / 1.7B | clone, preset, voice design | 10 | 2–5 GB |
 | Ming-3.0-tts 0.5B | clone, preset, voice design, multilingual | 7 | ~3 GB |
 | Chatterbox Multilingual | clone | 23 | ~5 GB |
+| IndexTTS-2 | clone | zh, en | ~3.6 GB |
 | MOSS-TTS-Delay | clone | 20 | ~10 GB |
 | SenseVoice Small (optional) | speech recognition | 5 | ~234 MB |
 

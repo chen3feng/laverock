@@ -153,6 +153,100 @@ code=$(curl -s -o /dev/null -w '%{http_code}' -X DELETE "$BASE/api/profiles/$pid
 curl -sf "$BASE/api/profiles" | grep -q "$pid" \
   && bad "deleted profile still listed" || ok "profile removed"
 
+echo "captures"
+# Two takes, and a byte-identical copy of the first.
+take_id() { sed -n 's/.*"id":"\([^"]*\)".*/\1/p'; }
+c1=$(curl -s -X POST "$BASE/api/captures" -F 'name=smoke-a' \
+  -F "audio=@$DIR/test_wavs/leijun-1.wav" | take_id)
+c2=$(curl -s -X POST "$BASE/api/captures" -F 'name=smoke-b' \
+  -F "audio=@$DIR/test_wavs/news-female.wav" | take_id)
+c3=$(curl -s -X POST "$BASE/api/captures" -F 'name=smoke-a-copy' \
+  -F "audio=@$DIR/test_wavs/leijun-1.wav" | take_id)
+if [ -n "$c1" ] && [ -n "$c2" ] && [ -n "$c3" ]; then
+  ok "create takes"
+else
+  bad "create takes"
+fi
+captures_json=$(curl -sf "$BASE/api/captures")
+case "$captures_json" in
+  *"{\"code\":\"no_transcript\"}"*) ok "untranscribed take flagged" ;;
+  *) bad "take readiness check" ;;
+esac
+# Content de-duplication is checked in the unit tests; a global clean-up
+# here would touch takes that belong to a real library, so this only
+# verifies that the duplicate is reported.
+c3_line=$(printf '%s\n' "$captures_json" | sed 's/},{/}\n{/g' | grep "\"$c3\"")
+case "$c3_line" in
+  *'"duplicate_of":null'*|'') bad "duplicate not flagged" ;;
+  *'"duplicate_of":"c'*) ok "duplicate take flagged" ;;
+  *) bad "duplicate not flagged" ;;
+esac
+curl -sf "$BASE/api/captures/$c1/audio" -o "$OUT/take-a.wav" \
+  && head -c 4 "$OUT/take-a.wav" | grep -q RIFF \
+  && ok "take audio" || bad "take audio"
+
+
+if curl -s "$BASE/api/health" | grep -q '"transcribe":true'; then
+  heard=$(curl -s -X POST "$BASE/api/captures/$c1/transcribe")
+  case "$heard" in
+    *武汉*) ok "re-transcribe take" ;;
+    *) bad "re-transcribe take: $(printf '%s' "$heard" | head -c 160)" ;;
+  esac
+else
+  echo "  skip re-transcribing (no speech-to-text model)"
+fi
+
+# A voice made of both takes hands the engine their audio joined.
+duo_json=$(curl -s -X POST "$BASE/api/profiles" \
+  -F 'name=smoke-test-duo' -F "capture=$c1" -F "capture=$c2")
+duo=$(printf '%s' "$duo_json" | take_id)
+[ -n "$duo" ] && ok "voice from two takes ($duo)" || bad "voice from two takes"
+if [ -n "$duo" ]; then
+  case "$duo_json" in
+    *'"captures":["'$c1'","'$c2'"]'*) ok "takes recorded on the voice" ;;
+    *) bad "take list missing from the new voice" ;;
+  esac
+  curl -sf "$BASE/api/profiles/$duo/audio" -o "$OUT/duo.wav"
+  a=$(wc -c <"$OUT/take-a.wav" | tr -d ' ')
+  d=$(wc -c <"$OUT/duo.wav" | tr -d ' ')
+  [ "$d" -gt "$a" ] && ok "joined reference covers both takes" \
+    || bad "joined reference too short ($d <= $a)"
+  code=$(curl -s -o "$OUT/duo-synth.wav" -w '%{http_code}' -X POST \
+    "$BASE/api/engines/$MODEL/synthesize" \
+    -F 'text=这是用两段素材拼成的声音。' -F "profile_id=$duo")
+  [ "$code" = "200" ] && head -c 4 "$OUT/duo-synth.wav" | grep -q RIFF \
+    && ok "synthesize from a two-take voice" \
+    || bad "synthesize from a two-take voice (HTTP $code)"
+  # The OpenAI-compatible endpoint resolves the same voice by name, so it
+  # must join the takes too (not just hand over the single fallback clip).
+  code=$(curl -s -o "$OUT/duo-oai.wav" -w '%{http_code}' -X POST \
+    "$BASE/v1/audio/speech" -H 'Content-Type: application/json' \
+    -d "{\"model\":\"$MODEL\",\"voice\":\"smoke-test-duo\",\"input\":\"通过 OpenAI 接口合成。\"}")
+  [ "$code" = "200" ] && head -c 4 "$OUT/duo-oai.wav" | grep -q RIFF \
+    && ok "openai speech from a two-take voice" \
+    || bad "openai speech from a two-take voice (HTTP $code)"
+  curl -s -o /dev/null -X DELETE "$BASE/api/profiles/$duo"
+fi
+
+# Deleting a take drops it from the voices using it.
+solo=$(curl -s -X POST "$BASE/api/profiles" \
+  -F 'name=smoke-test-solo' -F "capture=$c1" -F "capture=$c2" | take_id)
+curl -s -o /dev/null -X DELETE "$BASE/api/captures/$c2"
+if [ -z "$solo" ]; then
+  bad "voice from takes for the delete check"
+else
+  solo_line=$(curl -sf "$BASE/api/profiles" | sed 's/},{/}\n{/g' | grep "\"$solo\"")
+  case "$solo_line" in
+    *'"captures":["'$c1'"]'*) ok "deleting a take updates voices" ;;
+    *) bad "voice still references a deleted take" ;;
+  esac
+fi
+# Only our own takes go; a real library keeps whatever it had.
+curl -s -o /dev/null -X DELETE "$BASE/api/captures/$c1"
+curl -s -o /dev/null -X DELETE "$BASE/api/captures/$c3"
+curl -s -o /dev/null -X DELETE "$BASE/api/profiles/$solo"
+ok "cleaned up takes"
+
 if case "$engines_json" in *'"id":"voxcpm2"'*) true ;; *) false ;; esac; then
   echo "voxcpm2"
   code=$(curl -s -o "$OUT/vox-zh.wav" -w '%{http_code}' -X POST \

@@ -33,6 +33,7 @@
       "../../scripts/ming3tts_runner.py": "scripts/ming3tts_runner.py",
       "../../scripts/download-chatterbox.sh": "scripts/download-chatterbox.sh",
       "../../scripts/chatterbox_runner.py": "scripts/chatterbox_runner.py",
+      "../../scripts/download-indextts2.sh": "scripts/download-indextts2.sh",
       "../../scripts/download-mosstts.sh": "scripts/download-mosstts.sh"
     },
     "macOS": {
