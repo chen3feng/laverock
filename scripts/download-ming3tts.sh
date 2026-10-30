@@ -104,6 +104,11 @@ PY="$(lv_native_path "$VPY")"
 RUNNER="$SHARED/runtime/ming3tts_runner.py"
 RUNTIME="$SHARED/runtime"
 WEIGHTS="$SHARED/weights"
+# Rust resolves manifest paths itself, so MSYS /e/.. mounts must be emitted
+# as E:/..; only the venv interpreter used to be converted.
+RUNNER_NATIVE="$(lv_native_path "$RUNNER")"
+RUNTIME_NATIVE="$(lv_native_path "$RUNTIME")"
+WEIGHTS_NATIVE="$(lv_native_path "$WEIGHTS")"
 
 case "$MODE" in
   clone)
@@ -169,9 +174,9 @@ cat > "$DEST/engine.json" <<EOF
   "capabilities": [$CAPS],
   "ming3tts": {
     "python": "$PY",
-    "script": "$RUNNER",
-    "model": "$WEIGHTS",
-    "runtime": "$RUNTIME",
+    "script": "$RUNNER_NATIVE",
+    "model": "$WEIGHTS_NATIVE",
+    "runtime": "$RUNTIME_NATIVE",
     "mode": "$MODE",
     "device": "auto",
     "env": { "PYTHONIOENCODING": "utf-8" }

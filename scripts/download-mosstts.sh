@@ -162,6 +162,11 @@ rm -rf "$AT"
 
 # 5. Manifest (absolute paths are allowed and used as-is).
 BIN_NATIVE="$(lv_native_path "$BIN")"
+# Rust resolves manifest paths itself, so MSYS /e/.. mounts must be emitted
+# as E:/..; only the runtime binary used to be converted.
+BACKBONE_NATIVE="$(lv_native_path "$WEIGHTS/$BACKBONE_FILE")"
+ENC_NATIVE="$(lv_native_path "$ENC")"
+DEC_NATIVE="$(lv_native_path "$DEC")"
 cat > "$DEST/engine.json" <<EOF
 {
   "id": "$ENGINE_ID",
@@ -171,9 +176,9 @@ cat > "$DEST/engine.json" <<EOF
   "capabilities": ["tts", "clone", "multilingual"],
   "mosstts": {
     "binary": "$BIN_NATIVE",
-    "backbone": "$WEIGHTS/$BACKBONE_FILE",
-    "audio_encoder": "$ENC",
-    "audio_decoder": "$DEC",
+    "backbone": "$BACKBONE_NATIVE",
+    "audio_encoder": "$ENC_NATIVE",
+    "audio_decoder": "$DEC_NATIVE",
     "language": "zh",
     "n_gpu_layers": -1,
     "max_new_tokens": 3072,

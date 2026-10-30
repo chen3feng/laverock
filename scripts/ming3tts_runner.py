@@ -94,7 +94,7 @@ def use_soundfile_audio_io(torch, torchaudio) -> None:
 
 
 def use_portable_dtype(model, torch, device: str) -> None:
-    """Make the CUDA-oriented checkpoint run on MPS/CPU.
+    """Run the CUDA-oriented checkpoint on CUDA, MPS or CPU.
 
     ming_tts loads the checkpoint in bfloat16 and only wraps generation in
     bfloat16 autocast for CUDA. Off CUDA that context is a no-op, so the
@@ -102,12 +102,17 @@ def use_portable_dtype(model, torch, device: str) -> None:
     ("mat1 and mat2 must have the same dtype"), and the VAE's ISTFT cannot
     build a complex32 signal on CPU or MPS. Cast the weights to float32 and
     let the prompt encoder follow the encoder's dtype instead of the
-    checkpoint's hardcoded bfloat16 cast.
+    checkpoint's hardcoded bfloat16 cast. On CUDA the LLM keeps bfloat16;
+    only the audio tokenizer is cast, because its ISTFT also lacks a
+    complex32 CUDA kernel in recent torch.
     """
-    if device.startswith("cuda"):
-        return
-    model.model.to(torch.float32)
     audio = model.model.audio
+    if not device.startswith("cuda"):
+        model.model.to(torch.float32)
+    # bfloat16 ISTFT builds a complex32 signal, and recent torch has no
+    # mul_cuda kernel for BComplex32 either, so the tokenizer runs in
+    # float32 on CUDA while the LLM stays bfloat16.
+    audio.to(torch.float32)
     encode = audio.encode_latent
     dtype = next(audio.encoder.parameters()).dtype
 
@@ -115,6 +120,28 @@ def use_portable_dtype(model, torch, device: str) -> None:
         return encode(waveform.to(dtype=dtype), waveform_length, *args, **kwargs)
 
     audio.encode_latent = encode_latent
+
+
+def use_float32_istft(torch) -> None:
+    """Run the VAE's ISTFT outside bfloat16 autocast.
+
+    ming_tts wraps CUDA generation in `torch.autocast(bfloat16)`, so the
+    ISTFT's `mag * (x + 1j * y)` builds a complex32 tensor no matter what
+    dtype the weights have, and recent torch has no CUDA kernel for it
+    ("mul_cuda not implemented for 'BComplex32'"). Entering a disabled
+    autocast region inside ISTFTHead.forward restores complex64.
+    """
+    try:
+        from audio_tokenizer.istft import ISTFTHead
+    except Exception:
+        return
+    original = ISTFTHead.forward
+
+    def forward(self, *args, **kwargs):
+        with torch.autocast(device_type="cuda", enabled=False):
+            return original(self, *args, **kwargs)
+
+    ISTFTHead.forward = forward
 
 
 def parse_args() -> argparse.Namespace:
@@ -161,6 +188,7 @@ def main() -> int:
         device = "cpu"
         model = MingTTS(args.model, device=device, text_normalization=pynini)
     use_portable_dtype(model, torch, device)
+    use_float32_istft(torch)
 
     emit("stage", "Generating speech")
     if args.mode in ("clone", "multilingual"):
