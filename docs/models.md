@@ -232,6 +232,57 @@ differences under about 10% as noise. Chatterbox is the roughest row: the
 same paragraph came out as 11 s of audio on one run and 19 s on another, so
 its RTF is a median over runs that disagree.
 
+### On a Windows desktop
+
+Measured on a desktop PC: Intel Core i7-3770K (4 cores, 8 threads), 32 GB of
+RAM, NVIDIA GeForce RTX 3060 Ti (8 GB), Windows 10 Pro 22H2.
+
+| Engine | RTF | Fixed cost | 10 s of speech |
+| --- | --- | --- | --- |
+| LongCat-AudioDiT 1B | 0.00 | 40.3 s | 40.3 s |
+| CosyVoice3 | 0.18 | 0.6 s | 2.3 s |
+| VoxCPM2 | 0.30 | 0.2 s | 3.2 s |
+| IndexTTS-2 Q8_0 | 0.60 | 1.0 s | 7.0 s |
+| dots.tts SOAR | 0.62 | 0.5 s | 6.7 s |
+| Chatterbox | 2.18 | 67.1 s | 88.9 s |
+| ZipVoice | 2.45 | 6.8 s | 31.2 s |
+| Kokoro-82M | 3.08 | 0.6 s | 31.5 s |
+| Ming 3.0 built-in voices | 4.16 | 17.7 s | 59.4 s |
+| Ming 3.0 multilingual | 4.25 | 18.7 s | 61.2 s |
+| Ming 3.0 voice design | 4.71 | 25.8 s | 73.0 s |
+| Ming 3.0 cloning | 5.15 | 24.6 s | 76.1 s |
+| Qwen3-TTS 0.6B cloning | 5.16 | 22.7 s | 74.3 s |
+| Qwen3-TTS 0.6B custom voice | 5.28 | 16.8 s | 69.6 s |
+| Qwen3-TTS 1.7B design | 5.64 | 16.7 s | 73.1 s |
+| MOSS-TTS | — | — | — |
+
+The audio.cpp engines run on CUDA here and match or beat the M4 Pro — dots
+0.62 against 1.39, CosyVoice3 0.18 against 0.30, VoxCPM2 0.30 against 0.62,
+IndexTTS-2 0.60 against 1.47 — and their resident fixed cost stays at or
+under a second. The ONNX engines are 4–14× slower than on the M4 Pro because
+the CPU is a 2012-era quad-core without AVX2; ZipVoice's 6.8 s of fixed cost
+is mostly encoding the reference clip on that CPU. Qwen3-TTS and Ming pay
+4–5× more as well: their autoregressive loop is bound by single-thread CPU
+speed, not by the GPU.
+
+LongCat reads 0.00 because every request takes about 40 s whatever the
+length — 5 s and 17.6 s of speech both finish in roughly 40 s — so the fit
+only sees the per-request cost, a fresh Python process loading the weights
+each time. Generation itself is much faster than real time on the 3060 Ti,
+but the duration term falls below the noise of that load.
+
+MOSS-TTS could not be timed here: the prebuilt Windows runtime has no CUDA
+backend (every layer is assigned to the CPU) and generation aborts inside the
+binary with exit code 0xC0000374, a heap-corruption crash.
+
+The 8 GB of VRAM held one audio.cpp model at a time. Leaving dots, VoxCPM2
+and CosyVoice3 resident together (about 6.2 + 6.5 + 3.3 GB) crashed the
+CosyVoice3 server on its second request, and the engine fell back to the
+one-shot CLI, so every row above was measured against a freshly started
+server. Method otherwise as above, except that LongCat got three text
+lengths (5, 12.5 and 17.6 s of speech) after the two-length fit came out
+with a negative slope.
+
 ## Requirements
 
 | Feature | Requirement |
