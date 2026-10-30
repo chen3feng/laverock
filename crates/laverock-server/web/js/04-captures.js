@@ -216,8 +216,6 @@ async function capturesToVoice() {
   fd.append('name', res.values.name || t('captures.default_name', { n: captureList.length }));
   // Repeated fields: order is the voice's take order.
   for (const id of ids) fd.append('capture', id);
-  const engine = currentEngine();
-  if (engine) fd.append('engine_id', engine.id);
   try {
     const voice = await api('/api/profiles', { method: 'POST', body: fd });
     toast(t('captures.added_voice', { name: voice.name, n: ids.length }));

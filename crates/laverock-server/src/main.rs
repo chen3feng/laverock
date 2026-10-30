@@ -521,7 +521,6 @@ async fn create_profile(
 ) -> Result<Json<profiles::ProfileMeta>, ApiError> {
     let mut name = None;
     let mut prompt_text = None;
-    let mut engine_id = None;
     let mut wav: Option<Vec<u8>> = None;
     // Takes from the recording library, in order. When present they are
     // the voice's audio and `prompt` is not needed.
@@ -548,15 +547,6 @@ async fn create_profile(
                         .await
                         .map_err(|e| ApiError::bad_request(format!("bad prompt_text: {e}")))?,
                 )
-            }
-            Some("engine_id") => {
-                let raw = field
-                    .text()
-                    .await
-                    .map_err(|e| ApiError::bad_request(format!("bad engine_id: {e}")))?;
-                if !raw.trim().is_empty() {
-                    engine_id = Some(raw);
-                }
             }
             Some("capture") | Some("captures") => {
                 let raw = field
@@ -585,16 +575,9 @@ async fn create_profile(
 
     let name = name.ok_or_else(|| ApiError::bad_request("missing required field: name"))?;
     if !capture_ids.is_empty() {
-        let limit = engine_id
-            .as_deref()
-            .and_then(|e| state.manager.reference_limit_secs(e).ok())
-            .unwrap_or(15.0);
-        return Ok(Json(state.profiles.create_from_captures(
-            &name,
-            engine_id,
-            &capture_ids,
-            limit,
-        )?));
+        return Ok(Json(
+            state.profiles.create_from_captures(&name, &capture_ids)?,
+        ));
     }
     let prompt_text =
         prompt_text.ok_or_else(|| ApiError::bad_request("missing required field: prompt_text"))?;
@@ -602,12 +585,7 @@ async fn create_profile(
         .filter(|b| !b.is_empty())
         .ok_or_else(|| ApiError::bad_request("missing required field: prompt (WAV reference)"))?;
 
-    Ok(Json(state.profiles.create(
-        &name,
-        &prompt_text,
-        engine_id,
-        &wav,
-    )?))
+    Ok(Json(state.profiles.create(&name, &prompt_text, &wav)?))
 }
 
 async fn update_profile(
@@ -675,18 +653,15 @@ async fn delete_profile(
 }
 
 /// The reference clip a voice would hand an engine: the takes joined,
-/// cut at the limit of the engine named in `?engine=` or the one the
-/// voice was saved with.
+/// cut at the limit of the engine named in `?engine=`, if any.
 async fn profile_audio(
     State(state): State<AppState>,
     Path(id): Path<String>,
     Query(q): Query<ProfileAudioQuery>,
 ) -> Result<Response, ApiError> {
-    let (meta, _) = state.profiles.get(&id)?;
     let limit = q
         .engine
         .as_deref()
-        .or(meta.engine_id.as_deref())
         .and_then(|engine| state.manager.reference_limit_secs(engine).ok())
         .unwrap_or(15.0);
     let combined = state.profiles.reference(&id, limit)?;

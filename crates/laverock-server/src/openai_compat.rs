@@ -106,10 +106,7 @@ enum VoiceTarget {
     Preset { name: String, value: String },
     /// Saved profile; its takes are joined once the engine, and so its
     /// reference limit, is known.
-    Profile {
-        id: String,
-        engine_hint: Option<String>,
-    },
+    Profile { id: String },
     /// Voice-design engines take their description from `instruct`.
     DesignOnly,
 }
@@ -156,20 +153,14 @@ fn resolve_voice(
     voice: &str,
 ) -> Result<VoiceTarget, (StatusCode, String, String)> {
     match profiles.get(voice) {
-        Ok((meta, _)) => Ok(VoiceTarget::Profile {
-            id: meta.id,
-            engine_hint: meta.engine_id,
-        }),
+        Ok((meta, _)) => Ok(VoiceTarget::Profile { id: meta.id }),
         Err(_) => {
             // Try a case-insensitive name match.
             if let Some(view) = profiles.list().ok().and_then(|ps| {
                 ps.into_iter()
                     .find(|p| p.meta.name.eq_ignore_ascii_case(voice))
             }) {
-                return Ok(VoiceTarget::Profile {
-                    id: view.meta.id,
-                    engine_hint: view.meta.engine_id,
-                });
+                return Ok(VoiceTarget::Profile { id: view.meta.id });
             }
             Err((
                 StatusCode::BAD_REQUEST,
@@ -299,18 +290,6 @@ pub async fn create_speech(
             Err((status, msg, code)) => return oai_error(status, &msg, "voice", &code),
         }
     };
-
-    // A saved profile may pin a specific engine; honor it when the model
-    // argument was just an alias.
-    if let VoiceTarget::Profile {
-        engine_hint: Some(hint),
-        ..
-    } = &target
-    {
-        if was_alias && state.manager.list().iter().any(|e| &e.id == hint) {
-            engine_id = hint.clone();
-        }
-    }
 
     // The OpenAI API has no sampling-steps concept; use the engine's
     // manifest default (some runners such as dots.tts reject a zero).

@@ -294,7 +294,7 @@ async function importProfile(file, strategy) {
   }
 }
 
-async function createProfile(name, promptText, blob, engineId) {
+async function createProfile(name, promptText, blob) {
   if (!blob) throw new Error(t("ui.choose_or_record_a_reference"));
   if (!name) throw new Error(t("ui.please_name_the_voice"));
   if (!promptText) throw new Error(t("ui.please_fill_in_the_reference"));
@@ -302,7 +302,6 @@ async function createProfile(name, promptText, blob, engineId) {
   fd.append('name', name);
   fd.append('prompt_text', promptText);
   fd.append('prompt', blob, blob.name || 'reference.wav');
-  if (engineId) fd.append('engine_id', engineId);
   const res = await apiFetch('/api/profiles', { method: 'POST', body: fd });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
@@ -324,7 +323,6 @@ $('saveprofile').onclick = async () => {
       $('profilename').value.trim(),
       $('prompt_text').value.trim(),
       synthCapture.blob,
-      $('engine').value,
     );
     $('profilename').value = '';
     $('savehint').textContent = t('ui.saved_for_picker', { name: meta.name });

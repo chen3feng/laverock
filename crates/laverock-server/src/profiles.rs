@@ -37,8 +37,6 @@ pub struct ProfileMeta {
     pub id: String,
     pub name: String,
     pub prompt_text: String,
-    #[serde(default)]
-    pub engine_id: Option<String>,
     /// Unix seconds.
     pub created_at: u64,
     /// Missing on profiles created before ingest analysis existed.
@@ -176,14 +174,8 @@ impl ProfileStore {
         Ok((meta, audio))
     }
 
-    pub fn create(
-        &self,
-        name: &str,
-        prompt_text: &str,
-        engine_id: Option<String>,
-        wav: &[u8],
-    ) -> Result<ProfileMeta> {
-        self.create_impl(name, prompt_text, engine_id, wav, true)
+    pub fn create(&self, name: &str, prompt_text: &str, wav: &[u8]) -> Result<ProfileMeta> {
+        self.create_impl(name, prompt_text, wav, true)
     }
 
     /// `clean` is false for archive imports: those clips were already
@@ -197,11 +189,10 @@ impl ProfileStore {
         &self,
         name: &str,
         prompt_text: &str,
-        engine_id: Option<String>,
         wav: &[u8],
         clean: bool,
     ) -> Result<ProfileMeta> {
-        self.create_impl_with(name, prompt_text, engine_id, wav, clean, None)
+        self.create_impl_with(name, prompt_text, wav, clean, None)
     }
 
     /// `captures` names takes that already exist (an archive carrying its
@@ -210,7 +201,6 @@ impl ProfileStore {
         &self,
         name: &str,
         prompt_text: &str,
-        engine_id: Option<String>,
         wav: &[u8],
         clean: bool,
         captures: Option<Vec<String>>,
@@ -226,7 +216,7 @@ impl ProfileStore {
         // The voice stores exactly the clip the capture kept, so the two
         // can never drift apart and no second trim is applied.
         let reference = prepare(&stored, false)?;
-        self.write_profile(name, prompt_text, engine_id, &reference, captures)
+        self.write_profile(name, prompt_text, &reference, captures)
     }
 
     /// The capture ids to record on a new or replaced voice, and the clip
@@ -249,15 +239,10 @@ impl ProfileStore {
     }
 
     /// Build a voice from existing captures, in the order given. The
-    /// stored `reference.wav` is the captures joined up to `max_secs`, so
-    /// older readers still get the audio an engine would use.
-    pub fn create_from_captures(
-        &self,
-        name: &str,
-        engine_id: Option<String>,
-        ids: &[String],
-        max_secs: f32,
-    ) -> Result<ProfileMeta> {
+    /// stored `reference.wav` is the takes joined up to the export cap:
+    /// the voice is engine-agnostic, so its engine's limit is applied
+    /// later, when it is synthesized with.
+    pub fn create_from_captures(&self, name: &str, ids: &[String]) -> Result<ProfileMeta> {
         validate_name(name)?;
         let (ids, clips) = self.load_captures(ids)?;
         if clips.is_empty() {
@@ -265,21 +250,20 @@ impl ProfileStore {
                 Key::NothingSelected,
             )));
         }
-        let combined = captures::combine(&clips, max_secs)?;
+        let combined = captures::combine(&clips, EXPORT_MAX_REFERENCE_SECS)?;
         if combined.text.is_empty() {
             return Err(CoreError::UserError(i18n::Message::new(
                 Key::TranscriptMissing,
             )));
         }
         let reference = prepare(&combined.wav, false)?;
-        self.write_profile(name, &combined.text, engine_id, &reference, ids)
+        self.write_profile(name, &combined.text, &reference, ids)
     }
 
     fn write_profile(
         &self,
         name: &str,
         prompt_text: &str,
-        engine_id: Option<String>,
         reference: &PreparedReference,
         captures: Vec<String>,
     ) -> Result<ProfileMeta> {
@@ -299,7 +283,6 @@ impl ProfileStore {
             id: id.clone(),
             name: name.trim().to_string(),
             prompt_text: prompt_text.trim().to_string(),
-            engine_id,
             created_at,
             reference: Some(facts),
             captures,
@@ -446,13 +429,16 @@ impl ProfileStore {
         };
         for view in views {
             let mut meta = view.meta;
-            if !meta.captures.is_empty() {
-                continue;
-            }
             let dir = match self.dir(&meta.id) {
                 Ok(d) => d,
                 Err(_) => continue,
             };
+            if !meta.captures.is_empty() {
+                // Voices are engine-agnostic now; drop the engine an
+                // older version recorded on the manifest.
+                self.drop_legacy_engine(&dir, &meta);
+                continue;
+            }
             let wav = match fs::read(dir.join("reference.wav")) {
                 Ok(w) => w,
                 Err(_) => continue,
@@ -484,6 +470,28 @@ impl ProfileStore {
             migrated += 1;
         }
         migrated
+    }
+
+    /// Rewrite a manifest that still carries the retired `engine_id`.
+    /// Unknown fields are ignored when parsing, so this only needs to
+    /// notice the key and write the typed manifest back.
+    fn drop_legacy_engine(&self, dir: &Path, meta: &ProfileMeta) {
+        let path = dir.join("profile.json");
+        let Ok(raw) = fs::read_to_string(&path) else {
+            return;
+        };
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(&raw) else {
+            return;
+        };
+        if value.get("engine_id").is_none() {
+            return;
+        }
+        let Ok(bytes) = serde_json::to_vec_pretty(meta) else {
+            return;
+        };
+        if let Err(e) = write_atomic(&path, &bytes) {
+            tracing::warn!("cannot clean voice {}: {e}", meta.id);
+        }
     }
 
     /// Keep only the ids that exist, in the given order and without
@@ -598,7 +606,6 @@ impl ProfileStore {
             "version": 1,
             "name": meta.name,
             "prompt_text": combined.text,
-            "engine_id": meta.engine_id,
             "audio_sha256": sha256_hex(&combined.wav),
             "captures": takes.len(),
             "exported_at": exported_at,
@@ -664,7 +671,6 @@ impl ProfileStore {
     fn create_without_transcript(
         &self,
         name: &str,
-        engine_id: Option<String>,
         wav: &[u8],
         captures: Option<Vec<String>>,
     ) -> Result<ProfileMeta> {
@@ -672,7 +678,7 @@ impl ProfileStore {
         let (captures, stored) = self.store_or_use(name, "", wav, false, captures)?;
         let reference = prepare(&stored, false)?;
         let text = self.joined_transcript(&captures).unwrap_or_default();
-        self.write_profile(name, &text, engine_id, &reference, captures)
+        self.write_profile(name, &text, &reference, captures)
     }
 
     /// Recreate the takes an archive carries. Returns `None` when it
@@ -734,8 +740,7 @@ impl ProfileStore {
                 "id": meta.id,
                 "name": meta.name,
                 "prompt_text": combined.text,
-                "engine_id": meta.engine_id,
-                "audio_sha256": audio_hash,
+                    "audio_sha256": audio_hash,
                 "captures": takes.len(),
             });
             let manifest = serde_json::json!({
@@ -743,8 +748,7 @@ impl ProfileStore {
                 "version": 1,
                 "name": meta.name,
                 "prompt_text": combined.text,
-                "engine_id": meta.engine_id,
-                "audio_sha256": audio_hash,
+                    "audio_sha256": audio_hash,
                 "captures": takes.len(),
                 "exported_at": exported_at,
             });
@@ -848,21 +852,9 @@ impl ProfileStore {
                         &entry.name
                     });
                     if entry.prompt_text.is_empty() {
-                        self.create_without_transcript(
-                            &name,
-                            entry.engine_id.clone(),
-                            &entry.wav,
-                            takes,
-                        )?;
+                        self.create_without_transcript(&name, &entry.wav, takes)?;
                     } else {
-                        self.create_impl_with(
-                            &name,
-                            &entry.prompt_text,
-                            entry.engine_id.clone(),
-                            &entry.wav,
-                            false,
-                            takes,
-                        )?;
+                        self.create_impl_with(&name, &entry.prompt_text, &entry.wav, false, takes)?;
                     }
                     report.imported += 1;
                 }
@@ -986,7 +978,6 @@ fn now_secs() -> u64 {
 struct ArchiveVoice {
     name: String,
     prompt_text: String,
-    engine_id: Option<String>,
     wav: Vec<u8>,
     audio_sha256: String,
     /// Per-take audio, when the archive was written by a version that
@@ -1100,10 +1091,6 @@ fn read_archive_voices(bytes: &[u8]) -> Result<Vec<ArchiveVoice>> {
                     .unwrap_or("")
                     .trim()
                     .to_string(),
-                engine_id: e
-                    .get("engine_id")
-                    .and_then(|v| v.as_str())
-                    .map(str::to_string),
                 audio_sha256: e
                     .get("audio_sha256")
                     .and_then(|v| v.as_str())
@@ -1144,10 +1131,6 @@ fn read_archive_voices(bytes: &[u8]) -> Result<Vec<ArchiveVoice>> {
             .unwrap_or("")
             .trim()
             .to_string(),
-        engine_id: manifest
-            .get("engine_id")
-            .and_then(|v| v.as_str())
-            .map(str::to_string),
         audio_sha256: sha256_hex(wav),
         wav: wav.clone(),
         captures: read_captures(&files, ""),
@@ -1219,7 +1202,7 @@ mod tests {
     fn create_trims_dead_air_and_keeps_the_original() {
         let (store, dir) = temp_store();
         let wav = wav_with_silence(0.6, 1.0);
-        let meta = store.create("Test", "text", None, &wav).expect("create");
+        let meta = store.create("Test", "text", &wav).expect("create");
 
         let facts = meta.reference.clone().expect("facts");
         assert!(facts.trimmed_secs > 0.5, "{facts:?}");
@@ -1246,7 +1229,7 @@ mod tests {
         let (store, dir) = temp_store();
         let wav = encode_wav(&vec![0.0f32; 24_000], 24_000).expect("encode");
         let err = store
-            .create("Test", "text", None, &wav)
+            .create("Test", "text", &wav)
             .expect_err("silent");
         assert!(matches!(err, CoreError::UserError(_)), "{err}");
         fs::remove_dir_all(&dir).ok();
@@ -1258,7 +1241,7 @@ mod tests {
         let wav = wav_with_silence(0.6, 1.0);
         // clean = false is what archive import uses.
         let meta = store
-            .create_impl("Imported", "text", None, &wav, false)
+            .create_impl("Imported", "text", &wav, false)
             .expect("create");
         let (_, stored) = store.get(&meta.id).expect("get");
         assert_eq!(stored, wav);
@@ -1270,7 +1253,7 @@ mod tests {
     fn replacing_a_clip_adds_a_take_and_keeps_the_old_one() {
         let (store, dir) = temp_store();
         let meta = store
-            .create("Test", "text", None, &wav_with_silence(0.6, 1.0))
+            .create("Test", "text", &wav_with_silence(0.6, 1.0))
             .expect("create");
         assert_eq!(meta.captures.len(), 1);
         let first = meta.captures[0].clone();
@@ -1309,18 +1292,23 @@ mod tests {
     fn migration_turns_a_saved_voice_into_a_single_take() {
         let (store, dir) = temp_store();
         let meta = store
-            .create("Test", "text", None, &wav_with_silence(0.6, 1.0))
+            .create("Test", "text", &wav_with_silence(0.6, 1.0))
             .expect("create");
         // Roll the manifest back to the pre-library shape.
         let path = dir.join("profiles").join(&meta.id).join("profile.json");
         let mut raw: serde_json::Value =
             serde_json::from_slice(&fs::read(&path).expect("read")).expect("parse");
         raw.as_object_mut().expect("object").remove("captures");
+        raw["engine_id"] = serde_json::json!("qwen3tts");
         fs::write(&path, serde_json::to_vec_pretty(&raw).expect("json")).expect("write");
 
         assert_eq!(store.migrate_captures(), 1);
         let (migrated, _) = store.get(&meta.id).expect("get");
         assert_eq!(migrated.captures.len(), 1);
+        // The retired engine field is not written back.
+        let stored: serde_json::Value =
+            serde_json::from_slice(&fs::read(&path).expect("read")).expect("parse");
+        assert!(stored.get("engine_id").is_none());
         // Running again changes nothing.
         assert_eq!(store.migrate_captures(), 0);
 
@@ -1339,6 +1327,30 @@ mod tests {
     }
 
     #[test]
+    fn migration_drops_the_retired_engine_field() {
+        let (store, dir) = temp_store();
+        let meta = store
+            .create("Test", "text", &take(2.0, 220.0))
+            .expect("create");
+        // A voice migrated by an older build still names its engine.
+        let path = dir.join("profiles").join(&meta.id).join("profile.json");
+        let mut raw: serde_json::Value =
+            serde_json::from_slice(&fs::read(&path).expect("read")).expect("parse");
+        raw["engine_id"] = serde_json::json!("qwen3tts");
+        fs::write(&path, serde_json::to_vec_pretty(&raw).expect("json")).expect("write");
+
+        // Nothing to migrate, but the stale field still goes.
+        assert_eq!(store.migrate_captures(), 0);
+        let stored: serde_json::Value =
+            serde_json::from_slice(&fs::read(&path).expect("read")).expect("parse");
+        assert!(stored.get("engine_id").is_none());
+        // The rest of the manifest survives the rewrite.
+        assert_eq!(stored["name"], "Test");
+        assert_eq!(stored["captures"].as_array().expect("captures").len(), 1);
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
     fn a_voice_built_from_two_takes_joins_audio_and_transcript() {
         let (store, dir) = temp_store();
         let a = store
@@ -1350,7 +1362,7 @@ mod tests {
             .create("b", "第二段", &take(2.0, 330.0), false)
             .expect("take b");
         let voice = store
-            .create_from_captures("Duo", None, &[a.id.clone(), b.id.clone()], 15.0)
+            .create_from_captures("Duo", &[a.id.clone(), b.id.clone()])
             .expect("create");
         assert_eq!(voice.captures, vec![a.id.clone(), b.id.clone()]);
         assert_eq!(voice.prompt_text, "第一段 第二段");
@@ -1389,7 +1401,7 @@ mod tests {
             .create("b", "第二段", &take(2.0, 330.0), false)
             .expect("take b");
         let voice = store
-            .create_from_captures("Duo", None, &[a.id.clone(), b.id.clone()], 15.0)
+            .create_from_captures("Duo", &[a.id.clone(), b.id.clone()])
             .expect("create");
         let zip = store.export_zip(&voice.id).expect("export");
 
@@ -1414,12 +1426,23 @@ mod tests {
         let first = store.captures().create("a", "文字", &wav, false).expect("a");
         let second = store.captures().create("b", "文字", &wav, false).expect("b");
         let voice = store
-            .create_from_captures("Duo", None, std::slice::from_ref(&second.id), 15.0)
+            .create_from_captures("Duo", std::slice::from_ref(&second.id))
             .expect("create");
 
         assert_eq!(store.dedupe_captures().expect("dedupe"), 1);
         let (meta, _) = store.get(&voice.id).expect("get");
-        assert_eq!(meta.captures, vec![first.id]);
+        // Both takes were made in the same second, so which one survives
+        // is decided by id; what matters is that the voice follows it.
+        let survivors: Vec<String> = store
+            .captures()
+            .list()
+            .expect("list")
+            .into_iter()
+            .map(|c| c.meta.id)
+            .collect();
+        assert_eq!(survivors.len(), 1, "one duplicate take should remain");
+        assert_eq!(meta.captures, survivors, "voice should follow the survivor");
+        assert!(first.id == survivors[0] || second.id == survivors[0]);
         fs::remove_dir_all(&dir).ok();
     }
 }
