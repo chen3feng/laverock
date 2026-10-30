@@ -147,8 +147,10 @@ function renderVoices() {
     const el = document.createElement('div');
     el.className = 'voice-card';
     const warns = voiceWarnings(p);
+    // A voice is engine-agnostic: the engine is picked at synthesis, so
+    // the engine it was first saved with is not shown as a binding.
     el.innerHTML = `
-      <div class="voice-top"><b>${esc(p.name)}</b>${p.engine_id ? `<span class="chip">${esc(p.engine_id)}</span>` : ''}${p.capture_count > 1 ? `<span class="chip">${esc(t('voices.takes', { n: p.capture_count }))}</span>` : ''}</div>
+      <div class="voice-top"><b>${esc(p.name)}</b>${p.capture_count > 1 ? `<span class="chip">${esc(t('voices.takes', { n: p.capture_count }))}</span>` : ''}</div>
       <div class="voice-meta">${fmtDur(p.duration_secs)} · ${fmtBytes(p.bytes)} · ${fmtDate(p.created_at)}</div>
       ${warns.map((w) => `<div class="voice-warn">⚠ ${esc(w)}</div>`).join('')}
       <div class="voice-text">${esc(p.prompt_text)}</div>
