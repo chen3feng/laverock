@@ -6,46 +6,31 @@
 //!
 //! A profile is deliberately engine-agnostic: the same reference audio
 //! works with any cloning engine that accepts a prompt clip.
+//!
+//! A voice may also be built from one or more [`crate::captures`] (the
+//! takes in the recording library). Its `captures` list names them in
+//! order; `reference.wav` then stays as a single-clip fallback for older
+//! readers, while synthesis and preview use the captures joined together.
 
+use crate::captures::{self, CaptureMeta, CaptureStore, CombinedReference};
+use crate::reference::{
+    self, clip_facts, is_valid_id, new_id, prepare, sha256_hex, write_atomic,
+    PreparedReference, ReferenceFacts, MAX_REFERENCE_BYTES,
+};
 use laverock_core::i18n::{self, Key};
-use laverock_core::{decode_wav, encode_wav, silence_profile, trim_silence, CoreError, Result};
+use laverock_core::{decode_wav, CoreError, Result};
 use serde::{Deserialize, Serialize};
 use std::{
-    borrow::Cow,
+    collections::{HashMap, HashSet},
     fs,
     path::{Path, PathBuf},
     time::{SystemTime, UNIX_EPOCH},
 };
 
-pub const MAX_REFERENCE_BYTES: usize = 20 * 1024 * 1024;
-
-/// Untouched upload kept alongside a trimmed `reference.wav`, so the
-/// original can be restored or reprocessed later.
-const ORIGINAL_REFERENCE_FILE: &str = "reference.original.wav";
-
-/// Silence kept at each end when a recording is trimmed at ingest. Dead
-/// air carries no timbre and conditioning models (MOSS-TTS in particular)
-/// pick up the rhythm of their prompt, so the margins are kept small.
-const REFERENCE_EDGE_KEEP_SECS: f32 = 0.10;
-
-/// What ingest measured on the reference clip. Stored in `profile.json`
-/// so the voice library can warn about clips that will condition
-/// synthesis badly.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct ReferenceFacts {
-    /// Duration of the stored (possibly trimmed) clip.
-    pub duration_secs: f32,
-    /// Length of the clip as originally recorded/uploaded.
-    pub original_duration_secs: f32,
-    /// Dead air removed from the start and end at ingest.
-    pub trimmed_secs: f32,
-    /// Longest pause between words, measured on the original clip.
-    pub longest_pause_secs: f32,
-    /// Peak amplitude of the original clip (1.0 = full scale).
-    pub peak: f32,
-    /// Fraction of original samples at or near full scale.
-    pub clipped_fraction: f32,
-}
+/// Longest reference assembled when packing a voice for export. Export
+/// must be faithful rather than engine-specific, so it is generous; the
+/// engine's own limit is applied at synthesis time.
+const EXPORT_MAX_REFERENCE_SECS: f32 = 60.0;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProfileMeta {
@@ -59,6 +44,11 @@ pub struct ProfileMeta {
     /// Missing on profiles created before ingest analysis existed.
     #[serde(default)]
     pub reference: Option<ReferenceFacts>,
+    /// Captures this voice is built from, in order. Empty means the voice
+    /// uses its own `reference.wav` (every voice created before the
+    /// recording library existed, until it is migrated).
+    #[serde(default)]
+    pub captures: Vec<String>,
 }
 
 /// A saved voice plus facts the library view needs without downloading
@@ -69,17 +59,29 @@ pub struct ProfileView {
     pub meta: ProfileMeta,
     pub duration_secs: f32,
     pub bytes: u64,
+    /// Number of takes behind this voice; 1 for a legacy single clip.
+    pub capture_count: usize,
 }
 
 pub struct ProfileStore {
     root: PathBuf,
+    captures: CaptureStore,
 }
+
+/// Validated capture ids plus their clips, in order.
+type LoadedCaptures = (Vec<String>, Vec<(CaptureMeta, Vec<u8>)>);
 
 impl ProfileStore {
     pub fn open(data_dir: impl AsRef<Path>) -> Result<Self> {
         let root = data_dir.as_ref().join("profiles");
         fs::create_dir_all(&root)?;
-        Ok(Self { root })
+        let captures = CaptureStore::open(data_dir)?;
+        Ok(Self { root, captures })
+    }
+
+    /// The recording library voices are built from.
+    pub fn captures(&self) -> &CaptureStore {
+        &self.captures
     }
 
     pub fn list(&self) -> Result<Vec<ProfileView>> {
@@ -97,25 +99,9 @@ impl ProfileStore {
                 .map_err(CoreError::from)
                 .and_then(|raw| serde_json::from_str::<ProfileMeta>(&raw).map_err(CoreError::from))
             {
-                Ok(mut meta) => {
+                Ok(meta) => {
                     let clip = entry.path().join("reference.wav");
-                    let (duration_secs, bytes) = clip_facts(&clip);
-                    // Profiles saved before ingest analysis existed get
-                    // their facts computed on the fly so the library can
-                    // still flag problematic clips.
-                    if meta.reference.is_none() {
-                        if let Ok(raw) = fs::read(&clip) {
-                            if let Ok((samples, rate)) = decode_wav(&raw) {
-                                let rate = rate.max(1) as u32;
-                                meta.reference = Some(facts_for(&samples, rate, samples.len()));
-                            }
-                        }
-                    }
-                    out.push(ProfileView {
-                        meta,
-                        duration_secs,
-                        bytes,
-                    });
+                    out.push(self.view(meta, &clip));
                 }
                 Err(e) => tracing::warn!(
                     "skipping unreadable profile {}: {e}",
@@ -125,6 +111,50 @@ impl ProfileStore {
         }
         out.sort_by_key(|a| std::cmp::Reverse(a.meta.created_at));
         Ok(out)
+    }
+
+    /// A voice as the library shows it: the stored facts, or — when the
+    /// voice is built from captures — what those takes add up to, because
+    /// that is the clip an engine actually receives.
+    fn view(&self, mut meta: ProfileMeta, clip: &Path) -> ProfileView {
+        let mut duration_secs;
+        let mut bytes;
+        let mut capture_count = 1;
+        let takes: Vec<CaptureMeta> = meta
+            .captures
+            .iter()
+            .filter_map(|id| self.captures.meta(id).ok())
+            .collect();
+        if takes.is_empty() {
+            (duration_secs, bytes) = clip_facts(clip);
+            // Profiles saved before ingest analysis existed get their
+            // facts computed on the fly so the library can still flag
+            // problematic clips.
+            if meta.reference.is_none() {
+                if let Ok(raw) = fs::read(clip) {
+                    if let Ok((samples, rate)) = decode_wav(&raw) {
+                        let rate = rate.max(1) as u32;
+                        meta.reference = Some(reference::facts_for(&samples, rate, samples.len()));
+                    }
+                }
+            }
+        } else {
+            capture_count = takes.len();
+            duration_secs = 0.0;
+            bytes = 0;
+            for take in &takes {
+                let (secs, size) = self.captures.facts(&take.id);
+                duration_secs += secs;
+                bytes += size;
+            }
+            meta.reference = Some(aggregate_facts(&takes));
+        }
+        ProfileView {
+            meta,
+            duration_secs,
+            bytes,
+            capture_count,
+        }
     }
 
     pub fn dir(&self, id: &str) -> Result<PathBuf> {
@@ -159,6 +189,10 @@ impl ProfileStore {
     /// `clean` is false for archive imports: those clips were already
     /// processed (or curated) elsewhere, and leaving them byte-identical
     /// keeps the content fingerprints used for duplicate detection valid.
+    ///
+    /// Every saved voice's clip is also a capture, so recordings made on
+    /// the synth page turn up in the recording library without the user
+    /// saving them twice.
     fn create_impl(
         &self,
         name: &str,
@@ -167,55 +201,328 @@ impl ProfileStore {
         wav: &[u8],
         clean: bool,
     ) -> Result<ProfileMeta> {
-        let name = name.trim();
+        self.create_impl_with(name, prompt_text, engine_id, wav, clean, None)
+    }
+
+    /// `captures` names takes that already exist (an archive carrying its
+    /// own per-take audio); otherwise the clip itself becomes one take.
+    fn create_impl_with(
+        &self,
+        name: &str,
+        prompt_text: &str,
+        engine_id: Option<String>,
+        wav: &[u8],
+        clean: bool,
+        captures: Option<Vec<String>>,
+    ) -> Result<ProfileMeta> {
+        validate_name(name)?;
         let prompt_text = prompt_text.trim();
-        if name.is_empty() {
-            return Err(CoreError::UserError(i18n::Message::new(
-                Key::VoiceNameEmpty,
-            )));
-        }
-        if name.chars().count() > 80 {
-            return Err(CoreError::UserError(i18n::Message::new(
-                Key::VoiceNameTooLong,
-            )));
-        }
         if prompt_text.is_empty() {
             return Err(CoreError::UserError(i18n::Message::new(
                 Key::TranscriptMissing,
             )));
         }
-        check_reference_size(wav)?;
-        // Decoding here also rejects clips the library could never use.
-        let reference = prepare_reference(wav, clean)?;
+        let (captures, stored) = self.store_or_use(name, prompt_text, wav, clean, captures)?;
+        // The voice stores exactly the clip the capture kept, so the two
+        // can never drift apart and no second trim is applied.
+        let reference = prepare(&stored, false)?;
+        self.write_profile(name, prompt_text, engine_id, &reference, captures)
+    }
 
+    /// The capture ids to record on a new or replaced voice, and the clip
+    /// bytes to store for it.
+    fn store_or_use(
+        &self,
+        name: &str,
+        prompt_text: &str,
+        wav: &[u8],
+        clean: bool,
+        existing: Option<Vec<String>>,
+    ) -> Result<(Vec<String>, Vec<u8>)> {
+        match existing {
+            Some(ids) => Ok((ids, wav.to_vec())),
+            None => {
+                let (capture, stored) = self.captures.ingest(name, prompt_text, wav, clean)?;
+                Ok((vec![capture.id], stored))
+            }
+        }
+    }
+
+    /// Build a voice from existing captures, in the order given. The
+    /// stored `reference.wav` is the captures joined up to `max_secs`, so
+    /// older readers still get the audio an engine would use.
+    pub fn create_from_captures(
+        &self,
+        name: &str,
+        engine_id: Option<String>,
+        ids: &[String],
+        max_secs: f32,
+    ) -> Result<ProfileMeta> {
+        validate_name(name)?;
+        let (ids, clips) = self.load_captures(ids)?;
+        if clips.is_empty() {
+            return Err(CoreError::UserError(i18n::Message::new(
+                Key::NothingSelected,
+            )));
+        }
+        let combined = captures::combine(&clips, max_secs)?;
+        if combined.text.is_empty() {
+            return Err(CoreError::UserError(i18n::Message::new(
+                Key::TranscriptMissing,
+            )));
+        }
+        let reference = prepare(&combined.wav, false)?;
+        self.write_profile(name, &combined.text, engine_id, &reference, ids)
+    }
+
+    fn write_profile(
+        &self,
+        name: &str,
+        prompt_text: &str,
+        engine_id: Option<String>,
+        reference: &PreparedReference,
+        captures: Vec<String>,
+    ) -> Result<ProfileMeta> {
         let created_at = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map(|d| d.as_secs())
             .unwrap_or(0);
-        let id = format!("p{created_at}-{:04x}", random_suffix());
-
+        let id = new_id('p');
         let dir = self.root.join(&id);
         fs::create_dir_all(&dir)?;
+        // The takes measured the clip at ingest; that is the more useful
+        // description of the voice than re-measuring the joined reference.
+        let facts = self
+            .capture_facts(&captures)
+            .unwrap_or_else(|| reference.facts.clone());
         let meta = ProfileMeta {
             id: id.clone(),
-            name: name.to_string(),
-            prompt_text: prompt_text.to_string(),
+            name: name.trim().to_string(),
+            prompt_text: prompt_text.trim().to_string(),
             engine_id,
             created_at,
-            reference: Some(reference.facts),
+            reference: Some(facts),
+            captures,
         };
 
         // Write the manifest last and atomically: a profile directory
         // without profile.json is ignored by list().
         fs::write(dir.join("reference.wav"), &reference.wav)?;
-        if let Some(original) = &reference.original {
-            fs::write(dir.join(ORIGINAL_REFERENCE_FILE), original)?;
-        }
         write_atomic(
             &dir.join("profile.json"),
             &serde_json::to_vec_pretty(&meta)?,
         )?;
         Ok(meta)
+    }
+
+    /// The clip an engine is given for this voice, joined up to `max_secs`.
+    /// A voice without captures (one not migrated yet) keeps its own
+    /// `reference.wav`; a single capture is returned byte-for-byte.
+    pub fn reference(&self, id: &str, max_secs: f32) -> Result<CombinedReference> {
+        let (meta, wav) = self.get(id)?;
+        let clips: Vec<(CaptureMeta, Vec<u8>)> = meta
+            .captures
+            .iter()
+            .filter_map(|cid| self.captures.get(cid).ok())
+            .collect();
+        if clips.len() > 1 {
+            return captures::combine(&clips, max_secs);
+        }
+        let wav = clips.first().map(|(_, bytes)| bytes.clone()).unwrap_or(wav);
+        Ok(CombinedReference {
+            wav,
+            text: meta.prompt_text,
+            used: 1,
+            dropped: 0,
+        })
+    }
+
+    /// Replace the captures a voice is built from, in order. The voice's
+    /// transcript is re-derived from them.
+    pub fn set_captures(&self, id: &str, ids: &[String]) -> Result<ProfileMeta> {
+        let (ids, _) = self.load_captures(ids)?;
+        let dir = self.dir(id)?;
+        let raw = fs::read_to_string(dir.join("profile.json"))?;
+        let mut meta: ProfileMeta = serde_json::from_str(&raw)?;
+        meta.prompt_text = self.joined_transcript(&ids).unwrap_or(meta.prompt_text);
+        meta.captures = ids;
+        write_atomic(
+            &dir.join("profile.json"),
+            &serde_json::to_vec_pretty(&meta)?,
+        )?;
+        Ok(meta)
+    }
+
+    /// Replace a take's transcript and refresh every voice built from it,
+    /// so a re-transcription shows up in the voice library too.
+    pub fn set_capture_transcript(&self, id: &str, text: &str) -> Result<CaptureMeta> {
+        let meta = self.captures.update(id, None, Some(text))?;
+        for view in self.list()? {
+            let mut voice = view.meta;
+            if !voice.captures.iter().any(|cid| cid == id) {
+                continue;
+            }
+            let Some(joined) = self.joined_transcript(&voice.captures) else {
+                continue;
+            };
+            if joined == voice.prompt_text {
+                continue;
+            }
+            voice.prompt_text = joined;
+            let dir = self.dir(&voice.id)?;
+            write_atomic(
+                &dir.join("profile.json"),
+                &serde_json::to_vec_pretty(&voice)?,
+            )?;
+        }
+        Ok(meta)
+    }
+
+    /// Delete a take from the library. Voices built from it lose it; a
+    /// voice left with no takes falls back to its own `reference.wav`.
+    pub fn delete_capture(&self, id: &str) -> Result<()> {
+        self.captures.delete(id)?;
+        for view in self.list()? {
+            let mut meta = view.meta;
+            if !meta.captures.iter().any(|cid| cid == id) {
+                continue;
+            }
+            meta.captures.retain(|cid| cid != id);
+            let dir = self.dir(&meta.id)?;
+            write_atomic(
+                &dir.join("profile.json"),
+                &serde_json::to_vec_pretty(&meta)?,
+            )?;
+        }
+        Ok(())
+    }
+
+    /// Delete takes whose audio duplicates an older take, then repoint
+    /// every voice that referenced a deleted copy. Returns how many were
+    /// removed.
+    pub fn dedupe_captures(&self) -> Result<usize> {
+        let removed = self.captures.dedupe()?;
+        if removed.is_empty() {
+            return Ok(0);
+        }
+        let remap: HashMap<String, String> = removed.into_iter().collect();
+        for view in self.list()? {
+            let mut meta = view.meta;
+            let mut changed = false;
+            let mut next: Vec<String> = Vec::with_capacity(meta.captures.len());
+            for cid in &meta.captures {
+                let id = remap.get(cid).cloned().unwrap_or_else(|| cid.clone());
+                if id != *cid || next.contains(&id) {
+                    changed = true;
+                }
+                if !next.contains(&id) {
+                    next.push(id);
+                }
+            }
+            if !changed {
+                continue;
+            }
+            meta.captures = next;
+            let dir = self.dir(&meta.id)?;
+            write_atomic(
+                &dir.join("profile.json"),
+                &serde_json::to_vec_pretty(&meta)?,
+            )?;
+        }
+        Ok(remap.len())
+    }
+
+    /// Give every voice that predates the recording library a single
+    /// capture holding its `reference.wav`. Idempotent: a voice already
+    /// naming captures is left alone, so this can run at every start.
+    pub fn migrate_captures(&self) -> usize {
+        let mut migrated = 0;
+        let views = match self.list() {
+            Ok(v) => v,
+            Err(e) => {
+                tracing::warn!("cannot migrate voices to captures: {e}");
+                return 0;
+            }
+        };
+        for view in views {
+            let mut meta = view.meta;
+            if !meta.captures.is_empty() {
+                continue;
+            }
+            let dir = match self.dir(&meta.id) {
+                Ok(d) => d,
+                Err(_) => continue,
+            };
+            let wav = match fs::read(dir.join("reference.wav")) {
+                Ok(w) => w,
+                Err(_) => continue,
+            };
+            // The clip was processed at ingest; keep the bytes untouched
+            // so the voice and its capture stay identical.
+            let capture = match self
+                .captures
+                .create(&meta.name, &meta.prompt_text, &wav, false)
+            {
+                Ok(c) => c,
+                Err(e) => {
+                    tracing::warn!("cannot migrate voice {}: {e}", meta.id);
+                    continue;
+                }
+            };
+            meta.captures = vec![capture.id];
+            let bytes = match serde_json::to_vec_pretty(&meta) {
+                Ok(bytes) => bytes,
+                Err(e) => {
+                    tracing::warn!("cannot migrate voice {}: {e}", meta.id);
+                    continue;
+                }
+            };
+            if let Err(e) = write_atomic(&dir.join("profile.json"), &bytes) {
+                tracing::warn!("cannot migrate voice {}: {e}", meta.id);
+                continue;
+            }
+            migrated += 1;
+        }
+        migrated
+    }
+
+    /// Keep only the ids that exist, in the given order and without
+    /// repeats, and load their clips alongside.
+    fn load_captures(&self, ids: &[String]) -> Result<LoadedCaptures> {
+        let mut seen = HashSet::new();
+        let mut kept = Vec::new();
+        let mut clips = Vec::new();
+        for cid in ids {
+            if !seen.insert(cid.clone()) {
+                continue;
+            }
+            let (meta, wav) = self.captures.get(cid)?;
+            kept.push(cid.clone());
+            clips.push((meta, wav));
+        }
+        Ok((kept, clips))
+    }
+
+    /// Facts of the named takes, aggregated; `None` when none exist.
+    fn capture_facts(&self, ids: &[String]) -> Option<ReferenceFacts> {
+        let takes: Vec<CaptureMeta> = ids
+            .iter()
+            .filter_map(|cid| self.captures.meta(cid).ok())
+            .collect();
+        (!takes.is_empty()).then(|| aggregate_facts(&takes))
+    }
+
+    /// Transcript of the given captures joined the same way
+    /// [`captures::combine`] joins their audio; `None` when none of them
+    /// has been transcribed.
+    fn joined_transcript(&self, ids: &[String]) -> Option<String> {
+        let texts: Vec<String> = ids
+            .iter()
+            .filter_map(|cid| self.captures.meta(cid).ok())
+            .map(|m| m.prompt_text.trim().to_string())
+            .filter(|t| !t.is_empty())
+            .collect();
+        (!texts.is_empty()).then(|| texts.join(" "))
     }
 
     /// Rename a voice, change its transcript, and/or replace the
@@ -228,50 +535,38 @@ impl ProfileStore {
         prompt_text: &str,
         wav: Option<&[u8]>,
     ) -> Result<ProfileMeta> {
-        self.update_impl(id, name, prompt_text, wav, true)
+        self.update_impl_with(id, name, prompt_text, wav, true, None)
     }
 
-    /// See [`ProfileStore::create_impl`] for `clean`.
-    fn update_impl(
+    /// See [`ProfileStore::create_impl`] for `clean` and `captures`.
+    fn update_impl_with(
         &self,
         id: &str,
         name: &str,
         prompt_text: &str,
         wav: Option<&[u8]>,
         clean: bool,
+        captures: Option<Vec<String>>,
     ) -> Result<ProfileMeta> {
         let dir = self.dir(id)?;
         let raw = fs::read_to_string(dir.join("profile.json"))?;
         let mut meta: ProfileMeta = serde_json::from_str(&raw)?;
 
-        let name = name.trim();
-        if name.is_empty() {
-            return Err(CoreError::UserError(i18n::Message::new(
-                Key::VoiceNameEmpty,
-            )));
-        }
-        if name.chars().count() > 80 {
-            return Err(CoreError::UserError(i18n::Message::new(
-                Key::VoiceNameTooLong,
-            )));
-        }
+        validate_name(name)?;
 
         if let Some(wav) = wav {
-            check_reference_size(wav)?;
-            let reference = prepare_reference(wav, clean)?;
+            // A replaced clip is a new take: the old captures stay in the
+            // library and the voice is rebuilt from the new one.
+            let (captures, stored) = self.store_or_use(name, prompt_text, wav, clean, captures)?;
+            let reference = prepare(&stored, false)?;
             fs::write(dir.join("reference.wav"), &reference.wav)?;
-            match &reference.original {
-                Some(original) => fs::write(dir.join(ORIGINAL_REFERENCE_FILE), original)?,
-                // The previous clip may have needed trimming; the new one
-                // does not, so no stale "original" should linger.
-                None => {
-                    let _ = fs::remove_file(dir.join(ORIGINAL_REFERENCE_FILE));
-                }
-            }
-            meta.reference = Some(reference.facts);
+            meta.reference = self
+                .capture_facts(&captures)
+                .or(Some(reference.facts.clone()));
+            meta.captures = captures;
         }
 
-        meta.name = name.to_string();
+        meta.name = name.trim().to_string();
         meta.prompt_text = prompt_text.trim().to_string();
         write_atomic(
             &dir.join("profile.json"),
@@ -279,7 +574,6 @@ impl ProfileStore {
         )?;
         Ok(meta)
     }
-
     pub fn delete(&self, id: &str) -> Result<()> {
         let dir = self.dir(id)?;
         fs::remove_dir_all(dir)?;
@@ -287,41 +581,61 @@ impl ProfileStore {
     }
 
     /// Pack a voice into a portable `.lvvoice` archive:
-    /// `manifest.json` (format version + metadata) and `reference.wav`.
-    /// The WAV is stored uncompressed — PCM already resists deflate well,
+    /// `manifest.json` (format version + metadata), `reference.wav` and —
+    /// for a voice built from several takes — `captures.json` plus one
+    /// WAV per take, so the receiving side keeps the takes apart. The
+    /// WAVs are stored uncompressed: PCM already resists deflate well,
     /// and ZIP_STORED keeps packing/extraction instant.
     pub fn export_zip(&self, id: &str) -> Result<Vec<u8>> {
-        use std::io::Write;
         use zip::{write::SimpleFileOptions, CompressionMethod, ZipWriter};
 
-        let (meta, wav) = self.get(id)?;
-        let exported_at = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map(|d| d.as_secs())
-            .unwrap_or(0);
+        let (meta, stored) = self.get(id)?;
+        let combined = self.reference(id, EXPORT_MAX_REFERENCE_SECS)?;
+        let takes = self.export_takes(&meta, &stored)?;
+        let exported_at = now_secs();
         let manifest = serde_json::json!({
             "format": "laverock-voice",
             "version": 1,
             "name": meta.name,
-            "prompt_text": meta.prompt_text,
+            "prompt_text": combined.text,
             "engine_id": meta.engine_id,
+            "audio_sha256": sha256_hex(&combined.wav),
+            "captures": takes.len(),
             "exported_at": exported_at,
         });
 
         let mut zip = ZipWriter::new(std::io::Cursor::new(Vec::new()));
         let opts = SimpleFileOptions::default().compression_method(CompressionMethod::Stored);
-        zip.start_file("manifest.json", opts)
-            .map_err(|e| CoreError::Wav(format!("cannot write archive: {e}")))?;
-        zip.write_all(serde_json::to_vec_pretty(&manifest)?.as_slice())
-            .map_err(|e| CoreError::Wav(format!("cannot write archive: {e}")))?;
-        zip.start_file("reference.wav", opts)
-            .map_err(|e| CoreError::Wav(format!("cannot write archive: {e}")))?;
-        zip.write_all(&wav)
-            .map_err(|e| CoreError::Wav(format!("cannot write archive: {e}")))?;
+        start_file(&mut zip, "manifest.json", opts, &serde_json::to_vec_pretty(&manifest)?)?;
+        start_file(&mut zip, "reference.wav", opts, &combined.wav)?;
+        write_takes(&mut zip, opts, "", &takes)?;
         let cursor = zip
             .finish()
             .map_err(|e| CoreError::Wav(format!("cannot finish archive: {e}")))?;
         Ok(cursor.into_inner())
+    }
+
+    /// The takes to write into an archive: one per capture, or a single
+    /// entry holding `reference.wav` for a voice that has none yet.
+    fn export_takes(&self, meta: &ProfileMeta, stored: &[u8]) -> Result<Vec<ExportTake>> {
+        let takes: Vec<ExportTake> = meta
+            .captures
+            .iter()
+            .filter_map(|cid| self.captures.get(cid).ok())
+            .map(|(m, wav)| ExportTake {
+                name: m.name,
+                prompt_text: m.prompt_text,
+                wav,
+            })
+            .collect();
+        if !takes.is_empty() {
+            return Ok(takes);
+        }
+        Ok(vec![ExportTake {
+            name: meta.name.clone(),
+            prompt_text: meta.prompt_text.clone(),
+            wav: stored.to_vec(),
+        }])
     }
 
     /// A name not already used by another voice, suffixed like "Name (2)".
@@ -352,33 +666,38 @@ impl ProfileStore {
         name: &str,
         engine_id: Option<String>,
         wav: &[u8],
+        captures: Option<Vec<String>>,
     ) -> Result<ProfileMeta> {
-        let created_at = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map(|d| d.as_secs())
-            .unwrap_or(0);
-        let id = format!("p{created_at}-{:04x}", random_suffix());
-        let dir = self.root.join(&id);
-        fs::create_dir_all(&dir)?;
         // Imported archives keep their bytes untouched; see create_impl.
-        let reference = prepare_reference(wav, false)?;
-        let meta = ProfileMeta {
-            id: id.clone(),
-            name: name.to_string(),
-            prompt_text: String::new(),
-            engine_id,
-            created_at,
-            reference: Some(reference.facts),
-        };
-        fs::write(dir.join("reference.wav"), &reference.wav)?;
-        if let Some(original) = &reference.original {
-            fs::write(dir.join(ORIGINAL_REFERENCE_FILE), original)?;
+        let (captures, stored) = self.store_or_use(name, "", wav, false, captures)?;
+        let reference = prepare(&stored, false)?;
+        let text = self.joined_transcript(&captures).unwrap_or_default();
+        self.write_profile(name, &text, engine_id, &reference, captures)
+    }
+
+    /// Recreate the takes an archive carries. Returns `None` when it
+    /// carried none (an older archive), so the caller falls back to one
+    /// capture made from the joined clip.
+    fn store_archive_captures(&self, voice: &str, takes: &[ArchiveCapture]) -> Option<Vec<String>> {
+        if takes.is_empty() {
+            return None;
         }
-        write_atomic(
-            &dir.join("profile.json"),
-            &serde_json::to_vec_pretty(&meta)?,
-        )?;
-        Ok(meta)
+        let mut ids = Vec::with_capacity(takes.len());
+        for take in takes {
+            let name = if take.name.is_empty() {
+                voice.to_string()
+            } else {
+                take.name.clone()
+            };
+            match self
+                .captures
+                .create(&name, &take.prompt_text, &take.wav, false)
+            {
+                Ok(meta) => ids.push(meta.id),
+                Err(e) => tracing::warn!("cannot import take of {voice}: {e}"),
+            }
+        }
+        (!ids.is_empty()).then_some(ids)
     }
 
     /// Export several voices into one `.lvvoices.zip` archive. Each
@@ -387,7 +706,6 @@ impl ProfileStore {
     /// `voices.json` indexes them. Compatible readers can still use
     /// the single-voice layout at the archive root.
     pub fn export_zip_batch(&self, ids: &[String]) -> Result<Vec<u8>> {
-        use std::io::Write;
         use zip::{write::SimpleFileOptions, CompressionMethod, ZipWriter};
 
         if ids.is_empty() {
@@ -403,37 +721,41 @@ impl ProfileStore {
         let mut zip = ZipWriter::new(std::io::Cursor::new(Vec::new()));
         let mut index = Vec::with_capacity(ids.len());
         for (i, id) in ids.iter().enumerate() {
-            let (meta, wav) = self.get(id)?;
+            let (meta, stored) = self.get(id)?;
+            let combined = self.reference(id, EXPORT_MAX_REFERENCE_SECS)?;
+            let takes = self.export_takes(&meta, &stored)?;
             let safe = archive_safe_name(&meta.name);
             let dir = format!("voices/{:02}-{}", i + 1, safe);
             zip.add_directory(format!("{dir}/"), opts)
                 .map_err(|e| CoreError::Wav(format!("cannot write archive: {e}")))?;
-            let audio_hash = sha256_hex(&wav);
+            let audio_hash = sha256_hex(&combined.wav);
             let entry = serde_json::json!({
                 "dir": dir,
                 "id": meta.id,
                 "name": meta.name,
-                "prompt_text": meta.prompt_text,
+                "prompt_text": combined.text,
                 "engine_id": meta.engine_id,
                 "audio_sha256": audio_hash,
+                "captures": takes.len(),
             });
             let manifest = serde_json::json!({
                 "format": "laverock-voice",
                 "version": 1,
                 "name": meta.name,
-                "prompt_text": meta.prompt_text,
+                "prompt_text": combined.text,
                 "engine_id": meta.engine_id,
                 "audio_sha256": audio_hash,
+                "captures": takes.len(),
                 "exported_at": exported_at,
             });
-            zip.start_file(format!("{dir}/manifest.json"), opts)
-                .map_err(|e| CoreError::Wav(format!("cannot write archive: {e}")))?;
-            zip.write_all(serde_json::to_vec_pretty(&manifest)?.as_slice())
-                .map_err(|e| CoreError::Wav(format!("cannot write archive: {e}")))?;
-            zip.start_file(format!("{dir}/reference.wav"), opts)
-                .map_err(|e| CoreError::Wav(format!("cannot write archive: {e}")))?;
-            zip.write_all(&wav)
-                .map_err(|e| CoreError::Wav(format!("cannot write archive: {e}")))?;
+            start_file(
+                &mut zip,
+                &format!("{dir}/manifest.json"),
+                opts,
+                &serde_json::to_vec_pretty(&manifest)?,
+            )?;
+            start_file(&mut zip, &format!("{dir}/reference.wav"), opts, &combined.wav)?;
+            write_takes(&mut zip, opts, &format!("{dir}/"), &takes)?;
             index.push(entry);
         }
         let bundle = serde_json::json!({
@@ -443,10 +765,12 @@ impl ProfileStore {
             "exported_at": exported_at,
             "voices": index,
         });
-        zip.start_file("voices.json", opts)
-            .map_err(|e| CoreError::Wav(format!("cannot write archive: {e}")))?;
-        zip.write_all(serde_json::to_vec_pretty(&bundle)?.as_slice())
-            .map_err(|e| CoreError::Wav(format!("cannot write archive: {e}")))?;
+        start_file(
+            &mut zip,
+            "voices.json",
+            opts,
+            &serde_json::to_vec_pretty(&bundle)?,
+        )?;
         let cursor = zip
             .finish()
             .map_err(|e| CoreError::Wav(format!("cannot finish archive: {e}")))?;
@@ -460,10 +784,10 @@ impl ProfileStore {
             .unwrap_or_default()
             .into_iter()
             .filter_map(|p| {
-                let (meta, wav) = self.get(&p.meta.id).ok()?;
+                let combined = self.reference(&p.meta.id, EXPORT_MAX_REFERENCE_SECS).ok()?;
                 Some(VoiceFingerprint {
-                    audio_sha256: sha256_hex(&wav),
-                    id: meta.id,
+                    audio_sha256: sha256_hex(&combined.wav),
+                    id: p.meta.id,
                 })
             })
             .collect()
@@ -500,16 +824,20 @@ impl ProfileStore {
                 .fingerprint_index()
                 .into_iter()
                 .find(|f| f.audio_sha256 == entry.audio_sha256);
+            // Archives written by this version carry each take on its own;
+            // older ones only have the joined clip.
+            let takes = self.store_archive_captures(&entry.name, &entry.captures);
 
             match (strategy, existing) {
                 (ImportStrategy::Skip, Some(_)) => report.skipped += 1,
                 (ImportStrategy::Overwrite, Some(fp)) => {
-                    self.update_impl(
+                    self.update_impl_with(
                         &fp.id,
                         &entry.name,
                         &entry.prompt_text,
                         Some(&entry.wav),
                         false,
+                        takes,
                     )?;
                     report.overwritten += 1;
                 }
@@ -520,14 +848,20 @@ impl ProfileStore {
                         &entry.name
                     });
                     if entry.prompt_text.is_empty() {
-                        self.create_without_transcript(&name, entry.engine_id.clone(), &entry.wav)?;
+                        self.create_without_transcript(
+                            &name,
+                            entry.engine_id.clone(),
+                            &entry.wav,
+                            takes,
+                        )?;
                     } else {
-                        self.create_impl(
+                        self.create_impl_with(
                             &name,
                             &entry.prompt_text,
                             entry.engine_id.clone(),
                             &entry.wav,
                             false,
+                            takes,
                         )?;
                     }
                     report.imported += 1;
@@ -556,75 +890,97 @@ pub struct ImportReport {
     pub failed: Vec<String>,
 }
 
-fn check_reference_size(wav: &[u8]) -> Result<()> {
-    if wav.len() > MAX_REFERENCE_BYTES {
+fn validate_name(name: &str) -> Result<()> {
+    let name = name.trim();
+    if name.is_empty() {
         return Err(CoreError::UserError(i18n::Message::new(
-            Key::ReferenceTooLarge,
+            Key::VoiceNameEmpty,
+        )));
+    }
+    if name.chars().count() > 80 {
+        return Err(CoreError::UserError(i18n::Message::new(
+            Key::VoiceNameTooLong,
         )));
     }
     Ok(())
 }
 
-/// A reference clip after validation and ingest processing.
-struct PreparedReference {
-    /// Bytes to store as `reference.wav`.
+/// What a voice's captures add up to, for the library's warnings: the
+/// sum of the takes, the worst pause/hiss, and the loudest peak.
+fn aggregate_facts(takes: &[CaptureMeta]) -> ReferenceFacts {
+    let mut out = ReferenceFacts::default();
+    let mut total = 0.0f32;
+    for take in takes {
+        if let Some(f) = &take.reference {
+            total += f.duration_secs;
+            out.original_duration_secs += f.original_duration_secs;
+            out.trimmed_secs += f.trimmed_secs;
+            out.longest_pause_secs = out.longest_pause_secs.max(f.longest_pause_secs);
+            out.peak = out.peak.max(f.peak);
+            out.clipped_fraction = out.clipped_fraction.max(f.clipped_fraction);
+        }
+    }
+    out.duration_secs = total;
+    out
+}
+
+/// One take as written into an archive.
+struct ExportTake {
+    name: String,
+    prompt_text: String,
     wav: Vec<u8>,
-    /// The untouched upload, kept alongside when the clip was trimmed.
-    original: Option<Vec<u8>>,
-    facts: ReferenceFacts,
 }
 
-/// Measure a clip. `stored_len` is the length of the clip actually kept
-/// (equal to `samples.len()` when nothing was trimmed).
-fn facts_for(samples: &[f32], sample_rate: u32, stored_len: usize) -> ReferenceFacts {
-    let rate = sample_rate.max(1) as f32;
-    let silence = silence_profile(samples, sample_rate.max(1));
-    let peak = samples.iter().fold(0.0f32, |m, s| m.max(s.abs()));
-    let clipped = samples.iter().filter(|s| s.abs() >= 0.999).count() as f32;
-    ReferenceFacts {
-        duration_secs: stored_len as f32 / rate,
-        original_duration_secs: samples.len() as f32 / rate,
-        trimmed_secs: samples.len().saturating_sub(stored_len) as f32 / rate,
-        longest_pause_secs: silence.longest_internal_pause_secs,
-        peak,
-        clipped_fraction: clipped / samples.len().max(1) as f32,
-    }
+fn start_file(
+    zip: &mut zip::ZipWriter<std::io::Cursor<Vec<u8>>>,
+    name: &str,
+    opts: zip::write::SimpleFileOptions,
+    bytes: &[u8],
+) -> Result<()> {
+    use std::io::Write;
+    zip.start_file(name, opts)
+        .map_err(|e| CoreError::Wav(format!("cannot write archive: {e}")))?;
+    zip.write_all(bytes)
+        .map_err(|e| CoreError::Wav(format!("cannot write archive: {e}")))
 }
 
-/// Validate a reference clip, measure it, and — when `clean` is set —
-/// trim the dead air at its ends. Internal pauses are left alone: they
-/// are part of the recording's rhythm and engines that cannot cope with
-/// them clean their own prompt (see the MOSS-TTS engine).
-fn prepare_reference(wav: &[u8], clean: bool) -> Result<PreparedReference> {
-    let (samples, sample_rate) = decode_wav(wav)?;
-    let rate = sample_rate.max(1) as u32;
-
-    let trimmed = if clean {
-        trim_silence(&samples, rate, REFERENCE_EDGE_KEEP_SECS)
-    } else {
-        Cow::Borrowed(samples.as_slice())
-    };
-    if trimmed.is_empty() {
-        return Err(CoreError::UserError(i18n::Message::new(
-            Key::ReferenceSilent,
-        )));
+/// Write `captures.json` plus one WAV per take under `{prefix}captures/`,
+/// so the receiving side keeps a multi-take voice in pieces instead of
+/// only as the joined clip.
+fn write_takes(
+    zip: &mut zip::ZipWriter<std::io::Cursor<Vec<u8>>>,
+    opts: zip::write::SimpleFileOptions,
+    prefix: &str,
+    takes: &[ExportTake],
+) -> Result<()> {
+    let mut index = Vec::with_capacity(takes.len());
+    for (i, take) in takes.iter().enumerate() {
+        let file = format!(
+            "{prefix}captures/{:02}-{}.wav",
+            i + 1,
+            archive_safe_name(&take.name)
+        );
+        start_file(zip, &file, opts, &take.wav)?;
+        index.push(serde_json::json!({
+            "file": file,
+            "name": take.name,
+            "prompt_text": take.prompt_text,
+            "audio_sha256": sha256_hex(&take.wav),
+        }));
     }
+    start_file(
+        zip,
+        &format!("{prefix}captures.json"),
+        opts,
+        &serde_json::to_vec_pretty(&index)?,
+    )
+}
 
-    let removed = samples.len().saturating_sub(trimmed.len());
-    // Re-encode only when a meaningful amount of dead air was removed:
-    // untouched clips stay byte-identical, which keeps the content
-    // fingerprints used for import de-duplication stable.
-    let (stored, original) = if clean && removed > (rate / 50) as usize {
-        (encode_wav(&trimmed, sample_rate)?, Some(wav.to_vec()))
-    } else {
-        (wav.to_vec(), None)
-    };
-
-    Ok(PreparedReference {
-        wav: stored,
-        original,
-        facts: facts_for(&samples, rate, trimmed.len()),
-    })
+fn now_secs() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
 }
 
 struct ArchiveVoice {
@@ -633,6 +989,57 @@ struct ArchiveVoice {
     engine_id: Option<String>,
     wav: Vec<u8>,
     audio_sha256: String,
+    /// Per-take audio, when the archive was written by a version that
+    /// keeps takes apart. Empty for older archives.
+    captures: Vec<ArchiveCapture>,
+}
+
+struct ArchiveCapture {
+    name: String,
+    prompt_text: String,
+    wav: Vec<u8>,
+}
+
+/// Takes listed in `{dir}/captures.json`, resolved against the archive
+/// index. A missing take is skipped rather than failing the import.
+fn read_captures(
+    files: &std::collections::HashMap<String, Vec<u8>>,
+    dir: &str,
+) -> Vec<ArchiveCapture> {
+    let Some(index) = files.get(&format!("{dir}captures.json")) else {
+        return Vec::new();
+    };
+    let Ok(entries) = serde_json::from_slice::<serde_json::Value>(index) else {
+        return Vec::new();
+    };
+    let Some(entries) = entries.as_array() else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for e in entries {
+        let Some(file) = e.get("file").and_then(|v| v.as_str()) else {
+            continue;
+        };
+        let Some(wav) = files.get(file.trim_start_matches('/')) else {
+            continue;
+        };
+        out.push(ArchiveCapture {
+            name: e
+                .get("name")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .trim()
+                .to_string(),
+            prompt_text: e
+                .get("prompt_text")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .trim()
+                .to_string(),
+            wav: wav.clone(),
+        });
+    }
+    out
 }
 
 /// Parse both the single-voice layout (root manifest) and the batch
@@ -703,6 +1110,7 @@ fn read_archive_voices(bytes: &[u8]) -> Result<Vec<ArchiveVoice>> {
                     .map(str::to_string)
                     .unwrap_or_else(|| sha256_hex(wav)),
                 wav: wav.clone(),
+                captures: read_captures(&files, &format!("{dir}/")),
             });
         }
         return Ok(out);
@@ -742,6 +1150,7 @@ fn read_archive_voices(bytes: &[u8]) -> Result<Vec<ArchiveVoice>> {
             .map(str::to_string),
         audio_sha256: sha256_hex(wav),
         wav: wav.clone(),
+        captures: read_captures(&files, ""),
     });
     Ok(out)
 }
@@ -774,60 +1183,11 @@ fn archive_safe_name(name: &str) -> String {
     }
 }
 
-/// Lowercase hex SHA-256 of the reference clip.
-fn sha256_hex(bytes: &[u8]) -> String {
-    use sha2::{Digest, Sha256};
-    let mut hasher = Sha256::new();
-    hasher.update(bytes);
-    let digest = hasher.finalize();
-    digest.iter().map(|b| format!("{b:02x}")).collect()
-}
-
-/// Duration and size of a reference clip; missing or unreadable clips
-/// report zero duration rather than failing the whole listing.
-fn clip_facts(path: &Path) -> (f32, u64) {
-    let Ok(bytes) = fs::read(path) else {
-        return (0.0, 0);
-    };
-    let size = bytes.len() as u64;
-    match decode_wav(&bytes) {
-        Ok((samples, rate)) if rate > 0 => (samples.len() as f32 / rate as f32, size),
-        _ => (0.0, size),
-    }
-}
-
-fn is_valid_id(id: &str) -> bool {
-    !id.is_empty()
-        && id.len() <= 64
-        && id
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
-}
-
-fn random_suffix() -> u16 {
-    // Cheap unique-enough suffix; ids also carry a second-resolution stamp.
-    use std::collections::hash_map::RandomState;
-    use std::hash::{BuildHasher, Hasher};
-    let mut h = RandomState::new().build_hasher();
-    h.write_u64(
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map(|d| d.subsec_nanos() as u64)
-            .unwrap_or(0),
-    );
-    (h.finish() & 0xffff) as u16
-}
-
-fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
-    let tmp = path.with_extension("json.tmp");
-    fs::write(&tmp, bytes)?;
-    fs::rename(&tmp, path)?;
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::reference::random_suffix;
+    use laverock_core::encode_wav;
     use std::sync::atomic::{AtomicU32, Ordering};
 
     fn temp_store() -> (ProfileStore, PathBuf) {
@@ -870,10 +1230,11 @@ mod tests {
 
         let (_, stored) = store.get(&meta.id).expect("get");
         assert!(stored.len() < wav.len(), "stored clip should be trimmed");
+        // The untouched upload is kept by the take, not by the voice.
         let original = fs::read(
-            dir.join("profiles")
-                .join(&meta.id)
-                .join(ORIGINAL_REFERENCE_FILE),
+            dir.join("captures")
+                .join(&meta.captures[0])
+                .join(crate::captures::ORIGINAL_CAPTURE_FILE),
         )
         .expect("original kept");
         assert_eq!(original, wav);
@@ -906,24 +1267,24 @@ mod tests {
     }
 
     #[test]
-    fn update_replaces_clip_and_drops_stale_original() {
+    fn replacing_a_clip_adds_a_take_and_keeps_the_old_one() {
         let (store, dir) = temp_store();
         let meta = store
             .create("Test", "text", None, &wav_with_silence(0.6, 1.0))
             .expect("create");
-        let original = dir
-            .join("profiles")
-            .join(&meta.id)
-            .join(ORIGINAL_REFERENCE_FILE);
-        assert!(original.is_file());
+        assert_eq!(meta.captures.len(), 1);
+        let first = meta.captures[0].clone();
 
-        // A clip without dead air needs no trimming, so no original remains.
         let tight = ws_tight_clip();
         let meta = store
             .update(&meta.id, "Test", "text", Some(&tight))
             .expect("update");
-        assert!(!original.exists(), "stale original should be removed");
+        // A clip without dead air needs no trimming.
         assert_eq!(meta.reference.expect("facts").trimmed_secs, 0.0);
+        assert_eq!(meta.captures.len(), 1);
+        assert_ne!(meta.captures[0], first);
+        // The replaced take is still in the library, untouched.
+        assert!(store.captures().get(&first).is_ok());
         fs::remove_dir_all(&dir).ok();
     }
 
@@ -933,5 +1294,132 @@ mod tests {
             .map(|i| 0.3 * (i as f32 * 220.0 * std::f32::consts::TAU / sr as f32).sin())
             .collect();
         encode_wav(&samples, sr as i32).expect("encode")
+    }
+
+    /// A tone at `hz` so takes in one test are not byte-identical.
+    fn take(secs: f32, hz: f32) -> Vec<u8> {
+        let sr = 24_000u32;
+        let samples: Vec<f32> = (0..(sr as f32 * secs) as usize)
+            .map(|i| 0.3 * (i as f32 * hz * std::f32::consts::TAU / sr as f32).sin())
+            .collect();
+        encode_wav(&samples, sr as i32).expect("encode")
+    }
+
+    #[test]
+    fn migration_turns_a_saved_voice_into_a_single_take() {
+        let (store, dir) = temp_store();
+        let meta = store
+            .create("Test", "text", None, &wav_with_silence(0.6, 1.0))
+            .expect("create");
+        // Roll the manifest back to the pre-library shape.
+        let path = dir.join("profiles").join(&meta.id).join("profile.json");
+        let mut raw: serde_json::Value =
+            serde_json::from_slice(&fs::read(&path).expect("read")).expect("parse");
+        raw.as_object_mut().expect("object").remove("captures");
+        fs::write(&path, serde_json::to_vec_pretty(&raw).expect("json")).expect("write");
+
+        assert_eq!(store.migrate_captures(), 1);
+        let (migrated, _) = store.get(&meta.id).expect("get");
+        assert_eq!(migrated.captures.len(), 1);
+        // Running again changes nothing.
+        assert_eq!(store.migrate_captures(), 0);
+
+        // What the engine gets is exactly the migrated take.
+        let combined = store.reference(&meta.id, 15.0).expect("reference");
+        let (_, wav) = store
+            .captures()
+            .get(&migrated.captures[0])
+            .expect("take");
+        assert_eq!(combined.wav, wav);
+        assert_eq!(combined.text, "text");
+        // The take library shows it as one voice's worth of audio.
+        let views = store.list().expect("list");
+        assert_eq!(views[0].capture_count, 1);
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_voice_built_from_two_takes_joins_audio_and_transcript() {
+        let (store, dir) = temp_store();
+        let a = store
+            .captures()
+            .create("a", "第一段", &take(2.0, 220.0), false)
+            .expect("take a");
+        let b = store
+            .captures()
+            .create("b", "第二段", &take(2.0, 330.0), false)
+            .expect("take b");
+        let voice = store
+            .create_from_captures("Duo", None, &[a.id.clone(), b.id.clone()], 15.0)
+            .expect("create");
+        assert_eq!(voice.captures, vec![a.id.clone(), b.id.clone()]);
+        assert_eq!(voice.prompt_text, "第一段 第二段");
+
+        let combined = store.reference(&voice.id, 15.0).expect("reference");
+        assert_eq!(combined.used, 2);
+        assert_eq!(combined.dropped, 0);
+        let (samples, rate) = decode_wav(&combined.wav).expect("decode");
+        // Two 2 s takes plus the short join gap.
+        let secs = samples.len() as f32 / rate as f32;
+        assert!((secs - 4.12).abs() < 0.05, "{secs}");
+
+        // A re-transcription lands on the voice too.
+        store
+            .set_capture_transcript(&b.id, "第二段改")
+            .expect("retranscribe");
+        let (voice, _) = store.get(&voice.id).expect("get");
+        assert_eq!(voice.prompt_text, "第一段 第二段改");
+
+        // Deleting a take drops it from the voice; the other stays.
+        store.delete_capture(&b.id).expect("delete");
+        let (voice, _) = store.get(&voice.id).expect("get");
+        assert_eq!(voice.captures, vec![a.id]);
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn archive_keeps_takes_apart() {
+        let (store, dir) = temp_store();
+        let a = store
+            .captures()
+            .create("a", "第一段", &take(2.0, 220.0), false)
+            .expect("take a");
+        let b = store
+            .captures()
+            .create("b", "第二段", &take(2.0, 330.0), false)
+            .expect("take b");
+        let voice = store
+            .create_from_captures("Duo", None, &[a.id.clone(), b.id.clone()], 15.0)
+            .expect("create");
+        let zip = store.export_zip(&voice.id).expect("export");
+
+        store.delete(&voice.id).expect("delete voice");
+        let report = store.import_archive(&zip, ImportStrategy::Skip).expect("import");
+        assert_eq!(report.imported, 1);
+        let imported = store
+            .list()
+            .expect("list")
+            .into_iter()
+            .find(|v| v.meta.name == "Duo")
+            .expect("voice");
+        assert_eq!(imported.capture_count, 2);
+        assert_eq!(imported.meta.prompt_text, "第一段 第二段");
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn dedupe_repoints_voices_at_the_surviving_take() {
+        let (store, dir) = temp_store();
+        let wav = take(2.0, 220.0);
+        let first = store.captures().create("a", "文字", &wav, false).expect("a");
+        let second = store.captures().create("b", "文字", &wav, false).expect("b");
+        let voice = store
+            .create_from_captures("Duo", None, std::slice::from_ref(&second.id), 15.0)
+            .expect("create");
+
+        assert_eq!(store.dedupe_captures().expect("dedupe"), 1);
+        let (meta, _) = store.get(&voice.id).expect("get");
+        assert_eq!(meta.captures, vec![first.id]);
+        fs::remove_dir_all(&dir).ok();
     }
 }

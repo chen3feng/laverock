@@ -224,6 +224,24 @@ impl Manifest {
         }
     }
 
+    /// Longest reference clip this engine will use, in seconds.
+    ///
+    /// A voice can be built from several takes; joining them stops here,
+    /// because that is the part of the reference the engine actually
+    /// conditions on. The numbers come from each engine's own limit:
+    /// VoxCPM2's encoder input is a fixed 15 s tensor (see
+    /// [`crate::VOXCPM2_MAX_REFERENCE_SECS`]), and LongCat budgets the
+    /// reference inside a ~30 s request. Everything else gets the common
+    /// "3–10 s works best, more is ignored" ceiling with room to spare.
+    pub fn reference_limit_secs(&self) -> f32 {
+        match self.kind {
+            EngineKind::VoxCpm2 => crate::VOXCPM2_MAX_REFERENCE_SECS,
+            EngineKind::LongCat => 10.0,
+            EngineKind::Stt => 0.0,
+            _ => 15.0,
+        }
+    }
+
     /// Parameters a manifest ships unless it declares its own list.
     pub fn default_parameters(kind: EngineKind) -> Vec<ParamSpec> {
         use serde_json::json;

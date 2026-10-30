@@ -131,6 +131,14 @@ function voiceWarnings(p) {
   return out;
 }
 
+// A voice previews what the selected engine would hear, so the engine
+// travels with the request and its reference limit applies.
+function profilePreviewUrl(id) {
+  const engine = currentEngine();
+  const url = `/api/profiles/${encodeURIComponent(id)}/audio`;
+  return engine ? `${url}?engine=${encodeURIComponent(engine.id)}` : url;
+}
+
 function renderVoices() {
   const grid = $('voicesGrid');
   grid.innerHTML = '';
@@ -140,7 +148,7 @@ function renderVoices() {
     el.className = 'voice-card';
     const warns = voiceWarnings(p);
     el.innerHTML = `
-      <div class="voice-top"><b>${esc(p.name)}</b>${p.engine_id ? `<span class="chip">${esc(p.engine_id)}</span>` : ''}</div>
+      <div class="voice-top"><b>${esc(p.name)}</b>${p.engine_id ? `<span class="chip">${esc(p.engine_id)}</span>` : ''}${p.capture_count > 1 ? `<span class="chip">${esc(t('voices.takes', { n: p.capture_count }))}</span>` : ''}</div>
       <div class="voice-meta">${fmtDur(p.duration_secs)} · ${fmtBytes(p.bytes)} · ${fmtDate(p.created_at)}</div>
       ${warns.map((w) => `<div class="voice-warn">⚠ ${esc(w)}</div>`).join('')}
       <div class="voice-text">${esc(p.prompt_text)}</div>
@@ -150,7 +158,7 @@ function renderVoices() {
         <button class="ghost small export" type="button">${t("ui.export")}</button>
         <button class="ghost small danger del" type="button">${t("ui.delete")}</button>
       </div>`;
-    el.querySelector('.play').onclick = () => togglePreview(p.id);
+    el.querySelector('.play').onclick = () => togglePreview(p.id, profilePreviewUrl(p.id));
     el.querySelector('.edit').onclick = () => editProfile(p);
     el.querySelector('.export').onclick = () => exportProfile(p);
     el.querySelector('.del').onclick = () => deleteProfile(p);
@@ -158,24 +166,29 @@ function renderVoices() {
   }
 }
 
-function togglePreview(id) {
+// `key` identifies what is playing (a voice or a take id); `url` is what
+// to play. A voice previews the clip the selected engine would hear, so
+// the engine's reference limit applies here too.
+function togglePreview(key, url) {
   const audio = $('previewer');
-  if (previewId === id) {
+  if (previewId === key) {
     audio.pause();
     audio.removeAttribute('src');
     previewId = null;
   } else {
-    previewId = id;
-    audio.src = `/api/profiles/${encodeURIComponent(id)}/audio`;
+    previewId = key;
+    audio.src = url;
     audio.play().catch(() => {});
   }
   renderVoices();
+  if (typeof renderCaptures === 'function') renderCaptures();
   syncProfileUI();
 }
 
 $('previewer').addEventListener('ended', () => {
   previewId = null;
   renderVoices();
+  if (typeof renderCaptures === 'function') renderCaptures();
   syncProfileUI();
 });
 
@@ -298,7 +311,7 @@ async function createProfile(name, promptText, blob, engineId) {
 
 $('preview').onclick = () => {
   const p = selectedProfile();
-  if (p) togglePreview(p.id);
+  if (p) togglePreview(p.id, profilePreviewUrl(p.id));
 };
 
 $('saveprofile').onclick = async () => {
