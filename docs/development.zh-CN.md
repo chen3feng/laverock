@@ -126,8 +126,12 @@ cargo fmt --all -- --check
 cargo clippy --all-targets --all-features -- -D warnings
 cargo test --workspace
 ./scripts/check-shell.sh          # bash 3.2 兼容性 + shellcheck
+
+# 需要已安装 ZipVoice + SenseVoice 并启动服务端
+./scripts/smoke-test.sh           # 功能面扫描
+./scripts/e2e-test.sh             # 录音 -> 转写 -> 合成 -> 导出
 ```
 
 CI 会在 macOS、Linux、Windows 上运行以上检查，然后在 Ubuntu 上用较小的 ZipVoice
-模型启动服务端并执行 `scripts/smoke-test.sh`。推送 `v*` 标签（或手动触发 Release
+模型与 SenseVoice 启动服务端，执行 `scripts/smoke-test.sh` 和 `scripts/e2e-test.sh`。推送 `v*` 标签（或手动触发 Release
 workflow）会构建 macOS 与 Windows 安装包并附加到 release。
