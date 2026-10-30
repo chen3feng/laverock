@@ -136,10 +136,14 @@ cargo fmt --all -- --check
 cargo clippy --all-targets --all-features -- -D warnings
 cargo test --workspace
 ./scripts/check-shell.sh          # bash 3.2 compatibility + shellcheck
+
+# against a running server with ZipVoice and SenseVoice installed
+./scripts/smoke-test.sh           # feature sweep
+./scripts/e2e-test.sh             # record -> transcribe -> synthesize -> export
 ```
 
 CI runs those on macOS, Linux and Windows, then starts the server on Ubuntu
-with the small ZipVoice model and exercises it with
-`scripts/smoke-test.sh`. Pushing a `v*` tag (or dispatching the Release
-workflow) builds the macOS and Windows installers and attaches them to the
-release.
+with the small ZipVoice model plus SenseVoice and exercises it with
+`scripts/smoke-test.sh` and `scripts/e2e-test.sh`. Pushing a `v*` tag (or
+dispatching the Release workflow) builds the macOS and Windows installers and
+attaches them to the release.

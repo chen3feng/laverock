@@ -98,8 +98,16 @@ jobs:
           path: models/sherpa-onnx-zipvoice-distill-int8-zh-en-emilia
           key: zipvoice-int8-${{ hashFiles('scripts/download-zipvoice.sh') }}
 
-      - name: Download model
-        run: ./scripts/download-zipvoice.sh
+      - name: Cache SenseVoice model
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: models/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17-int8
+          key: sensevoice-int8-${{ hashFiles('scripts/download-stt.sh') }}
+
+      - name: Download models
+        run: |
+          ./scripts/download-zipvoice.sh
+          ./scripts/download-stt.sh
 
       - name: Build server
         run: |
@@ -124,6 +132,11 @@ jobs:
 
       - name: Smoke test
         run: ./scripts/smoke-test.sh
+
+      # The chain a user walks: the reference clip is transcribed and that
+      # transcript feeds a clone synthesis, then history and export.
+      - name: End-to-end test
+        run: ./scripts/e2e-test.sh
 
       - name: Server log
         if: always()
