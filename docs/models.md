@@ -141,8 +141,7 @@ and is skipped automatically when absent.
 
 **Chatterbox** — Resemble AI's 0.5B multilingual clone model: clone a clip
 and speak any of 23 languages. The transcript is not required. Defaults to
-Chinese; pick the target language in the engine parameters. Chinese synthesis
-currently produces unintelligible audio in this build — English is unaffected.
+Chinese; pick the target language in the engine parameters.
 
 **MOSS-TTS-Delay** — a multilingual zero-shot TTS/clone model driven by a
 native llama.cpp binary, with no Python at inference time. The installer
@@ -176,7 +175,7 @@ Measured on a MacBook Pro: Apple M4 Pro (14-core CPU — 10 performance and
 | Qwen3-TTS 0.6B custom voice | 1.00 | 3.9 s | 13.9 s |
 | Qwen3-TTS 1.7B design | 1.20 | 4.1 s | 16.1 s |
 | dots.tts SOAR | 1.40 | 1.9 s | 16.0 s |
-| Chatterbox, English | 2.61 | 13.5 s | 39.7 s |
+| Chatterbox | 3.88 | 9.8 s | 48.6 s |
 
 RTF is generation time divided by audio duration, so below 1 is faster than
 real time. The fixed cost is what a request pays before the first sample —
@@ -195,8 +194,9 @@ server. MOSS-TTS and Ming voice design got more points and a
 median-of-slopes fit, because a single stalled request had skewed the plain
 least-squares slope. Requests were serial, with no concurrency; the machine
 was otherwise idle apart from Spotlight catching up after a reboot, so treat
-differences under about 10% as noise. Chatterbox is measured on English —
-its Chinese output is not usable yet (see the note above).
+differences under about 10% as noise. Chatterbox is the roughest row: the
+same paragraph came out as 11 s of audio on one run and 19 s on another, so
+its RTF is a median over runs that disagree.
 
 ## Requirements
 
