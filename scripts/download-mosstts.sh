@@ -2,23 +2,30 @@
 # Install MOSS-TTS-Delay (OpenMOSS) as a Laverock engine.
 #
 # MOSS-TTS ships a first-class GGUF export plus a native llama.cpp runtime.
-# Instead of a Python/PyTorch stack we build the OpenMOSS llama.cpp fork's
-# `llama-moss-tts` binary once and run everything from it: the Qwen3-delay
-# backbone and the audio encoder/decoder. The audio tokenizer is converted
-# to GGUF with a small numpy-only helper, so inference needs no Python.
+# Instead of a Python/PyTorch stack we run the OpenMOSS llama.cpp fork's
+# `llama-moss-tts` binary, which drives the Qwen3-delay backbone and the
+# audio encoder/decoder. That binary is prebuilt by .github/workflows/
+# mosstts-runner.yml and published on this repo's rolling "mosstts-runner"
+# release, so installing no longer needs cmake or a C++ toolchain; we only
+# compile from source as a fallback for unreleased platforms. The audio
+# tokenizer is converted to GGUF with a small numpy-only helper, so
+# inference itself needs no Python.
 #
 # Weights come from ModelScope (open); the HF mirror of the GGUF repo is
 # gated behind a login.
 #
 #   MOSS_MODEL_QUANT=Q8_0     pick a larger first-class backbone quant
-#   MOSS_LLAMA_REF=...        pin a different fork branch/tag
-#   MOSS_LLAMA_REPO=...       override the fork URL
+#   MOSS_LLAMA_REF=...        pin a different fork branch/tag (also the
+#                             source of the tokenizer converter)
+#   MOSS_LLAMA_REPO=...       override the fork URL (source build only)
+#   MOSS_RUNTIME_BUILD=1      always build the runtime from source
 #
-# Requirements: cmake, a C++ compiler, git, and a Python 3 with pip (only
-# for the one-time tokenizer conversion; not needed at inference time).
+# Requirements: a Python 3 with pip (one-time tokenizer conversion; not
+# needed at inference time), plus git + cmake + a C++ compiler only when
+# the source build runs.
 #
-# Disk: backbone ~5–9 GB + tokenizer ~7 GB (freed after conversion) +
-# the build tree, so budget ~20 GB free during install.
+# Disk: backbone ~5–9 GB + tokenizer ~7 GB (freed after conversion). The
+# fallback build adds a compiler and a build tree; budget ~20 GB free then.
 set -euo pipefail
 
 # shellcheck source=laverock-lib.sh
@@ -31,28 +38,67 @@ WORK="$DEST/build"
 FORK="$WORK/llama.cpp"
 BUILD="$FORK/build"
 AT="$WORK/audio-tokenizer"
+SRC="$WORK/src"
 QUANT="${MOSS_MODEL_QUANT:-Q4_K_M}"
 BACKBONE_FILE="MOSS_TTS_FIRST_CLASS_${QUANT}.gguf"
 FORK_URL="${MOSS_LLAMA_REPO:-https://github.com/OpenMOSS/llama.cpp}"
-FORK_REF="${MOSS_LLAMA_REF:-moss-tts-firstclass}"
+# Pinned to the commit the prebuilt runner is built from
+# (.github/workflows/mosstts-runner.yml); bump both together.
+FORK_REF="${MOSS_LLAMA_REF:-b785003ba497794ecfa337c3e47f01af79489888}"
 GGUF_REPO="OpenMOSS/MOSS-TTS-GGUF"
 AT_REPO="OpenMOSS/MOSS-Audio-Tokenizer"
 
 die() { echo "$*" >&2; exit 1; }
 
-# 1. Toolchain checks. Failing early beats downloading 12 GB first.
-command -v cmake >/dev/null 2>&1 || die "cmake is required to build the MOSS-TTS runtime"
-command -v git >/dev/null 2>&1 || die "git is required to fetch the MOSS-TTS runtime"
-if ! command -v c++ >/dev/null 2>&1 && ! command -v g++ >/dev/null 2>&1 \
-   && ! command -v clang++ >/dev/null 2>&1 && ! lv_is_windows; then
-  die "a C++ compiler (c++/g++/clang++) is required to build the MOSS-TTS runtime"
-fi
-PYTHON="$(command -v python3.12 2>/dev/null || command -v python3.11 2>/dev/null \
-  || command -v python3.10 2>/dev/null || command -v python3 2>/dev/null \
-  || command -v python 2>/dev/null || true)"
-[ -n "$PYTHON" ] || die "a Python 3 interpreter is required for the one-time tokenizer conversion"
-
 mkdir -p "$WEIGHTS" "$WORK"
+
+# 1. Native runtime: prebuilt first, source build only as a fallback.
+BIN=""
+if [ "${MOSS_RUNTIME_BUILD:-0}" != "1" ]; then
+  BIN="$(lv_mosstts_bin "$TOOLS")" || BIN=""
+fi
+if [ -z "$BIN" ]; then
+  echo "No prebuilt llama-moss-tts for this platform; building from source." >&2
+  command -v cmake >/dev/null 2>&1 || die "cmake is required to build the MOSS-TTS runtime"
+  command -v git >/dev/null 2>&1 || die "git is required to build the MOSS-TTS runtime"
+  if ! command -v c++ >/dev/null 2>&1 && ! command -v g++ >/dev/null 2>&1 \
+     && ! command -v clang++ >/dev/null 2>&1 && ! lv_is_windows; then
+    die "a C++ compiler (c++/g++/clang++) is required to build the MOSS-TTS runtime"
+  fi
+
+  # A shallow clone of the pinned commit is enough. The TTS CLI has no use
+  # for TLS or the HTTP server, and disabling them avoids pulling OpenSSL in.
+  if [ ! -d "$FORK/.git" ]; then
+    lv_stage "Fetching the MOSS-TTS llama.cpp runtime"
+    git clone --depth 1 "$FORK_URL" "$FORK"
+    git -C "$FORK" fetch --depth 1 origin "$FORK_REF" 2>/dev/null || true
+    git -C "$FORK" checkout --detach "$FORK_REF" 2>/dev/null || true
+  fi
+
+  lv_stage "Building llama-moss-tts (several minutes)"
+  if [ ! -x "$BUILD/bin/llama-moss-tts" ] && [ ! -x "$BUILD/bin/llama-moss-tts.exe" ]; then
+    jobs="$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)"
+    gen=()
+    if command -v ninja >/dev/null 2>&1; then gen=(-G Ninja); fi
+    # On macOS the default clang may resolve the CommandLineTools SDK, which
+    # can be newer than the compiler understands; pin the Xcode SDK instead.
+    sys=()
+    if [ "$(uname -s)" = "Darwin" ]; then
+      sr="$(xcrun --sdk macosx --show-sdk-path 2>/dev/null || true)"
+      if [ -n "$sr" ]; then sys=("-DCMAKE_OSX_SYSROOT=$sr"); fi
+    fi
+    cmake -S "$FORK" -B "$BUILD" ${gen[@]+"${gen[@]}"} -DCMAKE_BUILD_TYPE=Release \
+      -DLLAMA_CURL=OFF -DLLAMA_OPENSSL=OFF -DLLAMA_BUILD_SERVER=OFF \
+      -DLLAMA_BUILD_TESTS=OFF -DLLAMA_BUILD_EXAMPLES=OFF \
+      ${sys[@]+"${sys[@]}"}
+    cmake --build "$BUILD" --target llama-moss-tts -j "$jobs"
+  fi
+  BIN="$BUILD/bin/llama-moss-tts"
+  if [ -x "${BIN}.exe" ]; then BIN="${BIN}.exe"; fi
+  [ -x "$BIN" ] || die "the build did not produce $BIN"
+  BIN="$(lv_native_path "$BIN")"
+fi
+echo "Runtime: $BIN"
 
 # 2. Weights (ModelScope, open).
 lv_ms_download_file "$GGUF_REPO" "first_class/$BACKBONE_FILE" "$WEIGHTS/$BACKBONE_FILE" 8 \
@@ -63,41 +109,39 @@ for f in config.json model.safetensors.index.json \
     "Downloading the audio tokenizer ($(basename "$f"))"
 done
 
-# 3. Source. A shallow clone of the first-class branch is enough.
-if [ ! -d "$FORK/.git" ]; then
-  lv_stage "Fetching the MOSS-TTS llama.cpp runtime"
-  git clone --depth 1 --branch "$FORK_REF" "$FORK_URL" "$FORK"
-fi
-
-# 4. Build the native binary. The TTS CLI has no use for TLS or the HTTP
-#    server, and disabling them avoids pulling OpenSSL into the build.
-lv_stage "Building llama-moss-tts (several minutes)"
-if [ ! -x "$BUILD/bin/llama-moss-tts" ] && [ ! -x "$BUILD/bin/llama-moss-tts.exe" ]; then
-  jobs="$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)"
-  gen=()
-  if command -v ninja >/dev/null 2>&1; then gen=(-G Ninja); fi
-  # On macOS the default clang may resolve the CommandLineTools SDK, which
-  # can be newer than the compiler understands; pin the Xcode SDK instead.
-  sys=()
-  if [ "$(uname -s)" = "Darwin" ]; then
-    sr="$(xcrun --sdk macosx --show-sdk-path 2>/dev/null || true)"
-    if [ -n "$sr" ]; then sys=("-DCMAKE_OSX_SYSROOT=$sr"); fi
+# 3. Source of the audio-tokenizer converter. The build above already has
+#    it; otherwise fetch the repo tarball at the same pinned commit, which
+#    keeps git out of the prebuilt path.
+CONVERT_DIR="$FORK"
+if [ ! -f "$CONVERT_DIR/convert_moss_audio_tokenizer_split_to_gguf.py" ]; then
+  CONVERT_DIR="$SRC/llama.cpp"
+  if [ ! -f "$CONVERT_DIR/convert_moss_audio_tokenizer_split_to_gguf.py" ]; then
+    lv_stage "Fetching the MOSS-TTS converter scripts"
+    tarball="$WORK/llama.cpp-src.tar.gz"
+    lv_download "https://codeload.github.com/OpenMOSS/llama.cpp/tar.gz/$FORK_REF" "$tarball" 0 \
+      || die "could not download $FORK_REF from OpenMOSS/llama.cpp"
+    rm -rf "$SRC"
+    mkdir -p "$SRC/extract"
+    tar -xzf "$tarball" -C "$SRC/extract"
+    root="$(find "$SRC/extract" -maxdepth 1 -mindepth 1 -type d | head -1)"
+    mkdir -p "$CONVERT_DIR"
+    cp "$root/convert_moss_audio_tokenizer_split_to_gguf.py" \
+       "$root/convert_moss_audio_tokenizer_to_gguf.py" "$CONVERT_DIR/"
+    cp -R "$root/gguf-py" "$CONVERT_DIR/"
+    cp "$root/LICENSE" "$CONVERT_DIR/" 2>/dev/null || true
+    rm -rf "$SRC/extract" "$tarball"
   fi
-  cmake -S "$FORK" -B "$BUILD" ${gen[@]+"${gen[@]}"} -DCMAKE_BUILD_TYPE=Release \
-    -DLLAMA_CURL=OFF -DLLAMA_OPENSSL=OFF -DLLAMA_BUILD_SERVER=OFF \
-    -DLLAMA_BUILD_TESTS=OFF -DLLAMA_BUILD_EXAMPLES=OFF \
-    ${sys[@]+"${sys[@]}"}
-  cmake --build "$BUILD" --target llama-moss-tts -j "$jobs"
 fi
-BIN="$BUILD/bin/llama-moss-tts"
-if [ -x "${BIN}.exe" ]; then BIN="${BIN}.exe"; fi
-[ -x "$BIN" ] || die "the build did not produce $BIN"
 
-# 5. Convert the audio tokenizer to the native encoder/decoder GGUFs.
+# 4. Convert the audio tokenizer to the native encoder/decoder GGUFs.
 lv_stage "Converting the audio tokenizer to GGUF"
 ENC="$WEIGHTS/moss_tts_audio_encoder_f16.gguf"
 DEC="$WEIGHTS/moss_tts_audio_decoder_f16.gguf"
 if [ ! -f "$ENC" ] || [ ! -f "$DEC" ]; then
+  PYTHON="$(command -v python3.12 2>/dev/null || command -v python3.11 2>/dev/null \
+    || command -v python3.10 2>/dev/null || command -v python3 2>/dev/null \
+    || command -v python 2>/dev/null || true)"
+  [ -n "$PYTHON" ] || die "a Python 3 interpreter is required for the one-time tokenizer conversion"
   VENV="$WORK/pyvenv"
   VPY="$(lv_venv_python "$VENV")"
   if [ ! -f "$VPY" ]; then
@@ -109,14 +153,14 @@ if [ ! -f "$ENC" ] || [ ! -f "$DEC" ]; then
   # through lv_prepare_python_venv, which would pull multi-GB CUDA torch on
   # Windows+NVIDIA for no reason.
   "$VPY" -m pip install --quiet --upgrade numpy pyyaml
-  "$VPY" "$FORK/convert_moss_audio_tokenizer_split_to_gguf.py" \
+  "$VPY" "$CONVERT_DIR/convert_moss_audio_tokenizer_split_to_gguf.py" \
     "$AT" --encoder-outfile "$ENC" --decoder-outfile "$DEC" --outtype f16
 fi
 [ -f "$ENC" ] && [ -f "$DEC" ] || die "audio tokenizer conversion produced no GGUF"
 # The safetensors are only needed for the conversion.
 rm -rf "$AT"
 
-# 6. Manifest (absolute paths are allowed and used as-is).
+# 5. Manifest (absolute paths are allowed and used as-is).
 BIN_NATIVE="$(lv_native_path "$BIN")"
 cat > "$DEST/engine.json" <<EOF
 {

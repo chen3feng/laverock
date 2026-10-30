@@ -10,8 +10,8 @@
 - Rust stable（edition 2021）与 Cargo。
 - 仅 Linux：Tauri 的 WebView 依赖 —— `libwebkit2gtk-4.1-dev`、
   `libappindicator3-dev`、`librsvg2-dev`、`patchelf`、`libgtk-3-dev`。
-- C++ 工具链与 CMake 只在安装时需要现场编译的引擎（MOSS-TTS）才需要，
-  应用本身不需要。
+- 应用本身不需要 C++ 工具链与 CMake。只有给未发布预编译包的平台
+  现场编译 MOSS-TTS 运行时（`MOSS_RUNTIME_BUILD=1`）时才需要。
 
 ## 从源码运行
 

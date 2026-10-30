@@ -24,7 +24,7 @@ Laverock 的安装包不含模型权重：包里是应用本身，模型按需�
 ./scripts/download-cosyvoice.sh    # CosyVoice3 0.5B，2.3 GB GGUF（共用运行时）
 ./scripts/download-ming3tts.sh     # Ming-3.0-tts 0.5B，venv + 约 3 GB 权重
 ./scripts/download-chatterbox.sh   # Chatterbox 多语种，venv + 约 5 GB
-./scripts/download-mosstts.sh      # MOSS-TTS-Delay，编译 llama.cpp + 约 10 GB 权重
+./scripts/download-mosstts.sh      # MOSS-TTS-Delay，预编译 llama.cpp 运行时 + 约 10 GB 权重
 
 # 变体
 QWEN3TTS_VARIANT=custom ./scripts/download-qwen3tts.sh    # 9 个预置音色
@@ -174,7 +174,7 @@ MOSS-TTS 与 Ming 声音设计多测了几个点并改用中位数斜率（最�
 | ONNX 引擎（ZipVoice、Kokoro、SenseVoice） | 除应用外无额外要求 |
 | audio.cpp 引擎（dots、CosyVoice、VoxCPM2） | 下载预编译运行时 |
 | Python 引擎（Qwen3-TTS、LongCat、Ming、Chatterbox） | Python 3.10–3.12；脚本自动创建隔离 venv |
-| MOSS-TTS | cmake、C++ 编译器（macOS：Xcode/CommandLineTools；Linux：gcc）与 Git |
+| MOSS-TTS | 下载预编译运行时；一次性转换分词器需要 Python 3 |
 | Windows 上应用内安装 | Git for Windows 提供的 `bash` |
 
 需要 Python 的引擎各自运行在独立 venv 中，绝不把代码加载进核心进程。

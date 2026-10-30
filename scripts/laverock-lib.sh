@@ -36,7 +36,10 @@ lv_init() {
 
 # lv_stage <label>
 lv_stage() {
-  printf '@@LV stage %s\n' "$*"
+  # stderr: these markers are progress output for the UI, and helpers such as
+  # lv_audiocpp_bin/lv_mosstts_bin are called in $(...) — stdout is the
+  # return value. The server merges both streams into the install log.
+  printf '@@LV stage %s\n' "$*" >&2
 }
 
 # lv_stage_key <key> [name=value ...]
@@ -52,7 +55,7 @@ lv_stage_key() {
   for pair in "$@"; do
     out="$out ${pair// /%20}"
   done
-  printf '@@LV stage %s\n' "$out"
+  printf '@@LV stage %s\n' "$out" >&2
 }
 
 # lv_progress <percent 0-100>
@@ -61,7 +64,7 @@ lv_progress() {
   case "$pct" in
     ''|*[!0-9.]*) return ;;
   esac
-  awk -v p="$pct" 'BEGIN { if (p < 0) p = 0; if (p > 100) p = 100; printf "@@LV progress %.1f\n", p }'
+  awk -v p="$pct" 'BEGIN { if (p < 0) p = 0; if (p > 100) p = 100; printf "@@LV progress %.1f\n", p }' >&2
 }
 
 # lv_filesize <path>  (portable byte count, 0 if missing)
@@ -386,6 +389,104 @@ lv_voxcpm2_runner() {
   cp "$cache/$inner" "$dest/$inner"
   chmod +x "$dest/$inner" 2>/dev/null || true
   lv_stage_key stage_vox_ready
+}
+
+# lv_mosstts_bin <tools_dir>
+#
+# Ensure the prebuilt llama-moss-tts runtime is available and print its
+# path in the platform-native form (E:/... on Windows). It is built by
+# .github/workflows/mosstts-runner.yml from the OpenMOSS llama.cpp fork and
+# published on this repo's rolling "mosstts-runner" release, so installing
+# MOSS-TTS no longer needs cmake or a C++ toolchain. The binary is cached
+# under <tools_dir>/mosstts-runtime and stamped with the upstream commit
+# from the manifest, so a rebuilt release replaces a stale binary.
+#
+# LAVEROCK_GITHUB_RELEASES overrides the download base (mirror). Returns
+# non-zero when the platform has no prebuilt asset or the download or
+# checksum check fails; the caller then falls back to a source build.
+lv_mosstts_bin() {
+  local tools="$1"
+  local cache="$tools/mosstts-runtime"
+  local asset ext inner
+  case "$(uname -s)" in
+    Darwin)
+      case "$(uname -m)" in
+        arm64) asset="llama-moss-tts-macos-arm64.tar.gz" ;;
+        x86_64) asset="llama-moss-tts-macos-x64.tar.gz" ;;
+        *) return 1 ;;
+      esac
+      ext=".tar.gz"; inner="llama-moss-tts" ;;
+    Linux)
+      [ "$(uname -m)" = "x86_64" ] || return 1
+      asset="llama-moss-tts-linux-x64.tar.gz"; ext=".tar.gz"; inner="llama-moss-tts" ;;
+    MINGW*|MSYS*|CYGWIN*)
+      asset="llama-moss-tts-windows-x64.zip"; ext=".zip"; inner="llama-moss-tts.exe" ;;
+    *)
+      return 1 ;;
+  esac
+
+  mkdir -p "$cache"
+  local base manifest want got commit extract
+  base="${LAVEROCK_GITHUB_RELEASES:-https://github.com/chen3feng/laverock/releases/download}"
+  manifest="$cache/manifest.json"
+
+  # Manifest first: its sha256 line catches a truncated archive, and its
+  # upstream commit tells us whether a cached binary is still current.
+  # Offline, keep using whatever is cached.
+  if curl -fsSL --retry 2 --max-time 60 \
+      "$base/mosstts-runner/mosstts-runner.json" -o "$manifest.tmp" 2>/dev/null; then
+    mv "$manifest.tmp" "$manifest"
+  elif [ -x "$cache/$inner" ]; then
+    lv_native_path "$cache/$inner"
+    return 0
+  else
+    return 1
+  fi
+  commit="$(sed -n 's/.*"upstream": *"\([0-9a-fA-F]*\)".*/\1/p' "$manifest" \
+    | head -1 | tr 'A-F' 'a-f')"
+
+  if [ -x "$cache/$inner" ] && [ -n "$commit" ] \
+     && [ "$(cat "$cache/COMMIT" 2>/dev/null)" = "$commit" ]; then
+    lv_native_path "$cache/$inner"
+    return 0
+  fi
+
+  lv_stage_key stage_verify_moss
+  want="$(sed -n "s/.*\"$asset\".*\"sha256\": *\"\([0-9a-fA-F]\{64\}\)\".*/\1/p" "$manifest" \
+    | head -1 | tr 'A-F' 'a-f')"
+  [ -n "$want" ] || { echo "no prebuilt $asset in the mosstts-runner manifest" >&2; return 1; }
+
+  lv_download "$base/mosstts-runner/$asset" "$cache/$asset" 0 || return 1
+  got="$(lv_sha256 "$cache/$asset" | tr 'A-F' 'a-f')"
+  if [ "$got" != "$want" ]; then
+    echo "checksum mismatch for $asset" >&2
+    rm -f "$cache/$asset"
+    return 1
+  fi
+
+  # The archive is a flat directory holding the static binary plus LICENSE
+  # and COMMIT.
+  extract="$cache/extract"
+  rm -rf "$extract"
+  mkdir -p "$extract"
+  if [ "$ext" = ".zip" ]; then
+    lv_unzip "$cache/$asset" "$extract"
+  else
+    tar -xzf "$cache/$asset" -C "$extract"
+  fi
+  [ -f "$extract/$inner" ] || { echo "$inner missing from $asset" >&2; return 1; }
+  cp "$extract/$inner" "$cache/$inner"
+  [ -f "$extract/LICENSE" ] && cp "$extract/LICENSE" "$cache/LICENSE"
+  if [ -f "$extract/COMMIT" ]; then
+    cp "$extract/COMMIT" "$cache/COMMIT"
+  else
+    printf '%s\n' "$commit" > "$cache/COMMIT"
+  fi
+  chmod +x "$cache/$inner" 2>/dev/null || true
+  rm -rf "$extract" "$cache/$asset" "$manifest"
+
+  lv_stage_key stage_moss_ready
+  lv_native_path "$cache/$inner"
 }
 
 # lv_fetch_parallel <url> <dest> <total_bytes> [workers]

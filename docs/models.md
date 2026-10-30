@@ -27,7 +27,7 @@ installs and CI use them directly:
 ./scripts/download-cosyvoice.sh    # CosyVoice3 0.5B, 2.3 GB GGUF (shares the runtime)
 ./scripts/download-ming3tts.sh     # Ming-3.0-tts 0.5B, venv + ~3 GB weights
 ./scripts/download-chatterbox.sh   # Chatterbox multilingual, venv + ~5 GB
-./scripts/download-mosstts.sh      # MOSS-TTS-Delay, builds llama.cpp + ~10 GB weights
+./scripts/download-mosstts.sh      # MOSS-TTS-Delay, prebuilt llama.cpp runtime + ~10 GB weights
 
 # Variants
 QWEN3TTS_VARIANT=custom ./scripts/download-qwen3tts.sh    # 9 preset speakers
@@ -205,7 +205,7 @@ its RTF is a median over runs that disagree.
 | ONNX engines (ZipVoice, Kokoro, SenseVoice) | none beyond the app |
 | audio.cpp engines (dots, CosyVoice, VoxCPM2) | prebuilt runtime is downloaded |
 | Python engines (Qwen3-TTS, LongCat, Ming, Chatterbox) | Python 3.10–3.12; the scripts create an isolated venv |
-| MOSS-TTS | cmake, a C++ compiler (Xcode/CommandLineTools on macOS, gcc on Linux) and Git |
+| MOSS-TTS | prebuilt runtime is downloaded; Python 3 for the one-time tokenizer conversion |
 | In-app installs on Windows | `bash` from Git for Windows |
 
 Engines that need Python run in their own venv and never load code into the
