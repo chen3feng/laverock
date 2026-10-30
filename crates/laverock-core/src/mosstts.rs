@@ -345,6 +345,24 @@ impl SpeechEngine for MossTtsEngine {
                         .arg("--reference-audio")
                         .arg(path);
                 }
+                // The vendored runtime's Metal backend reorders each graph
+                // before allocation and its dependency accounting is wrong
+                // for fused nodes: a node can be scheduled alongside work it
+                // actually depends on, the scheduler then recycles a buffer
+                // that is still in use, and the resulting write corrupts the
+                // host heap (SIGSEGV in graph_optimize, or a malloc abort
+                // somewhere unrelated later on).
+                //
+                // Measured over launches that supply a reference clip: 36 of
+                // 131 crashed with the pass on, 12 of 172 with it off, so
+                // about one in four becomes about one in fifteen. That is a
+                // large cut, not a cure: a rarer corruption survives in the
+                // audio encoder path (see issue #57) and the retry loop in
+                // run_chunk absorbs the remainder. No measurable cost (3.08 s
+                // vs 3.09 s for a short line, 6.62 s vs 6.61 s for a long
+                // one). Manifest env entries are applied below, so an install
+                // can still override it.
+                cmd.env("GGML_METAL_GRAPH_OPTIMIZE_DISABLE", "1");
                 for (key, value) in &self.env {
                     cmd.env(key, value);
                 }
