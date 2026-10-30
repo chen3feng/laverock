@@ -115,8 +115,8 @@ into chunks with short pauses.
 audio.cpp (Metal on macOS, CPU elsewhere). Cloning defaults to the x-vector
 mode, which needs only the reference audio, so an approximate transcript does
 not hurt; the voice + text mode gives higher similarity when the transcript
-is accurate. Measured on an M4 Pro with the Q8_0 checkpoint: RTF 1.3–1.9,
-about 6 GB peak memory.
+is accurate. Measured on an M4 Pro with the Q8_0 checkpoint: RTF 1.4 (see
+**Speed**), about 6 GB peak memory.
 
 **CosyVoice3** — 0.5B streaming LLM TTS sharing the audio.cpp runtime with
 dots.tts. Three templates: zero-shot cloning (reference plus an accurate
@@ -126,10 +126,10 @@ the transcript is unreliable) and instruction control ("用温和的语气，
 
 **Qwen3-TTS** — the official `qwen-tts` package in an isolated venv. Device
 selection is automatic: CUDA in bfloat16, Apple MPS in float32 (float16
-produces NaN in the codec), otherwise CPU. A 0.6B clone takes roughly 25 s on
-Apple Silicon and 90 s on CPU per short sentence, including model load. Three
-installs share one venv: the clone variant, `custom` (nine built-in speakers:
-Vivian/Ryan/Sohee…) and `design` (1.7B, builds a voice from a description).
+produces NaN in the codec), otherwise CPU. Three installs share one venv:
+the clone variant, `custom` (nine built-in speakers: Vivian/Ryan/Sohee…) and
+`design` (1.7B, builds a voice from a description). Per-request timings are in
+**Speed** above.
 
 **Ming-3.0-tts** — a 0.5B dense checkpoint that ranks first among open
 weights on the Artificial Analysis controlled-voice leaderboard. Cloning
@@ -141,7 +141,8 @@ and is skipped automatically when absent.
 
 **Chatterbox** — Resemble AI's 0.5B multilingual clone model: clone a clip
 and speak any of 23 languages. The transcript is not required. Defaults to
-Chinese; pick the target language in the engine parameters.
+Chinese; pick the target language in the engine parameters. Chinese synthesis
+currently produces unintelligible audio in this build — English is unaffected.
 
 **MOSS-TTS-Delay** — a multilingual zero-shot TTS/clone model driven by a
 native llama.cpp binary, with no Python at inference time. The installer
@@ -153,6 +154,49 @@ the decoder degrades on very long inputs.
 **SenseVoice** — optional on-device speech recognition covering zh/en/ja/
 ko/yue. Once installed, a recorded or uploaded reference clip is transcribed
 automatically into the transcript field; the Transcribe button re-runs it.
+
+## Speed
+
+Measured on a MacBook Pro: Apple M4 Pro (14-core CPU — 10 performance and
+4 efficiency — with a 20-core GPU), 48 GB unified memory, macOS 27.0.1.
+
+| Engine | RTF | Fixed cost | 10 s of speech |
+| --- | --- | --- | --- |
+| LongCat-AudioDiT 1B | 0.17 | 8.6 s | 10.3 s |
+| ZipVoice | 0.17 | 0.9 s | 2.6 s |
+| CosyVoice3 | 0.30 | 4.1 s | 7.0 s |
+| MOSS-TTS | 0.33 | 2.4 s | 5.7 s |
+| VoxCPM2 | 0.60 | 1.9 s | 7.9 s |
+| Kokoro-82M | 0.64 | 0.7 s | 7.0 s |
+| Ming 3.0 voice design | 0.98 | 4.0 s | 13.8 s |
+| Ming 3.0 multilingual | 0.99 | 3.8 s | 13.6 s |
+| Ming 3.0 built-in voices | 0.99 | 3.7 s | 13.6 s |
+| Ming 3.0 cloning | 1.00 | 3.8 s | 13.8 s |
+| Qwen3-TTS 0.6B cloning | 1.00 | 4.3 s | 14.3 s |
+| Qwen3-TTS 0.6B custom voice | 1.00 | 3.9 s | 13.9 s |
+| Qwen3-TTS 1.7B design | 1.20 | 4.1 s | 16.1 s |
+| dots.tts SOAR | 1.40 | 1.9 s | 16.0 s |
+| Chatterbox, English | 2.61 | 13.5 s | 39.7 s |
+
+RTF is generation time divided by audio duration, so below 1 is faster than
+real time. The fixed cost is what a request pays before the first sample —
+starting the engine's process, loading weights for the engines that keep
+nothing between requests, and reading the reference clip. A request therefore
+takes `fixed cost + RTF × audio duration`; the third column applies that to
+10 s of speech. Engines with a large fixed cost and a low RTF (LongCat,
+CosyVoice3) are good for long passages and wasteful for one-liners.
+
+Method: requests go to the local server over loopback, with two Chinese texts
+— a sentence that produces about 2 s of speech and a paragraph that produces
+10–13 s. One warm-up request per engine is discarded, the two texts are then
+requested in alternating pairs for at least two rounds, and
+`T = fixed + RTF × duration` is fitted per engine from a freshly started
+server. MOSS-TTS and Ming voice design got more points and a
+median-of-slopes fit, because a single stalled request had skewed the plain
+least-squares slope. Requests were serial, with no concurrency; the machine
+was otherwise idle apart from Spotlight catching up after a reboot, so treat
+differences under about 10% as noise. Chatterbox is measured on English —
+its Chinese output is not usable yet (see the note above).
 
 ## Requirements
 

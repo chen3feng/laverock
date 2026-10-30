@@ -58,7 +58,7 @@
 
 | 文档 | 内容 |
 | --- | --- |
-| [模型](docs/models.zh-CN.md) | 目录、能力、环境要求、手工安装、鸣谢 |
+| [模型](docs/models.zh-CN.md) | 目录、能力、速度实测、环境要求、手工安装、鸣谢 |
 | [HTTP API](docs/api.zh-CN.md) | REST 接口、示例、OpenAI 兼容 API |
 | [手机遥控](docs/remote.zh-CN.md) | 配对、局域网安全、HTTPS、安装为应用 |
 | [配置](docs/configuration.zh-CN.md) | 环境变量、数据目录、代理与镜像、界面语言 |
