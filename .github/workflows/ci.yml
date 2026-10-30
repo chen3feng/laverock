@@ -62,6 +62,12 @@ jobs:
       - name: Shell scripts
         run: ./scripts/check-shell.sh
 
+      # The UI ships as one generated HTML file; make sure its sources in
+      # crates/laverock-server/web/ were not edited without rebuilding it.
+      - name: Web bundle
+        if: matrix.os == 'ubuntu-latest'
+        run: python3 scripts/build-web.py --check
+
       - name: Format
         run: cargo fmt --all -- --check
 

@@ -59,8 +59,13 @@ go through the audio.cpp or llama.cpp binaries; Python engines are driven as
 subprocesses through a runner in `scripts/`, each in its own venv.
 
 The server owns profiles, history, settings, pairing and the model catalog.
-The SPA in `assets/index.html` is plain HTML/CSS/JS with no build step; it is
-compiled into the server with `include_str!`, so rebuild after editing it.
+The SPA is plain HTML/CSS/JS compiled into the server with `include_str!`.
+Its sources live in `crates/laverock-server/web/` — a shell `index.html`, a
+stylesheet, the markup, and one JavaScript file per section — and
+`python3 scripts/build-web.py` stitches them into the single
+`assets/index.html` that ships (no runtime dependencies, no bundler). Edit the
+files under `web/`, run the script, then rebuild the server; CI runs
+`build-web.py --check` so a stale bundle cannot merge.
 
 ## Adding a model
 
