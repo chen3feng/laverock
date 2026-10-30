@@ -71,7 +71,7 @@ Requirements, per-engine notes and manual install scripts are in
 
 | Document | Contents |
 | --- | --- |
-| [Models](docs/models.md) | catalog, capabilities, requirements, manual installation, credits |
+| [Models](docs/models.md) | catalog, capabilities, speed, requirements, manual installation, credits |
 | [HTTP API](docs/api.md) | REST endpoints, examples, OpenAI-compatible API |
 | [Phone remote](docs/remote.md) | pairing, LAN security, HTTPS, installing as an app |
 | [Configuration](docs/configuration.md) | environment variables, data directories, proxy and mirrors, interface language |

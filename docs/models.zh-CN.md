@@ -102,7 +102,7 @@ DOTS_MODEL=dots.tts-mf ./scripts/download-dots.sh         # 4 步 MeanFlow 导�
 **dots.tts** —— 2B 连续 AR 模型，flow-matching 头部驱动 48 kHz AudioVAE，经
 audio.cpp 运行（macOS 用 Metal，其它平台 CPU）。克隆默认的 x-vector 模式只需
 参考音频，文字稿不准确也不影响；文字稿准确时「声纹 + 文字」相似度更高。
-M4 Pro 上 Q8_0 检查点实测：RTF 1.3–1.9，峰值内存约 6 GB。
+M4 Pro 上 Q8_0 检查点实测：RTF 1.4（见「速度」），峰值内存约 6 GB。
 
 **CosyVoice3** —— 0.5B 流式 LLM TTS，与 dots.tts 共用 audio.cpp 运行时。
 三种模板：零样本克隆（参考音频 + 准确文字稿，相似度最高）、跨语种克隆（仅凭声音，
@@ -111,9 +111,8 @@ M4 Pro 上 Q8_0 检查点实测：RTF 1.3–1.9，峰值内存约 6 GB。
 
 **Qwen3-TTS** —— 官方 `qwen-tts` 包运行在独立 venv 中。自动选择设备：CUDA 用
 bfloat16，Apple MPS 用 float32（codec 上 float16 会产生 NaN），其余走 CPU。
-以一句短句为例，0.6B 克隆在 Apple Silicon 上约 25 秒、CPU 约 90 秒（含模型加载）。
 三个安装共用同一 venv：克隆版、`custom`（九个内置说话人：Vivian/Ryan/Sohee 等）
-和 `design`（1.7B，按描述创造音色）。
+和 `design`（1.7B，按描述创造音色）。请求耗时见上文「速度」。
 
 **Ming-3.0-tts** —— 0.5B 稠密模型，在 Artificial Analysis「受控音色克隆」排行榜
 中位列开源模型第一。仅凭参考音频即可克隆，给出文字稿可以提升一致度但不是必需。
@@ -121,7 +120,8 @@ bfloat16，Apple MPS 用 float32（codec 上 float16 会产生 NaN），其余�
 内置音色。FST 文本正则需要 `pynini`（仅 conda 提供），缺失时自动跳过。
 
 **Chatterbox** —— Resemble AI 的 0.5B 多语种克隆模型：克隆一段参考音频即可说
-23 种语言，不需要文字稿。默认中文，可在引擎参数中选择目标语言。
+23 种语言，不需要文字稿。默认中文，可在引擎参数中选择目标语言。当前版本的
+中文合成结果不可懂，英文不受影响。
 
 **MOSS-TTS-Delay** —— 多语言零样本 TTS / 克隆模型，由原生 llama.cpp 二进制作
 推理，运行时无需 Python。安装脚本从源码编译该运行时并把音频 tokenizer 转成 GGUF；
@@ -130,6 +130,43 @@ bfloat16，Apple MPS 用 float32（codec 上 float16 会产生 NaN），其余�
 
 **SenseVoice** —— 可选的本地语音识别，覆盖中英日韩粤。安装后，录音或上传的参考
 音频会自动转写并填入文字稿栏；「转写」按钮可以手动重跑。
+
+## 速度
+
+测试机：MacBook Pro，Apple M4 Pro（14 核 CPU，10 性能核 + 4 效率核，20 核
+GPU），48 GB 统一内存，macOS 27.0.1。
+
+| 引擎 | RTF | 固定开销 | 生成 10 秒语音 |
+| --- | --- | --- | --- |
+| LongCat-AudioDiT 1B | 0.17 | 8.6 s | 10.3 s |
+| ZipVoice | 0.17 | 0.9 s | 2.6 s |
+| CosyVoice3 | 0.30 | 4.1 s | 7.0 s |
+| MOSS-TTS | 0.33 | 2.4 s | 5.7 s |
+| VoxCPM2 | 0.60 | 1.9 s | 7.9 s |
+| Kokoro-82M | 0.64 | 0.7 s | 7.0 s |
+| Ming 3.0 声音设计 | 0.98 | 4.0 s | 13.8 s |
+| Ming 3.0 多语种 | 0.99 | 3.8 s | 13.6 s |
+| Ming 3.0 内置音色 | 0.99 | 3.7 s | 13.6 s |
+| Ming 3.0 克隆 | 1.00 | 3.8 s | 13.8 s |
+| Qwen3-TTS 0.6B 克隆 | 1.00 | 4.3 s | 14.3 s |
+| Qwen3-TTS 0.6B 预置音色 | 1.00 | 3.9 s | 13.9 s |
+| Qwen3-TTS 1.7B 声音设计 | 1.20 | 4.1 s | 16.1 s |
+| dots.tts SOAR | 1.40 | 1.9 s | 16.0 s |
+| Chatterbox，英文 | 2.61 | 13.5 s | 39.7 s |
+
+RTF 是生成耗时除以音频时长，小于 1 表示快于实时。固定开销是请求在产出第一个
+采样之前花掉的时间——启动引擎进程、每次请求都重新加载权重的引擎的加载时间，
+以及读取参考音频。因此单次请求耗时约为「固定开销 + RTF × 音频时长」，第三列
+就是按 10 秒语音算出来的结果。固定开销大而 RTF 低的引擎（LongCat、CosyVoice3）
+适合读长文，只说一句话则很浪费。
+
+测试方法：通过本机回环调用服务端接口，用两段中文——一句约生成 2 秒语音，一段
+约生成 10–13 秒。每个引擎先发一次预热请求并丢弃，然后短句与长段交替请求至少
+两轮，拟合 `T = 固定开销 + RTF × 时长`；每个引擎都从新启动的服务端测起。
+MOSS-TTS 与 Ming 声音设计多测了几个点并改用中位数斜率（最小二乘会被单次卡顿
+拖偏）。请求串行执行，机器上只有重启后还在补索引的 Spotlight，因此 10% 以内
+的差异可以视作噪声。Chatterbox 用英文测得——它的中文输出目前不可用（见上文
+说明）。
 
 ## 环境要求
 
