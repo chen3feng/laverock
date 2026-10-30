@@ -36,7 +36,7 @@ The desktop shell sets `LAVEROCK_DATA_DIR`, `LAVEROCK_MODELS_DIR`,
 
 The data directory holds:
 
-```
+```text
 profiles/     saved voices (a WAV plus metadata per voice)
 history/      generated audio, newest first (capped at 100 entries / 1 GiB)
 tls/          self-signed certificate for the LAN listener

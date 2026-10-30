@@ -44,7 +44,7 @@ binary, `LAVEROCK_URL` at a server elsewhere.
 
 ## Architecture
 
-```
+```text
 laverock-core     engine trait + manifest registry + ONNX/GGUF runtimes
 laverock-server   thin HTTP control plane + embedded SPA + model installer
 laverock-desktop  Tauri shell: tray, autostart, server supervision
@@ -58,8 +58,8 @@ go through the audio.cpp or llama.cpp binaries; Python engines are driven as
 subprocesses through a runner in `scripts/`, each in its own venv.
 
 The server owns profiles, history, settings, pairing and the model catalog.
-The SPA in `assets/index.html` is plain HTML/CSS/JS with no build step, so
-editing it is just a refresh.
+The SPA in `assets/index.html` is plain HTML/CSS/JS with no build step; it is
+compiled into the server with `include_str!`, so rebuild after editing it.
 
 ## Adding a model
 

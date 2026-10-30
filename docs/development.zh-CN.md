@@ -41,7 +41,7 @@ cargo run -p laverock-server     # 然后打开 http://127.0.0.1:8787
 
 ## 架构
 
-```
+```text
 laverock-core     引擎 trait + 清单注册表 + ONNX/GGUF 运行时
 laverock-server   轻量 HTTP 控制面 + 内嵌单页应用 + 模型安装器
 laverock-desktop  Tauri 外壳：托盘、开机自启、服务托管
