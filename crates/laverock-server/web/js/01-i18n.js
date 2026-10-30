@@ -1,0 +1,539 @@
+// ---------------------------------------------------------------- i18n
+
+const I18N = {
+  zh: {
+    'brand.sub': '本地语音工作室',
+    'nav.synthesize': '合成', 'nav.voices': '语音素材', 'nav.models': '模型',
+    'nav.history': '历史', 'nav.settings': '设置', 'state.title': '服务状态',
+
+    'synth.title': '合成',
+    'synth.sub': '选择引擎与声音，输入文字，在这台电脑上生成语音。',
+    'engine': '引擎', 'voice': '声音', 'preview': '试听', 'stop': '停止',
+    'profilehint.default': '选择一个已保存的声音，或使用下方的临时录音。',
+    'adhoc.title': '临时参考声音（3–10 秒干净人声）',
+    'adhoc.hint': '录音会在浏览器内转成 24kHz 单声道 WAV；也可以直接上传 WAV。',
+    'prompttext.label': '参考音频对应文字（ZipVoice / LongCat / CosyVoice 零样本必填）',
+    'prompttext.ph': '例如：那还是三十六年前，一九八七年。',
+    'prompttext.hint': '录音说了什么就填什么，可多行。ZipVoice、LongCat-AudioDiT 以及 CosyVoice 的零样本模板必填；VoxCPM2、Qwen3-TTS、dots.tts 可留空。',
+    'savevoice.label': '保存到声音库（可选，便于下次直接复用）',
+    'profilename.ph': '给这个声音起个名字，例如：新闻女声',
+    'saveprofile': '保存声音',
+    'text.label': '要合成的文字', 'text.ph': '输入中文或 English 文本……',
+    'go': '生成语音', 'download.wav': '下载 WAV', 'download.mp3': '下载 MP3',
+    'synth.samples': '候选项',
+    'synth.samples_hint': '一次生成多段候选项逐一试听，选中满意的再下载。克隆引擎会通过不同的种子/采样本产生差异。',
+
+    'voices.title': '语音素材',
+    'voices.sub': '保存的参考声音可以复用到任何克隆引擎。',
+    'voice.new': '＋ 新建声音',
+    'voice.name': '声音名称', 'voice.name.ph': '例如：新闻女声',
+    'voice.ref': '参考声音（3–10 秒干净人声）',
+    'voice.rec.hint': '录音会在浏览器内转成 24kHz 单声道 WAV。',
+    'voice.prompt': '参考音频对应文字（ZipVoice 必填）',
+    'voice.prompt.ph': '录音里说了什么就填什么',
+    'voice.save': '保存到声音库', 'cancel': '取消',
+    'voice.import': '⬆ 导入声音', 'voice.exported': '已导出声音',
+    'voice.imported': '已导入声音「{name}」', 'voice.import.fail': '导入失败',
+    'voice.export.fail': '导出失败',
+    'voice.exportBatch': '⬇ 批量导出', 'voice.exportSelected': '导出所选',
+    'voice.search': '搜索声音…', 'voice.selectAll': '全选',
+    'voice.importStrategy': '检测到存档中有与本机重复的声音，如何处理？',
+    'voice.strategySkip': '跳过已存在（推荐）',
+    'voice.strategyCopy': '全部创建副本（重名加序号）',
+    'voice.strategyOverwrite': '用存档覆盖同名声音',
+    'voice.importReport': '导入 {n} · 跳过 {s} · 覆盖 {o}',
+    'voice.importSomeFailed': '部分声音导入失败：',
+    'voice.noSelection': '请先选择至少一个声音',
+    'voice.exportCount': '已选 {n} 个',
+    'voice.warn.clipped': '参考音有削波（音量过大），克隆效果可能变差',
+    'voice.warn.pause': '参考音中间有 {secs} 秒停顿，部分引擎可能把停顿带进结果',
+    'voice.warn.short': '参考音偏短（建议 3–10 秒）',
+    'voice.warn.long': '参考音偏长（建议 3–10 秒），合成会更慢',
+    'voice.warn.quiet': '参考音音量偏低',
+    'voices.empty': '还没有保存的声音。点击「新建声音」录音或上传一段 3–10 秒的参考音频。',
+
+    'models.title': '模型',
+    'models.sub': '每个模型都是 <code>models/&lt;id&gt;/engine.json</code> 描述的一个插件。',
+    'models.dir': '模型目录', 'models.scripts': '下载脚本',
+    'models.paths.hint': '下载使用「设置 → 下载网络」中的代理与镜像；安装完成后引擎会自动刷新。',
+    'models.desktop.only': '模型管理仅在电脑端可用',
+    'models.desktop.hint': '手机上可以查看已安装的引擎并直接合成。安装新模型请在电脑上打开同一界面。',
+    'models.installed': '已安装', 'models.installed.empty': '还没有安装任何模型。从下方选择一个开始下载。',
+    'models.available': '可安装',
+
+    'history.title': '历史',
+    'history.sub': '本机生成的语音，最多保留 100 条或 1 GB。',
+    'history.clear': '清空全部',
+    'history.empty': '还没有生成记录。去「合成」生成第一条吧。',
+    'history.variant': '候选项 {n}',
+    'history.variant_group': '共 {n} 个候选项',
+
+    'settings.title': '设置',
+    'settings.sub': '下载网络、手机遥控与关于信息。',
+    'settings.downloads': '下载网络',
+    'settings.downloads.hint': '代理与镜像只影响模型下载脚本，不会改变本机推理。',
+    'proxy': '代理', 'proxy.system': '跟随系统代理（默认）', 'proxy.manual': '手动指定',
+    'proxy.direct': '不使用代理（直连）',
+    'hf.mirror': 'Hugging Face 镜像', 'pip.mirror': 'PyPI 镜像（Qwen3-TTS 安装）',
+    'settings.modelsdir': '当前模型目录：', 'settings.scriptsdir': '脚本目录：',
+    'settings.toolsdir': '虚拟环境目录：',
+    'settings.workspace': '工作区目录（可选）',
+    'settings.workspace.hint': '留空使用默认位置。设置后模型下载到「目录/models」、虚拟环境装到「目录/tools」，方便把大文件放到更大的磁盘；重启后生效。',
+    'settings.save': '保存设置',
+    'settings.remote': '手机遥控',
+    'lan.hint.default': '开启后，同一 Wi-Fi 下的手机经配对即可访问同一套界面',
+    'lan.access': '局域网访问', 'pair.qr': '生成配对二维码',
+    'pair.devices': '已配对设备', 'devices.none': '暂无',
+    'phone.thisdevice': '本机连接', 'phone.connected': '已连接到电脑。',
+    'phone.hint': '网络、模型与下载设置只能在电脑上修改。', 'phone.unpair': '取消配对',
+    'about': '关于', 'about.suffix': '所有推理都在本机完成。',
+    'language': '界面语言', 'lang.system': '跟随系统', 'lang.zh': '中文', 'lang.en': 'English',
+    'language.hint': '跟随系统时按浏览器语言自动选择；选择会保存在本设备。',
+
+    'pair.title': '连接到 Laverock',
+    'pair.msg': '在这台电脑上打开「设置 → 手机遥控 → 生成配对二维码」，然后用手机扫码。',
+    'pair.code': '配对码', 'pair.code.ph': '6 位数字', 'pair.connect': '连接',
+    'dialog.ok': '确定', 'dialog.cancel': '取消',
+
+    'cap.tts': '语音合成', 'cap.clone': '声音克隆', 'cap.voice-design': '声音设计',
+    'cap.instruct': '指令控制', 'cap.preset-voices': '预置音色', 'cap.stt': '语音识别',
+
+    'cap.file': '选择文件', 'cap.record': '● 录音', 'cap.stop': '■ 停止', 'cap.none': '未选择',
+    'cap.transcribe': '✎ 转写', 'transcribe.busy': '转写中…',
+    'preset.official.hf': '官方（huggingface.co）', 'preset.cn': 'hf-mirror.com（国内加速）',
+    'preset.official.pip': '官方（pypi.org）', 'preset.custom': '自定义…',
+    "ui.en_us": "zh-CN",
+    "ui.please_confirm": "请确认",
+    "ui.install_the_sensevoice_speech_to": "请先在「模型」页下载 SenseVoice 语音识别模型。",
+    "ui.no_speech_recognized": "未识别到语音",
+    "ui.transcription_failed": "转写失败：",
+    "ui.microphone_recording_is_unavailable_here": "当前环境不支持麦克风录音，请改用「选择文件」上传 WAV",
+    "ui.requesting_microphone_permission": "正在请求麦克风权限……",
+    "ui.cannot_record": "无法录音",
+    "ui.recording_click_again_to_stop": "录音中……再次点击结束",
+    "ui.microphone_recording": "麦克风录音",
+    "ui.microphone_access_requires_https_or": "需要通过 HTTPS 或 localhost 访问才能使用麦克风",
+    "ui.failed_to_load_voices": "读取声音库失败：",
+    "ui.temporary_recording_upload": "临时录音 / 上传",
+    "ui.edit": "编辑",
+    "ui.export": "导出",
+    "ui.delete": "删除",
+    "ui.save_failed": "保存失败：",
+    "ui.delete_failed": "删除失败：",
+    "ui.voice_exported": "已导出声音",
+    "ui.export_failed": "导出失败：",
+    "ui.imported_n_skipped_s_overwritten": "导入 {n} · 跳过 {s} · 覆盖 {o}",
+    "ui.some_voices_failed": "部分声音导入失败：",
+    "ui.import_failed": "导入失败：",
+    "ui.no_voices_to_export": "没有可导出的声音",
+    "ui.export_voices": "导出声音",
+    "ui.voices_exported": "已导出声音",
+    "ui.import_voices": "导入声音",
+    "ui.failed_to_load_engines": "读取引擎失败：",
+    "ui.no_models_found_download_one": "未发现模型 — 前往「模型」下载",
+    "ui.engine_parameters": "引擎参数",
+    "ui.text": "、",
+    "ui.please_enter_text_to_synthesize": "请输入要合成的文字",
+    "ui.please_select_an_engine": "请选择引擎",
+    "ui.first_load_takes_20_90": "首次加载约 20–90 秒",
+    "ui.first_load_takes_30_90": "首次加载约 30–90 秒",
+    "ui.first_load_takes_a_few": "首次加载需数秒",
+    "ui.first_load_takes_a_few_2": "首次加载模型需几秒",
+    "ui.generating_speech": "正在合成语音…",
+    "ui.audio": "音频",
+    "ui.synthesis_failed": "合成失败",
+    "ui.no_audio_data_received": "没有收到音频数据",
+    "ui.done": "完成",
+    "ui.failed": "失败：",
+    "ui.failed_to_load_models": "读取模型列表失败：",
+    "ui.scripts_directory_not_found_installs": "未找到 scripts/ 目录（安装不可用）",
+    "ui.manually_installed_manifest": "手动安装的 manifest",
+    "ui.preparing": "准备中…",
+    "ui.downloading": "下载中",
+    "ui.needs_update": "需要更新",
+    "ui.loaded_in_memory": "已加载到内存",
+    "ui.loaded_on_first_use": "首次使用时加载",
+    "ui.directory": "目录",
+    "ui.installing": "安装中…",
+    "ui.reinstall": "重新安装",
+    "ui.retry_install": "重试安装",
+    "ui.download_install": "下载安装",
+    "ui.scripts_directory_not_found": "未找到 scripts/ 目录",
+    "ui.could_not_start_the_install": "无法开始安装：",
+    "ui.download_started_progress_is_shown": "已开始下载，进度会显示在卡片里",
+    "ui.install_failed_see_the_log": "安装失败，请查看卡片中的日志",
+    "ui.install_finished": "安装流程结束",
+    "ui.failed_to_load_history": "读取历史失败：",
+    "ui.download_failed": "下载失败：",
+    "ui.converting": "转换中…",
+    "ui.used_for_model_downloads_only": "仅用于模型下载，支持 http、https、socks5、socks5h。",
+    "ui.always_connect_directly_even_if": "始终直连，即使环境变量或系统里设置了代理。",
+    "ui.not_found": "未找到",
+    "ui.failed_to_load_settings": "读取设置失败：",
+    "ui.saved_applies_to_the_next": "已保存，下次下载生效",
+    "ui.download_settings_saved": "下载设置已保存",
+    "ui.pairing": "正在配对……",
+    "ui.pairing_failed": "配对失败：",
+    "ui.android_phone": "Android 手机",
+    "ui.mac_browser": "Mac 浏览器",
+    "ui.browser_device": "浏览器设备",
+    "ui.enter_the_6_digit_pairing": "请输入 6 位配对码",
+    "ui.enabling": "正在开启……",
+    "ui.disabling": "正在关闭……",
+    "ui.operation_failed": "操作失败：",
+    "ui.cert_fingerprint": "  ·  证书指纹 ",
+    "ui.mp3_export_failed": "导出 MP3 失败：",
+    "ui.edit_voice": "编辑声音",
+    "ui.save": "保存",
+    "ui.name": "名称",
+    "ui.reference_transcript": "参考音频对应文字",
+    "ui.required_for_zipvoice_may_be": "ZipVoice 合成时必填；VoxCPM2 与 Qwen3-TTS 可以留空。",
+    "ui.replace_reference_clip_optional_3": "替换参考音频（可选，3–10 秒干净人声）",
+    "ui.leave_empty_to_keep_the": "不选则保留原音频。",
+    "ui.name_cannot_be_empty": "名称不能为空",
+    "ui.delete_voice": "删除声音",
+    "ui.choose_or_record_a_reference": "请先选择或录制参考声音",
+    "ui.please_name_the_voice": "请给声音起个名字",
+    "ui.please_fill_in_the_reference": "请填写参考音频对应的文字",
+    "ui.delete_this_generation_the_audio": "删除这条生成记录？音频文件会一并删除。",
+    "ui.delete_entry": "删除记录",
+    "ui.clear_all_generation_history_this": "清空全部生成记录？此操作不可恢复。",
+    "ui.clear_history": "清空历史",
+    "ui.clear": "清空",
+    "ui.history_cleared": "已清空历史",
+    "ui.clear_failed": "清空失败：",
+    "ui.generating": "生成中……",
+    "ui.pairing_code": "配对码",
+    "ui.revoke": "撤销",
+    "ui.revoke_device": "撤销设备",
+    "ui.revoke_failed": "撤销失败：",
+    "ui.using_voice": "使用「{name}」· 参考文本：{transcript}",
+    "ui.saved_for_picker": "已保存「{name}」，下次可直接选用",
+    "ui.updated_voice": "已更新「{name}」",
+    "ui.deleted_voice": "已删除「{name}」",
+    "ui.saved_voice": "已保存「{name}」",
+    "ui.delete_voice_confirm": "删除声音「{name}」？此操作不可撤销。",
+    "ui.revoke_confirm": "撤销设备「{name}」的访问权限？",
+    "ui.lan_url": "同一 Wi-Fi 下的手机可访问 {url}",
+    "ui.connected_computer": "已连接到电脑{device}。",
+    "ui.device_paren": "（{name}）",
+    "ui.detected_system_proxy": "检测到系统代理 <code>{proxy}</code>，模型下载会自动使用它。",
+    "ui.no_system_proxy": "未检测到系统代理，模型下载将直连。",
+    "ui.mic_permission_denied": "权限被拒绝。请在「系统设置 → 隐私与安全性 → 麦克风」中允许 Laverock（或浏览器），然后重试。",
+    "ui.mic_not_found": "没有找到可用的麦克风设备。",
+    "ui.mic_check_settings": "请检查系统麦克风设置后重试。",
+    "ui.loading_model": "正在加载模型到内存（{note}）",
+  },
+  en: {
+    'brand.sub': 'Local voice studio',
+    'nav.synthesize': 'Synthesize', 'nav.voices': 'Voice clips', 'nav.models': 'Models',
+    'nav.history': 'History', 'nav.settings': 'Settings', 'state.title': 'Service status',
+
+    'synth.title': 'Synthesize',
+    'synth.sub': 'Pick an engine and a voice, type text, and generate speech on this computer.',
+    'engine': 'Engine', 'voice': 'Voice', 'preview': 'Preview', 'stop': 'Stop',
+    'profilehint.default': 'Pick a saved voice, or record a temporary one below.',
+    'adhoc.title': 'Temporary reference voice (3–10 s of clean speech)',
+    'adhoc.hint': 'Recordings are converted in the browser to 24 kHz mono WAV; you can also upload a WAV.',
+    'prompttext.label': 'Reference transcript (required for ZipVoice / LongCat / zero-shot CosyVoice)',
+    'prompttext.ph': 'e.g. It was thirty-six years ago, back in 1987.',
+    'prompttext.hint': 'Write exactly what the recording says; multiple lines are fine. Required for ZipVoice, LongCat-AudioDiT and CosyVoice zero-shot; optional for VoxCPM2, Qwen3-TTS and dots.tts.',
+    'savevoice.label': 'Save to voice library (optional, for reuse later)',
+    'profilename.ph': 'Name this voice, e.g. News anchor',
+    'saveprofile': 'Save voice',
+    'text.label': 'Text to synthesize', 'text.ph': 'Type Chinese or English text…',
+    'go': 'Generate', 'download.wav': 'Download WAV', 'download.mp3': 'Download MP3',
+    'synth.samples': 'Takes',
+    'synth.samples_hint': 'Generate several takes at once to audition side by side, then download the one you like. Cloning engines vary them via seed/sampling.',
+
+    'voices.title': 'Voice clips',
+    'voices.sub': 'Saved reference voices work with any cloning engine.',
+    'voice.new': '＋ New voice',
+    'voice.name': 'Voice name', 'voice.name.ph': 'e.g. News anchor',
+    'voice.ref': 'Reference clip (3–10 s of clean speech)',
+    'voice.rec.hint': 'Recordings are converted in the browser to 24 kHz mono WAV.',
+    'voice.prompt': 'Reference transcript (required for ZipVoice)',
+    'voice.prompt.ph': 'Write exactly what the recording says',
+    'voice.save': 'Save to library', 'cancel': 'Cancel',
+    'voice.import': '⬆ Import voice', 'voice.exported': 'Voice exported',
+    'voice.imported': 'Imported voice "{name}"', 'voice.import.fail': 'Import failed',
+    'voice.export.fail': 'Export failed',
+    'voice.exportBatch': '⬇ Export batch', 'voice.exportSelected': 'Export selected',
+    'voice.search': 'Search voices…', 'voice.selectAll': 'Select all',
+    'voice.importStrategy': 'The archive contains voices already on this machine. How should duplicates be handled?',
+    'voice.strategySkip': 'Skip existing (recommended)',
+    'voice.strategyCopy': 'Create copies (suffix name clashes)',
+    'voice.strategyOverwrite': 'Overwrite matching voices with archive',
+    'voice.importReport': 'Imported {n} · skipped {s} · overwritten {o}',
+    'voice.importSomeFailed': 'Some voices failed to import: ',
+    'voice.noSelection': 'Select at least one voice first',
+    'voice.exportCount': '{n} selected',
+    'voice.warn.clipped': 'The reference is clipped (too loud); cloning quality may suffer',
+    'voice.warn.pause': 'The reference has a {secs}s pause; some engines may copy it into the result',
+    'voice.warn.short': 'Reference is short (3–10 s works best)',
+    'voice.warn.long': 'Reference is long (3–10 s works best); synthesis will be slower',
+    'voice.warn.quiet': 'Reference volume is low',
+    'voices.empty': 'No saved voices yet. Click "New voice" to record or upload a 3–10 s reference clip.',
+
+    'models.title': 'Models',
+    'models.sub': 'Each model is a plugin described by <code>models/&lt;id&gt;/engine.json</code>.',
+    'models.dir': 'Models directory', 'models.scripts': 'Download scripts',
+    'models.paths.hint': 'Downloads use the proxy and mirrors under Settings → Downloads; the engine list refreshes when an install finishes.',
+    'models.desktop.only': 'Model management is available on desktop only',
+    'models.desktop.hint': 'On a phone you can view installed engines and synthesize. Install new models from the same screen on the computer.',
+    'models.installed': 'Installed', 'models.installed.empty': 'No models installed yet. Pick one below to download.',
+    'models.available': 'Available',
+
+    'history.title': 'History',
+    'history.sub': 'Speech generated on this computer, capped at 100 entries or 1 GB.',
+    'history.clear': 'Clear all',
+    'history.empty': 'No generations yet. Head to Synthesize to make the first one.',
+    'history.variant': 'take #{n}',
+    'history.variant_group': '{n} takes',
+
+    'settings.title': 'Settings',
+    'settings.sub': 'Downloads, phone remote control and about.',
+    'settings.downloads': 'Downloads',
+    'settings.downloads.hint': 'Proxy and mirrors only affect model download scripts, never local inference.',
+    'proxy': 'Proxy', 'proxy.system': 'Follow system proxy (default)', 'proxy.manual': 'Manual',
+    'proxy.direct': 'No proxy (direct connection)',
+    'hf.mirror': 'Hugging Face mirror', 'pip.mirror': 'PyPI mirror (Qwen3-TTS install)',
+    'settings.modelsdir': 'Models directory: ', 'settings.scriptsdir': 'Scripts directory: ',
+    'settings.toolsdir': 'Virtual environments: ',
+    'settings.workspace': 'Workspace directory (optional)',
+    'settings.workspace.hint': 'Leave empty to use the default. When set, models download to "<dir>/models" and virtual environments install to "<dir>/tools" — handy for keeping the multi-GB files on a larger drive. Takes effect after a restart.',
+    'settings.save': 'Save settings',
+    'settings.remote': 'Phone remote',
+    'lan.hint.default': 'When enabled, a phone on the same Wi-Fi can pair and use the same interface',
+    'lan.access': 'LAN access', 'pair.qr': 'Show pairing QR code',
+    'pair.devices': 'Paired devices', 'devices.none': 'None',
+    'phone.thisdevice': 'This device', 'phone.connected': 'Connected to the computer.',
+    'phone.hint': 'Network, model and download settings can only be changed on the computer.',
+    'phone.unpair': 'Unpair',
+    'about': 'About', 'about.suffix': 'all inference runs on this machine.',
+    'language': 'Interface language', 'lang.system': 'Follow system', 'lang.zh': '中文', 'lang.en': 'English',
+    'language.hint': 'Follow system uses the browser language; the choice is saved on this device.',
+
+    'pair.title': 'Connect to Laverock',
+    'pair.msg': 'On this computer open Settings → Phone remote → Show pairing QR code, then scan it with your phone.',
+    'pair.code': 'Pairing code', 'pair.code.ph': '6-digit code', 'pair.connect': 'Connect',
+    'dialog.ok': 'OK', 'dialog.cancel': 'Cancel',
+
+    'cap.tts': 'Speech synthesis', 'cap.clone': 'Voice cloning', 'cap.voice-design': 'Voice design',
+    'cap.instruct': 'Voice instructions', 'cap.preset-voices': 'Preset voices', 'cap.stt': 'Speech-to-text',
+
+    'cap.file': 'Choose file', 'cap.record': '● Record', 'cap.stop': '■ Stop', 'cap.none': 'None',
+    'cap.transcribe': '✎ Transcribe', 'transcribe.busy': 'Transcribing…',
+    'preset.official.hf': 'Official (huggingface.co)', 'preset.cn': 'hf-mirror.com (faster in China)',
+    'preset.official.pip': 'Official (pypi.org)', 'preset.custom': 'Custom…',
+    "ui.en_us": "en-US",
+    "ui.please_confirm": "Please confirm",
+    "ui.install_the_sensevoice_speech_to": "Install the SenseVoice speech-to-text model under Models first.",
+    "ui.no_speech_recognized": "No speech recognized",
+    "ui.transcription_failed": "Transcription failed: ",
+    "ui.microphone_recording_is_unavailable_here": "Microphone recording is unavailable here; use \"Choose file\" to upload a WAV.",
+    "ui.requesting_microphone_permission": "Requesting microphone permission\u2026",
+    "ui.cannot_record": "Cannot record",
+    "ui.recording_click_again_to_stop": "Recording\u2026 click again to stop",
+    "ui.microphone_recording": "Microphone recording",
+    "ui.microphone_access_requires_https_or": "Microphone access requires HTTPS or localhost",
+    "ui.failed_to_load_voices": "Failed to load voices: ",
+    "ui.temporary_recording_upload": "Temporary recording / upload",
+    "ui.edit": "Edit",
+    "ui.export": "Export",
+    "ui.save_failed": "Save failed: ",
+    "ui.delete_failed": "Delete failed: ",
+    "ui.voice_exported": "Voice exported",
+    "ui.export_failed": "Export failed: ",
+    "ui.imported_n_skipped_s_overwritten": "Imported {n} \u00b7 skipped {s} \u00b7 overwritten {o}",
+    "ui.some_voices_failed": "Some voices failed: ",
+    "ui.import_failed": "Import failed: ",
+    "ui.no_voices_to_export": "No voices to export",
+    "ui.export_voices": "Export voices",
+    "ui.voices_exported": "Voices exported",
+    "ui.import_voices": "Import voices",
+    "ui.failed_to_load_engines": "Failed to load engines: ",
+    "ui.no_models_found_download_one": "No models found \u2014 download one under Models",
+    "ui.engine_parameters": "Engine parameters",
+    "ui.text": ", ",
+    "ui.please_enter_text_to_synthesize": "Please enter text to synthesize",
+    "ui.please_select_an_engine": "Please select an engine",
+    "ui.first_load_takes_20_90": "first load takes ~20\u201390 s",
+    "ui.first_load_takes_30_90": "first load takes ~30\u201390 s",
+    "ui.first_load_takes_a_few": "first load takes a few seconds",
+    "ui.first_load_takes_a_few_2": "first load takes a few seconds",
+    "ui.generating_speech": "Generating speech\u2026",
+    "ui.audio": "audio",
+    "ui.synthesis_failed": "Synthesis failed",
+    "ui.no_audio_data_received": "No audio data received",
+    "ui.done": "Done",
+    "ui.failed_to_load_models": "Failed to load models: ",
+    "ui.scripts_directory_not_found_installs": "scripts/ directory not found (installs unavailable)",
+    "ui.manually_installed_manifest": "manually installed manifest",
+    "ui.preparing": "Preparing\u2026",
+    "ui.downloading": "Downloading",
+    "ui.needs_update": "Needs update",
+    "ui.loaded_in_memory": "loaded in memory",
+    "ui.loaded_on_first_use": "loaded on first use",
+    "ui.directory": "Directory",
+    "ui.installing": "Installing\u2026",
+    "ui.reinstall": "Reinstall",
+    "ui.retry_install": "Retry install",
+    "ui.download_install": "Download & install",
+    "ui.scripts_directory_not_found": "scripts/ directory not found",
+    "ui.could_not_start_the_install": "Could not start the install: ",
+    "ui.download_started_progress_is_shown": "Download started; progress is shown on the card",
+    "ui.install_failed_see_the_log": "Install failed; see the log on the card",
+    "ui.install_finished": "Install finished",
+    "ui.failed_to_load_history": "Failed to load history: ",
+    "ui.download_failed": "Download failed: ",
+    "ui.converting": "Converting\u2026",
+    "ui.used_for_model_downloads_only": "Used for model downloads only; http, https, socks5 and socks5h are supported.",
+    "ui.always_connect_directly_even_if": "Always connect directly, even if a proxy is configured in the environment or system.",
+    "ui.not_found": "not found",
+    "ui.failed_to_load_settings": "Failed to load settings: ",
+    "ui.saved_applies_to_the_next": "Saved; applies to the next download",
+    "ui.download_settings_saved": "Download settings saved",
+    "ui.pairing": "Pairing\u2026",
+    "ui.pairing_failed": "Pairing failed: ",
+    "ui.android_phone": "Android phone",
+    "ui.mac_browser": "Mac browser",
+    "ui.browser_device": "Browser device",
+    "ui.enter_the_6_digit_pairing": "Enter the 6-digit pairing code",
+    "ui.enabling": "Enabling\u2026",
+    "ui.disabling": "Disabling\u2026",
+    "ui.operation_failed": "Operation failed: ",
+    "ui.cert_fingerprint": "  \u00b7  cert fingerprint ",
+    "ui.mp3_export_failed": "MP3 export failed: ",
+    "ui.edit_voice": "Edit voice",
+    "ui.save": "Save",
+    "ui.name": "Name",
+    "ui.reference_transcript": "Reference transcript",
+    "ui.required_for_zipvoice_may_be": "Required for ZipVoice; may be empty for VoxCPM2 and Qwen3-TTS.",
+    "ui.replace_reference_clip_optional_3": "Replace reference clip (optional, 3\u201310 s clean speech)",
+    "ui.leave_empty_to_keep_the": "Leave empty to keep the current audio.",
+    "ui.name_cannot_be_empty": "Name cannot be empty",
+    "ui.delete_voice": "Delete voice",
+    "ui.choose_or_record_a_reference": "Choose or record a reference voice first",
+    "ui.please_name_the_voice": "Please name the voice",
+    "ui.please_fill_in_the_reference": "Please fill in the reference transcript",
+    "ui.delete_this_generation_the_audio": "Delete this generation? The audio file is deleted as well.",
+    "ui.delete_entry": "Delete entry",
+    "ui.clear_all_generation_history_this": "Clear all generation history? This cannot be undone.",
+    "ui.clear_history": "Clear history",
+    "ui.clear": "Clear",
+    "ui.history_cleared": "History cleared",
+    "ui.clear_failed": "Clear failed: ",
+    "ui.generating": "Generating\u2026",
+    "ui.pairing_code": "Pairing code",
+    "ui.revoke": "Revoke",
+    "ui.revoke_device": "Revoke device",
+    "ui.revoke_failed": "Revoke failed: ",
+    "ui.using_voice": "Using \"{name}\" \u00b7 transcript: {transcript}",
+    "ui.saved_for_picker": "Saved \"{name}\" \u2014 it will be in the voice picker next time",
+    "ui.updated_voice": "Updated \"{name}\"",
+    "ui.deleted_voice": "Deleted \"{name}\"",
+    "ui.saved_voice": "Saved \"{name}\"",
+    "ui.delete_voice_confirm": "Delete voice \"{name}\"? This cannot be undone.",
+    "ui.revoke_confirm": "Revoke access for \"{name}\"?",
+    "ui.lan_url": "Phones on the same Wi-Fi can open {url}",
+    "ui.connected_computer": "Connected to the computer{device}.",
+    "ui.device_paren": " ({name})",
+    "ui.detected_system_proxy": "Detected system proxy <code>{proxy}</code>; model downloads use it automatically.",
+    "ui.no_system_proxy": "No system proxy detected; model downloads connect directly.",
+    "ui.mic_permission_denied": "Permission denied. Allow Laverock (or your browser) to use the microphone in System Settings \u2192 Privacy & Security, then retry.",
+    "ui.mic_not_found": "No microphone device found.",
+    "ui.mic_check_settings": "Check the system microphone settings and retry.",
+    "ui.loading_model": "Loading model into memory ({note})",
+    "ui.delete": "Delete",
+    "ui.failed": "Failed: ",
+  },
+};
+
+let lang = 'zh';
+const t = (key, params) => {
+  let s = (I18N[lang] && I18N[lang][key]) ?? I18N.zh[key] ?? key;
+  if (params) for (const [k, v] of Object.entries(params)) s = s.replaceAll(`{${k}}`, v);
+  return s;
+};
+const dateLocale = () => (t("ui.en_us"));
+
+function detectLang(ignoreSaved = false) {
+  const saved = ignoreSaved ? null : localStorage.getItem('laverock.lang');
+  if (saved === 'zh' || saved === 'en') return saved;
+  return (navigator.language || 'zh').toLowerCase().startsWith('zh') ? 'zh' : 'en';
+}
+
+// Static markup carries translations in data-i18n / -ph / -title attributes.
+function applyI18n(root = document) {
+  root.querySelectorAll('[data-i18n]').forEach((el) => { el.innerHTML = t(el.dataset.i18n); });
+  root.querySelectorAll('[data-i18n-ph]').forEach((el) => { el.placeholder = t(el.dataset.i18nPh); });
+  root.querySelectorAll('[data-i18n-title]').forEach((el) => { el.title = t(el.dataset.i18nTitle); });
+  document.documentElement.lang = lang === 'zh' ? 'zh-CN' : 'en';
+}
+
+async function setLanguage(next, { persist = true } = {}) {
+  if (next !== 'zh' && next !== 'en') return;
+  lang = next;
+  if (persist === 'explicit') localStorage.setItem('laverock.lang', lang);
+  else if (persist === 'system') localStorage.removeItem('laverock.lang');
+  $('langSelect').value = persist === 'explicit' ? lang : 'system';
+  $('settingsLang').value = $('langSelect').value;
+  applyI18n();
+  document.title = `${t('nav.' + currentPage())} · Laverock`;
+  // Rebuild every dynamic, localized view.
+  fillPreset($('hfPreset'), HF_PRESETS);
+  fillPreset($('pipPreset'), PIP_PRESETS);
+  syncProxyMode();
+  await Promise.all([loadEngines(), loadProfiles(), loadSettingsPage()]);
+  renderHistory();
+  await loadModels();
+  if (session && session.lan_enabled) loadDevices();
+}
+
+$('settingsLang').onchange = () => {
+  $('langSelect').value = $('settingsLang').value;
+  $('langSelect').dispatchEvent(new Event('change'));
+};
+
+$('langSelect').onchange = async () => {
+  const v = $('langSelect').value;
+  if (v === 'system') {
+    await setLanguage(detectLang(true), { persist: 'system' });
+  } else {
+    await setLanguage(v, { persist: 'explicit' });
+    // Best effort: also store it as the machine default so fresh paired
+    // devices inherit the language. Phones cannot reach this endpoint.
+    if (session.loopback && serverSettings) {
+      try {
+        await api('/api/settings', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ...serverSettings, language: v }),
+        });
+      } catch (_) { /* per-device setting already saved locally */ }
+    }
+  }
+};
+
+// Manifest text is either a plain string (third-party manifests) or a
+// {en, zh} object (everything we generate). Resolve it for the UI
+// language; engine-provided ids stay untouched when no label exists.
+function loc(value) {
+  if (value == null) return '';
+  if (typeof value === 'string') return value;
+  return value[lang] || value.zh || value.en || '';
+}
+
+
+let engines = [];
+let profiles = [];
+let session = { loopback: true, paired: false };
+let modelsData = null;
+let modelsTimer = null;
+let previewId = null;
+let toastTimer = null;
+let mp3Supported = false;
+let transcribeAvailable = false;
+let lastSynthBlob = null;
+let serverSettings = null;

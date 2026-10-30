@@ -53,8 +53,12 @@ laverock-desktop  Tauri 外壳：托盘、开机自启、服务托管
 通过 audio.cpp 或 llama.cpp 二进制执行；Python 引擎由 `scripts/` 中的运行器以
 子进程方式驱动，各自运行在独立 venv 中。
 
-服务端负责声音、历史、设置、配对和模型目录。`assets/index.html` 里的单页应用是
-纯 HTML/CSS/JS，没有构建步骤，改完刷新即可。
+服务端负责声音、历史、设置、配对和模型目录。单页应用是纯 HTML/CSS/JS，由
+`include_str!` 编译进服务端。源码在 `crates/laverock-server/web/`：一个外壳
+`index.html`、样式表、页面标记，以及按功能分节的多个 JavaScript 文件；
+`python3 scripts/build-web.py` 把它们拼成最终发布的单个 `assets/index.html`
+（运行时无依赖、不上打包器）。改 `web/` 下的文件、跑脚本、再重新编译服务端；
+CI 会执行 `build-web.py --check`，产物落后于源码的 PR 合不进去。
 
 ## 新增模型
 
