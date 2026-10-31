@@ -60,6 +60,19 @@ function toast(message, isError) {
   toastTimer = setTimeout(() => { el.hidden = true; }, 3200);
 }
 
+// Only one clip plays at a time. Voice and take previews share the hidden
+// `#previewer`, but the result and history cards use native players and
+// the comparison row creates its own, so each playback path stops the
+// others explicitly.
+function pauseOtherAudio(except) {
+  const previewer = $('previewer');
+  const stoppedPreview = previewer !== except && !previewer.paused;
+  for (const el of document.querySelectorAll('audio')) {
+    if (el !== except) el.pause();
+  }
+  if (stoppedPreview) resetPreviewState();
+}
+
 // In-app modal. WebKit's `confirm()` is not implemented inside the Tauri
 // WKWebView (it returns false without showing anything), so every
 // confirmation and form goes through this dialog instead.
@@ -117,10 +130,15 @@ function showDialog({ title, message = '', fields = [], okText, danger = false }
           btn.textContent = o.label;
           btn.onclick = () => {
             if (player.dataset.url === o.url) {
-              if (player.paused) player.play().catch(() => {});
-              else player.pause();
+              if (player.paused) {
+                pauseOtherAudio(player);
+                player.play().catch(() => {});
+              } else {
+                player.pause();
+              }
               return;
             }
+            pauseOtherAudio(player);
             player.pause();
             player.dataset.url = o.url;
             player.src = o.url;

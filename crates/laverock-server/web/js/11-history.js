@@ -100,6 +100,7 @@ function buildHistoryTake(host, h, engineName, variantLabel) {
   const audio = document.createElement('audio');
   audio.controls = true;
   audio.preload = 'none';
+  audio.addEventListener('play', () => pauseOtherAudio(audio));
   audio.src = `/api/history/${encodeURIComponent(h.id)}/audio`;
 
   const saveFromUrl = async (el, url, name, busyLabel) => {

@@ -179,6 +179,7 @@ function togglePreview(key, url) {
     previewId = null;
   } else {
     previewId = key;
+    pauseOtherAudio(audio);
     audio.src = url;
     audio.play().catch(() => {});
   }
@@ -193,6 +194,15 @@ $('previewer').addEventListener('ended', () => {
   if (typeof renderCaptures === 'function') renderCaptures();
   syncProfileUI();
 });
+
+// pauseOtherAudio calls this when it stops a running preview because a
+// native player started, so the lists drop their play/stop icons too.
+function resetPreviewState() {
+  previewId = null;
+  renderVoices();
+  if (typeof renderCaptures === 'function') renderCaptures();
+  syncProfileUI();
+}
 
 async function editProfile(p) {
   const res = await showDialog({
