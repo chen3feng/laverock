@@ -23,7 +23,8 @@ mod zipvoice;
 
 pub use audio::{
     cap_silences, decode_wav, decode_wav_channels, encode_wav, resample_mono, silence_profile,
-    trim_reference, trim_silence, SilenceProfile, VOXCPM2_MAX_REFERENCE_SECS,
+    trim_reference, trim_silence, trim_trailing_low_level, SilenceProfile,
+    VOXCPM2_MAX_REFERENCE_SECS,
 };
 pub use enhance::{EnhanceMode, Enhancer, DENOISE_MODELS, ENHANCE_DIR, SEPARATION_MODEL};
 pub use manager::{
