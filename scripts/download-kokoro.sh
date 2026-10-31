@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
-# Download Kokoro-82M (multi-language v1.0, INT8) for sherpa-onnx.
-# ~132 MB compressed: ONNX model, voices.bin, espeak data, jieba dict.
+# Download Kokoro-82M (multi-language v1.0) for sherpa-onnx.
+# ~132 MB compressed for the INT8 model, plus a 310 MB fp32 export on
+# machines that run it faster (a usable GPU, or an x86 CPU without AVX2).
+# LAVEROCK_ONNX_VARIANT / KOKORO_FP32 override the choice. Also: voices.bin,
+# espeak data, jieba dict.
 # Kokoro has preset speakers only (54 style vectors, no cloning), so the
 # manifest we write carries the full sid -> voice choice list.
 #
@@ -57,6 +60,42 @@ for f in model.int8.onnx voices.bin tokens.txt espeak-ng-data/phondata \
   fi
 done
 
+# The fp32 export is only worth its 310 MB where it is faster: the CUDA
+# provider accelerates fp32 only, and on an x86 CPU without AVX2 the INT8
+# kernels fall back to scalar code. The server passes the variant for this
+# machine; a hand-run install falls back to a local check. KOKORO_FP32=1/0
+# overrides both.
+lv_cpu_has_avx2() {
+  case "$(uname -s)" in
+    Linux) grep -qm1 avx2 /proc/cpuinfo 2>/dev/null ;;
+    Darwin) sysctl -n machdep.cpu.features 2>/dev/null | grep -q AVX2 ;;
+    *) return 0 ;;  # Windows: assume a CPU from the last decade.
+  esac
+}
+
+VARIANT="$(printf '%s' "${LAVEROCK_ONNX_VARIANT:-}" | tr '[:upper:]' '[:lower:]')"
+case "$VARIANT" in
+  fp32|int8) ;;
+  *)
+    case "${KOKORO_FP32:-}" in
+      1) VARIANT=fp32 ;;
+      0) VARIANT=int8 ;;
+      *) if lv_cpu_has_avx2; then VARIANT=int8; else VARIANT=fp32; fi ;;
+    esac
+    ;;
+esac
+
+FP32_FIELD=""
+if [ "$VARIANT" = "fp32" ]; then
+  if lv_hf_download_file "csukuangfj/kokoro-multi-lang-v1_0" model.onnx \
+       "$DEST/model.onnx" 8 "Downloading the fp32 Kokoro model (~310 MB)"; then
+    FP32_FIELD='
+    "model_fp32": "model.onnx",'
+  else
+    echo "fp32 model unavailable; the INT8 model will be used" >&2
+  fi
+fi
+
 # Speaker ids follow the order baked into the ONNX metadata
 # (`speaker_names`), not alphabetic order — em_santa is sid 53.
 # af_* 美式英语 | bf_*/bm_* 英式英语 | zf_*/zm_* 中文（普通话）
@@ -65,11 +104,11 @@ cat > "$DEST/engine.json" <<EOF
 {
   "id": "$MODEL",
   "kind": "kokoro",
-  "name": "Kokoro 82M (INT8)",
+  "name": "Kokoro 82M",
   "languages": ["zh", "en", "ja", "fr", "es", "it", "pt", "hi"],
   "capabilities": ["tts", "preset-voices"],
   "kokoro": {
-    "model": "model.int8.onnx",
+    "model": "model.int8.onnx",$FP32_FIELD
     "voices": "voices.bin",
     "tokens": "tokens.txt",
     "data_dir": "espeak-ng-data",

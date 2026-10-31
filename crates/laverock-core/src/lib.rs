@@ -32,6 +32,7 @@ pub use manifest::{
     Manifest, Ming3TtsManifest, MossTtsManifest, ParamKind, ParamOption, ParamSpec,
     Qwen3TtsManifest, SttManifest, SynthDefaults, ZipVoiceManifest,
 };
+pub use onnx::model_variant;
 pub use transcribe::Transcriber;
 
 /// Re-exported for engines that need the underlying runtime.

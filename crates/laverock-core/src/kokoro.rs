@@ -47,11 +47,28 @@ impl KokoroEngine {
                 .join(",")
         });
 
+        // Pick the export that suits this machine. Both files are optional in
+        // the manifest; an install that only has one keeps working.
+        let want_fp32 = onnx::prefer_fp32();
+        let fp32 = k
+            .model_fp32
+            .as_deref()
+            .filter(|fp32| want_fp32 && Path::new(&resolve(fp32)).exists());
+        if want_fp32 && fp32.is_none() {
+            tracing::warn!(
+                engine = %manifest.id,
+                "this machine would run the fp32 Kokoro export faster, but only \
+                 the INT8 file is installed; reinstall the model to switch"
+            );
+        }
+        let model = fp32.unwrap_or(&k.model);
+        tracing::info!(engine = %manifest.id, model = %model, "Kokoro model file");
+
         // sherpa-onnx calls exit() on configuration errors, which would
         // take the whole server down. Validate every referenced file
         // (and the espeak data dir) before handing control to C++.
         let mut required: Vec<PathBuf> = vec![
-            resolve(&k.model).into(),
+            resolve(model).into(),
             resolve(&k.voices).into(),
             resolve(&k.tokens).into(),
             resolve(&k.data_dir).into(),
@@ -78,7 +95,7 @@ impl KokoroEngine {
         let mut config = OfflineTtsConfig {
             model: OfflineTtsModelConfig {
                 kokoro: OfflineTtsKokoroModelConfig {
-                    model: Some(resolve(&k.model)),
+                    model: Some(resolve(model)),
                     voices: Some(resolve(&k.voices)),
                     tokens: Some(resolve(&k.tokens)),
                     data_dir: Some(resolve(&k.data_dir)),
