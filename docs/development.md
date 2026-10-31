@@ -182,6 +182,9 @@ cargo test --workspace
 # against a running server with ZipVoice and SenseVoice installed
 ./scripts/smoke-test.sh           # feature sweep
 ./scripts/e2e-test.sh             # record -> transcribe -> synthesize -> export
+
+# with Playwright installed (`npm install -g playwright`) and the server running
+node scripts/check-web-audio.mjs  # one clip plays at a time in the UI
 ```
 
 CI runs those on macOS, Linux and Windows, then starts the server on Ubuntu

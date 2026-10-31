@@ -32,6 +32,7 @@ function renderSynthResults(list, engine) {
     const audio = document.createElement('audio');
     audio.controls = true;
     audio.preload = 'none';
+    audio.addEventListener('play', () => pauseOtherAudio(audio));
     const url = URL.createObjectURL(v.blob);
     synthResultUrls.push(url);
     audio.src = url;

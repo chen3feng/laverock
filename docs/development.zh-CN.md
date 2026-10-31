@@ -162,6 +162,9 @@ cargo test --workspace
 # 需要已安装 ZipVoice + SenseVoice 并启动服务端
 ./scripts/smoke-test.sh           # 功能面扫描
 ./scripts/e2e-test.sh             # 录音 -> 转写 -> 合成 -> 导出
+
+# 需要 npm install -g playwright，并已启动服务端
+node scripts/check-web-audio.mjs  # 界面同一时间只播放一段音频
 ```
 
 CI 会在 macOS、Linux、Windows 上运行以上检查，然后在 Ubuntu 上用较小的 ZipVoice
