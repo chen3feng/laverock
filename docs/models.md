@@ -165,7 +165,9 @@ Four installs share one checkpoint: cloning, voice design, multilingual
 built-in voices. FST text normalization needs `pynini` (conda-forge only)
 and is skipped automatically when absent. Long text is split at about 64
 semantic units and the fragments are level-matched before they are joined;
-ordinary sentences are generated in one pass, so they get no seam.
+ordinary sentences are generated in one pass, so they get no seam. Output is
+deterministic for the same text and voice: the runtime uses the upstream
+default seed (1895).
 
 **Chatterbox** — Resemble AI's 0.5B multilingual clone model: clone a clip
 and speak any of 23 languages. The transcript is not required. Defaults to
