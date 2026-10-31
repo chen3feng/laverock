@@ -10,8 +10,8 @@
 
 use crate::i18n::{self, Key};
 use crate::{
-    decode_wav, encode_wav, Audio, CoreError, Manifest, ProgressEvent, Result, SpeechEngine,
-    SynthRequest,
+    decode_wav, encode_wav, trim_trailing_low_level, Audio, CoreError, Manifest, ProgressEvent,
+    Result, SpeechEngine, SynthRequest,
 };
 use std::{
     io::{BufRead, BufReader, Read},
@@ -200,6 +200,10 @@ impl SpeechEngine for ChatterboxEngine {
         let bytes = std::fs::read(&out_wav)
             .map_err(|e| CoreError::Synth(format!("runner produced no audio: {e}")))?;
         let (samples, sample_rate) = decode_wav(&bytes)?;
+        // Chatterbox occasionally keeps emitting a quiet babble tail after
+        // the text ends (several seconds in the worst case). It is above
+        // digital silence, so trim it against the clip's own level.
+        let samples = trim_trailing_low_level(&samples, sample_rate.max(1) as u32).into_owned();
 
         let _ = std::fs::remove_dir_all(&tmp);
 

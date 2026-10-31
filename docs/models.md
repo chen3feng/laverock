@@ -167,7 +167,9 @@ and is skipped automatically when absent.
 
 **Chatterbox** — Resemble AI's 0.5B multilingual clone model: clone a clip
 and speak any of 23 languages. The transcript is not required. Defaults to
-Chinese; pick the target language in the engine parameters.
+Chinese; pick the target language in the engine parameters. A run can keep
+emitting a quiet babble tail after the text ends; the engine cuts a long
+low-level tail against the clip's own loudness, keeping 0.3 s of margin.
 
 **IndexTTS-2** — bilibili's Chinese/English zero-shot clone model: a
 GPT-style token model conditions on the reference clip (cut to 15 s) and a

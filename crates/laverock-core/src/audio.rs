@@ -251,6 +251,56 @@ pub fn trim_silence(samples: &[f32], sample_rate: u32, keep_seconds: f32) -> Cow
     }
 }
 
+/// A trailing run at least this long is treated as junk, not a breath.
+const LOW_TAIL_MIN_SECS: f32 = 0.8;
+/// Frames below this fraction of the clip's own loud level are junk. An
+/// absolute threshold cannot see it: Chatterbox's tail sits above digital
+/// silence, so `trim_silence` leaves it.
+const LOW_TAIL_RELATIVE: f32 = 0.10;
+/// Margin kept after the last loud frame.
+const LOW_TAIL_KEEP_SECS: f32 = 0.30;
+
+/// Cut a long, low-level tail that some TTS runs append after the text
+/// ends. The threshold follows the clip's own 95th-percentile frame level,
+/// so quiet speech at the end of a normal utterance is left alone; only a
+/// run of at least [`LOW_TAIL_MIN_SECS`] that stays below
+/// [`LOW_TAIL_RELATIVE`] of the loud level is removed, keeping
+/// [`LOW_TAIL_KEEP_SECS`] of margin.
+pub fn trim_trailing_low_level(samples: &[f32], sample_rate: u32) -> Cow<'_, [f32]> {
+    let frame_len = silence_frame_len(sample_rate);
+    if samples.len() < 3 * frame_len {
+        return Cow::Borrowed(samples);
+    }
+    let frame_secs = frame_len as f32 / sample_rate.max(1) as f32;
+    let levels: Vec<f32> = samples
+        .chunks(frame_len)
+        .map(|frame| (frame.iter().map(|s| s * s).sum::<f32>() / frame.len() as f32).sqrt())
+        .collect();
+
+    let mut ordered = levels.clone();
+    ordered.sort_by(f32::total_cmp);
+    let p95 = ordered[((ordered.len() - 1) as f32 * 0.95).round() as usize];
+    // An entirely quiet clip gives no reliable reference level.
+    if p95 < SILENCE_RMS {
+        return Cow::Borrowed(samples);
+    }
+    let threshold = (p95 * LOW_TAIL_RELATIVE).max(SILENCE_RMS);
+    let Some(last) = levels.iter().rposition(|&level| level > threshold) else {
+        return Cow::Borrowed(samples);
+    };
+    let trailing = (levels.len() - 1 - last) as f32 * frame_secs;
+    if trailing < LOW_TAIL_MIN_SECS {
+        return Cow::Borrowed(samples);
+    }
+    let keep = (LOW_TAIL_KEEP_SECS * sample_rate.max(1) as f32) as usize;
+    let end = ((last + 1) * frame_len + keep).min(samples.len());
+    if end == samples.len() {
+        Cow::Borrowed(samples)
+    } else {
+        Cow::Owned(samples[..end].to_vec())
+    }
+}
+
 /// Shorten every *internal* near-silence longer than `max_pause_secs` to
 /// that length by cutting the middle out of the quiet run. Used to tame
 /// MOSS-TTS's "silence-token attractor", which inserts pauses of 0.3–1.5 s
@@ -507,6 +557,59 @@ mod tests {
             trimmed.len()
         );
         assert_eq!(trimmed[..1_200], [0.0; 1_200], "kept margin is silent");
+    }
+
+    #[test]
+    fn low_level_tail_after_speech_is_cut() {
+        let sr = 24_000usize;
+        let mut samples = tone_gap_tone(0.5, 0.0); // ~1 s of loud tone
+                                                   // 2 s of quiet babble: above digital silence, so `trim_silence`
+                                                   // leaves it alone, but far below the speech.
+        samples.extend(
+            (0..2 * sr)
+                .map(|i| 0.0057 * (i as f32 * 170.0 * std::f32::consts::TAU / sr as f32).sin()),
+        );
+
+        let trimmed = trim_trailing_low_level(&samples, sr as u32);
+        assert!(trimmed.len() < samples.len());
+        // Speech ends at 1.0 s; 0.3 s of margin remains.
+        assert!(
+            (trimmed.len() as i64 - (1.3 * sr as f64) as i64).abs() <= 240,
+            "trimmed to {} samples",
+            trimmed.len()
+        );
+    }
+
+    #[test]
+    fn low_level_tail_trims_only_a_long_run() {
+        let sr = 24_000usize;
+        let mut samples = tone_gap_tone(0.5, 0.0);
+        // A short, soft phrase at the end is speech, not junk.
+        samples.extend(
+            (0..(0.5 * sr as f32) as usize)
+                .map(|i| 0.01 * (i as f32 * 170.0 * std::f32::consts::TAU / sr as f32).sin()),
+        );
+        assert!(matches!(
+            trim_trailing_low_level(&samples, sr as u32),
+            Cow::Borrowed(_)
+        ));
+    }
+
+    #[test]
+    fn low_level_trim_leaves_quiet_and_loud_clips_alone() {
+        let sr = 24_000usize;
+        // Entirely quiet: no reliable reference level.
+        let quiet = vec![0.003f32; sr];
+        assert!(matches!(
+            trim_trailing_low_level(&quiet, sr as u32),
+            Cow::Borrowed(_)
+        ));
+        // Speech runs to the last sample.
+        let loud = vec![0.3f32; sr];
+        assert!(matches!(
+            trim_trailing_low_level(&loud, sr as u32),
+            Cow::Borrowed(_)
+        ));
     }
 
     #[test]
