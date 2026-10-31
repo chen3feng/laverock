@@ -181,6 +181,11 @@ messages! {
     UnsupportedPlatform = "unsupported_platform"
         { en: "{model} is not supported on this platform; see the model notes for details.",
           zh: "当前平台不支持 {model}，原因见该模型的说明。" },
+    KokoroFp32Missing = "kokoro_fp32_missing"
+        { en: "This machine runs the fp32 Kokoro export faster, but only the INT8 file is installed. Reinstall to download it.",
+          zh: "本机使用 fp32 版 Kokoro 更快，但目前只安装了 INT8 文件。重新安装即可下载。" },
+    ModelDeleteFailed = "model_delete_failed"
+        { en: "Could not delete {model}: {error}", zh: "无法删除 {model}：{error}" },
     ScriptMissing = "script_missing"
         { en: "Download script missing: {path}", zh: "缺少下载脚本：{path}" },
     ManifestReadFailed = "manifest_read_failed"

@@ -120,6 +120,7 @@ function modelCard(model, installed) {
   const actions = el.querySelector('.model-actions');
   if (installed && !stale) {
     actions.innerHTML = `<span class="hint">${t("ui.directory")}: models/${esc(model.dir)}</span>`;
+    actions.appendChild(deleteButton(model));
     return el;
   }
 
@@ -140,6 +141,7 @@ function modelCard(model, installed) {
     dir.className = 'hint';
     dir.textContent = `${t("ui.directory")}: models/${model.dir}`;
     actions.appendChild(dir);
+    actions.appendChild(deleteButton(model));
   }
   if (!modelsData.scripts_dir) {
     const hint = document.createElement('span');
@@ -148,6 +150,32 @@ function modelCard(model, installed) {
     actions.appendChild(hint);
   }
   return el;
+}
+
+// Deleting removes files from disk, so it goes through the same
+// confirmation dialog as the other destructive actions.
+function deleteButton(model) {
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'ghost danger';
+  btn.textContent = t('ui.delete_model');
+  btn.onclick = async () => {
+    const ok = await confirmAction(
+      t('ui.confirm_delete_message', { model: model.name }),
+      { title: t('ui.delete_model'), okText: t('ui.delete_model') },
+    );
+    if (!ok) return;
+    btn.disabled = true;
+    try {
+      await api(`/api/models/${encodeURIComponent(model.id)}`, { method: 'DELETE' });
+      toast(t('ui.model_deleted', { model: model.name }));
+      await Promise.all([loadEngines(), loadModels()]);
+    } catch (e) {
+      btn.disabled = false;
+      toast(t('ui.could_not_delete_model') + e.message, true);
+    }
+  };
+  return btn;
 }
 
 async function installModel(id) {

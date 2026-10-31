@@ -248,6 +248,16 @@ impl EngineManager {
         }
     }
 
+    /// Drop a loaded engine and stop anything it keeps running, so the
+    /// model directory can be deleted (Windows refuses to remove files a
+    /// resident server still holds open).
+    pub fn unload(&self, id: &str) {
+        let engine = self.loaded.lock().expect("engine lock poisoned").remove(id);
+        if let Some(engine) = engine {
+            engine.unload();
+        }
+    }
+
     pub fn manifest_defaults(&self, id: &str) -> Result<crate::manifest::SynthDefaults> {
         Ok(self.manifest(id)?.defaults)
     }
