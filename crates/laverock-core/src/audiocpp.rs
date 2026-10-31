@@ -224,6 +224,18 @@ impl SpeechEngine for AudioCppEngine {
         &self.name
     }
 
+    /// Stop this engine's resident server, freeing the model's VRAM.
+    ///
+    /// Skipped while a request holds `run_lock`: the manager calls this from
+    /// another engine's request path, and killing a server mid-synthesis
+    /// would fail a call that was already in flight.
+    fn unload(&self) {
+        let Ok(_guard) = self.run_lock.try_lock() else {
+            return;
+        };
+        self.stop_resident();
+    }
+
     fn synthesize(&self, req: &SynthRequest) -> Result<Audio> {
         let has_prompt = !req.prompt_samples.is_empty();
         if !has_prompt

@@ -43,6 +43,15 @@ pub trait SpeechEngine: Send + Sync {
     fn id(&self) -> &str;
     fn name(&self) -> &str;
     fn synthesize(&self, req: &SynthRequest) -> Result<Audio>;
+
+    /// Give back memory held between requests, if the engine keeps any.
+    ///
+    /// The manager calls this on every engine except the one about to run,
+    /// so switching models releases the previous model's weights instead of
+    /// holding them all at once. Implementations must be cheap when nothing
+    /// is resident and must not interrupt a request in flight; the default
+    /// is a no-op for engines whose weights live in this process.
+    fn unload(&self) {}
 }
 
 /// A synthesis request. Reference audio is required for cloning engines.
@@ -214,7 +223,29 @@ impl EngineManager {
     /// Convenience: load if needed and run one synthesis request.
     pub fn synthesize(&self, id: &str, req: &SynthRequest) -> Result<Audio> {
         let engine = self.engine(id)?;
+        self.release_others(id);
         engine.synthesize(req)
+    }
+
+    /// Release whatever the other engines keep loaded.
+    ///
+    /// One model at a time is the only thing that fits on an 8 GB card, and
+    /// keeping several resident audio.cpp servers alive is exactly what ran
+    /// out of VRAM. Engines that hold nothing between requests ignore it.
+    fn release_others(&self, keep: &str) {
+        // Cloned out first: unloading can stop a child process and wait for
+        // it, which must not happen while the registry lock is held.
+        let others: Vec<Arc<dyn SpeechEngine>> = {
+            let loaded = self.loaded.lock().expect("engine lock poisoned");
+            loaded
+                .iter()
+                .filter(|(id, _)| id.as_str() != keep)
+                .map(|(_, engine)| engine.clone())
+                .collect()
+        };
+        for other in others {
+            other.unload();
+        }
     }
 
     pub fn manifest_defaults(&self, id: &str) -> Result<crate::manifest::SynthDefaults> {
@@ -312,5 +343,86 @@ mod tests {
         assert_eq!(found[0].id, "zipvoice");
 
         fs::remove_dir_all(&base).ok();
+    }
+}
+
+#[cfg(test)]
+mod unload_tests {
+    use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    /// Records how often the manager asked it to release its model.
+    struct MockEngine {
+        id: String,
+        unloads: Arc<AtomicUsize>,
+    }
+
+    impl SpeechEngine for MockEngine {
+        fn id(&self) -> &str {
+            &self.id
+        }
+
+        fn name(&self) -> &str {
+            "mock"
+        }
+
+        fn synthesize(&self, _req: &SynthRequest) -> Result<Audio> {
+            Ok(Audio {
+                samples: vec![0.0; 16],
+                sample_rate: 24_000,
+            })
+        }
+
+        fn unload(&self) {
+            self.unloads.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+
+    fn request() -> SynthRequest {
+        SynthRequest {
+            text: "hello".into(),
+            prompt_text: None,
+            prompt_samples: Vec::new(),
+            prompt_sr: 24_000,
+            speed: 1.0,
+            num_steps: 1,
+            params: Default::default(),
+            progress: None,
+        }
+    }
+
+    /// Only one model's weights are kept resident: a request for one engine
+    /// releases every other loaded engine, and never itself.
+    #[test]
+    fn switching_engines_unloads_the_others() {
+        let root = std::env::temp_dir().join(format!("laverock-unload-{}", std::process::id()));
+        let manager = EngineManager::open(&root).expect("manager");
+        let first_unloads = Arc::new(AtomicUsize::new(0));
+        let second_unloads = Arc::new(AtomicUsize::new(0));
+        {
+            let mut loaded = manager.loaded.lock().expect("engine lock");
+            loaded.insert(
+                "first".into(),
+                Arc::new(MockEngine {
+                    id: "first".into(),
+                    unloads: first_unloads.clone(),
+                }),
+            );
+            loaded.insert(
+                "second".into(),
+                Arc::new(MockEngine {
+                    id: "second".into(),
+                    unloads: second_unloads.clone(),
+                }),
+            );
+        }
+
+        manager.synthesize("first", &request()).expect("first");
+        assert_eq!(first_unloads.load(Ordering::SeqCst), 0);
+        assert_eq!(second_unloads.load(Ordering::SeqCst), 1);
+
+        manager.synthesize("second", &request()).expect("second");
+        assert_eq!(first_unloads.load(Ordering::SeqCst), 1);
+        assert_eq!(second_unloads.load(Ordering::SeqCst), 1);
     }
 }
