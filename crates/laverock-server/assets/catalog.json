@@ -26,12 +26,12 @@
   {
     "id": "kokoro",
     "dir": "kokoro-int8-multi-lang-v1_0",
-    "name": "Kokoro 82M (INT8)",
+    "name": "Kokoro 82M",
     "description": {
-      "en": "A lightweight 82M-parameter TTS that runs in real time on CPU. 54 official preset voices across 8 languages (English, Chinese, Japanese, French, Spanish, Italian, Portuguese, Hindi). No voice cloning — choose a built-in voice.",
-      "zh": "仅 82M 参数的轻量 TTS，CPU 上即可实时合成；54 个官方预置音色，覆盖中英日法西意葡印地 8 种语言。不支持声音克隆，只能选择内置音色。"
+      "en": "A lightweight 82M-parameter TTS that runs in real time on CPU. 54 official preset voices across 8 languages (English, Chinese, Japanese, French, Spanish, Italian, Portuguese, Hindi). No voice cloning — choose a built-in voice. The installer adds the fp32 export on machines that run it faster (a CUDA build or an x86 CPU without AVX2), and the engine picks the better file automatically.",
+      "zh": "仅 82M 参数的轻量 TTS，CPU 上即可实时合成；54 个官方预置音色，覆盖中英日法西意葡印地 8 种语言。不支持声音克隆，只能选择内置音色。在 fp32 更快的机器上（CUDA 构建，或没有 AVX2 的 x86 CPU），安装时还会下载 fp32 导出，引擎会自动选用更快的那个文件。"
     },
-    "size": "~135 MB",
+    "size": "~135 MB (INT8) / ~450 MB with fp32",
     "languages": [
       "zh",
       "en",
@@ -49,8 +49,8 @@
     "script": "download-kokoro.sh",
     "env": {},
     "note": {
-      "en": "Pure ONNX runtime — no Python or build toolchain needed. Preset voices only: when selected, the synth page hides the voice library/recorder/transcript and offers a built-in voice picker.",
-      "zh": "纯 ONNX 运行时，无需 Python 或编译工具链。该模型只有预置音色：选中后合成页不会出现声音库/录音/参考文字，改为在引擎参数里选择音色。"
+      "en": "Pure ONNX runtime — no Python or build toolchain needed. Preset voices only: when selected, the synth page hides the voice library/recorder/transcript and offers a built-in voice picker. The INT8 and fp32 files can coexist; deleting the fp32 one falls back to INT8.",
+      "zh": "纯 ONNX 运行时，无需 Python 或编译工具链。该模型只有预置音色：选中后合成页不会出现声音库/录音/参考文字，改为在引擎参数里选择音色。INT8 与 fp32 两个文件可以共存；删掉 fp32 文件即回退到 INT8。"
     }
   },
   {

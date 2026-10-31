@@ -59,6 +59,13 @@ CUDA 构建下也可用 `LAVEROCK_ONNX_PROVIDER=cpu` 强制走 CPU。
 构建下一样快。在 RTX 3060 Ti 上，fp32 Kokoro 生成 9.6 秒语音用 1.5 秒，四个 CPU
 线程要 10.2 秒；而 INT8 Kokoro 两种构建都是 6.3 秒。
 
+因此安装脚本按「运行安装的那台机器」而不是构建机器选择文件：服务端导出
+`LAVEROCK_ONNX_VARIANT`（`fp32` 或 `int8`，由运行时后端与本机 AVX2 检测决定），
+`download-kokoro.sh` 读到 `fp32` 时会在 INT8 之外再下载 fp32 导出。手动运行脚本时
+它会自行做同样的检测；`LAVEROCK_ONNX_VARIANT` 或 `KOKORO_FP32=1/0` 可覆盖。
+加载时引擎在本机偏好 fp32 且清单里的 `model_fp32` 文件存在时使用它，只装了 INT8
+时打一条警告。
+
 ## 架构
 
 ```text

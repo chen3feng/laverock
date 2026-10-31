@@ -32,6 +32,39 @@ pub fn requested() -> String {
     provider
 }
 
+/// Whether the fp32 ONNX export should be preferred over the INT8 one.
+///
+/// The CUDA provider only accelerates fp32, and ONNX Runtime's INT8 kernels
+/// need AVX2 on x86: without it they fall back to scalar code, measured four
+/// times slower than fp32 on a 2012 Ivy Bridge. Elsewhere — AVX2 x86, Apple
+/// Silicon's NEON — INT8 is the smaller, faster choice.
+pub fn prefer_fp32() -> bool {
+    if requested() != "cpu" {
+        return true;
+    }
+    #[cfg(target_arch = "x86_64")]
+    {
+        !std::is_x86_feature_detected!("avx2")
+    }
+    #[cfg(not(target_arch = "x86_64"))]
+    {
+        false
+    }
+}
+
+/// The model variant an installer should fetch for this machine.
+///
+/// The decision is made on the machine that runs the installer, not on
+/// whichever machine built the app: the provider check includes the runtime
+/// CUDA probe, and the CPU check looks at the local processor.
+pub fn model_variant() -> &'static str {
+    if prefer_fp32() {
+        "fp32"
+    } else {
+        "int8"
+    }
+}
+
 /// Whether the CUDA provider can start on this machine. The Windows runtime
 /// needs a driver with a device, plus cuDNN 9 as a separate DLL.
 #[cfg(all(feature = "onnx-cuda", windows))]
@@ -111,6 +144,28 @@ mod tests {
         }
         std::env::set_var(ENV, "cuda");
         assert_eq!(requested(), "cpu");
+        std::env::remove_var(ENV);
+    }
+
+    /// The installer's variant and the loader's preference must agree,
+    /// or a machine would download one export and run the other.
+    #[test]
+    fn install_variant_matches_the_loader_preference() {
+        let expected = if prefer_fp32() { "fp32" } else { "int8" };
+        assert_eq!(model_variant(), expected);
+    }
+
+    /// A CPU build asks for the CPU, so only the local ISA decides.
+    #[test]
+    fn cpu_build_prefers_fp32_only_without_avx2() {
+        if cfg!(feature = "onnx-cuda") {
+            return;
+        }
+        std::env::set_var(ENV, "cuda");
+        #[cfg(target_arch = "x86_64")]
+        assert_eq!(prefer_fp32(), !std::is_x86_feature_detected!("avx2"));
+        #[cfg(not(target_arch = "x86_64"))]
+        assert!(!prefer_fp32());
         std::env::remove_var(ENV);
     }
 }

@@ -68,6 +68,15 @@ either way. On an RTX 3060 Ti, an fp32 Kokoro export took 1.5 s for 9.6 s of
 speech on the GPU against 10.2 s on four CPU threads, while the INT8 Kokoro
 took 6.3 s in both builds.
 
+Installers therefore choose their files for the machine they run on, not for
+the machine that built the app: the server exports `LAVEROCK_ONNX_VARIANT`
+(`fp32` or `int8`, from the runtime provider and a local AVX2 check), and
+`download-kokoro.sh` fetches the fp32 export in addition to the INT8 one when
+it reads `fp32`. A hand-run script makes the same check itself;
+`LAVEROCK_ONNX_VARIANT` or `KOKORO_FP32=1/0` overrides either. At load time
+the engine uses `model_fp32` from the manifest when the file exists and the
+machine prefers fp32, and warns if only the INT8 file is installed.
+
 ## Architecture
 
 ```text

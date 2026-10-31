@@ -15,7 +15,7 @@ Laverock 的安装包不含模型权重：包里是应用本身，模型按需�
 
 ```sh
 ./scripts/download-zipvoice.sh     # ZipVoice，约 160 MB，中英，ONNX
-./scripts/download-kokoro.sh       # Kokoro-82M，约 135 MB，8 种语言，预置音色
+./scripts/download-kokoro.sh       # Kokoro-82M，约 135 MB（INT8；含 fp32 约 450 MB），8 种语言，预置音色
 ./scripts/download-stt.sh          # SenseVoice 语音识别，约 234 MB，自动转写
 ./scripts/download-voxcpm2.sh      # VoxCPM2，约 3.3 GB，30 种语言，GGUF
 ./scripts/download-qwen3tts.sh     # Qwen3-TTS 克隆，隔离 venv + 约 1.5 GB 模型
@@ -52,7 +52,7 @@ DOTS_MODEL=dots.tts-mf ./scripts/download-dots.sh         # 4 步 MeanFlow 导�
 | 引擎 id | 模型 | 模式 | 语言 | 下载体积 |
 | --- | --- | --- | --- | --- |
 | `sherpa-onnx-zipvoice-distill-int8-zh-en-emilia` | ZipVoice Distill INT8 | 克隆 | 中英 | 约 160 MB |
-| `kokoro-int8-multi-lang-v1_0` | Kokoro-82M INT8 | 54 个预置音色 | 中英日法西意葡印地 | 约 135 MB |
+| `kokoro-int8-multi-lang-v1_0` | Kokoro-82M | 54 个预置音色 | 中英日法西意葡印地 | 约 135 MB（INT8）/ 含 fp32 约 450 MB |
 | `sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17-int8` | SenseVoice Small INT8 | 语音识别 | 中英日韩粤 | 约 234 MB |
 | `voxcpm2` | VoxCPM2 | 克隆、声音设计 | 30 种语言 | 约 3.3 GB |
 | `longcat` | LongCat-AudioDiT 1B | 克隆 | 中英 | 约 7 GB（含 venv） |
@@ -90,6 +90,12 @@ DOTS_MODEL=dots.tts-mf ./scripts/download-dots.sh         # 4 步 MeanFlow 导�
 
 **Kokoro** —— 仅 82M 参数，CPU 上实时合成，54 个官方预置音色覆盖 8 种语言。
 不支持克隆：在引擎参数里选择内置音色。纯 ONNX，无需 Python 或编译工具链。
+
+模型有 INT8 与 fp32 两种导出。在 fp32 更快的机器上——CUDA 构建，或没有 AVX2
+的 x86 CPU（此时 ONNX Runtime 的 INT8 算子会退化为标量实现）——安装脚本会一并
+下载 fp32 文件，引擎自动优先使用它；其它机器只下载 135 MB 的 INT8。Apple
+Silicon 保持 INT8：NEON 上量化模型表现很好，也不存在可优先的 CUDA 后端。两个
+文件可以共存，删掉 `model.onnx` 即回退到 INT8。
 
 **VoxCPM2** —— 30 种语言，支持零样本克隆与声音设计。通过 audio.cpp 原生运行时
 推理（Windows 带 NVIDIA 显卡时使用 CUDA），与 dots.tts、CosyVoice3 共用，并常驻
@@ -237,7 +243,10 @@ MOSS-TTS 在这台机器上无法测速：预编译的 Windows 运行时没有 C
 ONNX Runtime 的 CUDA 后端没有对应的量化算子实现，所以 INT8 Kokoro 两种构建
 都是 6.3 秒，显存占用始终不变。作为对照，同一模型的 fp32 导出用 GPU 生成
 9.6 秒语音只要 1.5 秒，四个 CPU 线程则需要 10.2 秒——GPU 通路本身可用，只是
-INT8 模型没有可加速的算子。该运行时的构建方法见
+INT8 模型没有可加速的算子。上表 Kokoro 一行仍是 INT8 的数字。现在 Kokoro
+会在这类机器上安装并优先使用 fp32 导出，而且即使不用 GPU，它在这颗 CPU 上也更
+快：没有 AVX2 时 INT8 算子退化为标量实现，同一段文字热身后耗时 6.2 秒，INT8
+为 14.8 秒。该运行时的构建方法见
 [开发文档](development.zh-CN.md#onnx-用-gpu)。
 
 8 GB 显存一次只放得下一个 audio.cpp 模型。让 dots、VoxCPM2、CosyVoice3

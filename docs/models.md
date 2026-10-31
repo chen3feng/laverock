@@ -18,7 +18,7 @@ installs and CI use them directly:
 
 ```sh
 ./scripts/download-zipvoice.sh     # ZipVoice, ~160 MB, zh/en, ONNX
-./scripts/download-kokoro.sh       # Kokoro-82M, ~135 MB, 8 languages, preset voices
+./scripts/download-kokoro.sh       # Kokoro-82M, ~135 MB INT8 (~450 MB with fp32), 8 languages, preset voices
 ./scripts/download-stt.sh          # SenseVoice STT, ~234 MB, auto-transcribes clips
 ./scripts/download-voxcpm2.sh      # VoxCPM2, ~3.3 GB, 30 languages, GGUF
 ./scripts/download-qwen3tts.sh     # Qwen3-TTS cloning, isolated venv + ~1.5 GB model
@@ -58,7 +58,7 @@ endpoint call the model.
 | Engine id | Model | Modes | Languages | Download |
 | --- | --- | --- | --- | --- |
 | `sherpa-onnx-zipvoice-distill-int8-zh-en-emilia` | ZipVoice Distill INT8 | clone | zh, en | ~160 MB |
-| `kokoro-int8-multi-lang-v1_0` | Kokoro-82M INT8 | 54 preset voices | zh, en, ja, fr, es, it, pt, hi | ~135 MB |
+| `kokoro-int8-multi-lang-v1_0` | Kokoro-82M | 54 preset voices | zh, en, ja, fr, es, it, pt, hi | ~135 MB (INT8) / ~450 MB with fp32 |
 | `sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17-int8` | SenseVoice Small INT8 | speech recognition | zh, en, ja, ko, yue | ~234 MB |
 | `voxcpm2` | VoxCPM2 | clone, voice design | 30 languages | ~3.3 GB |
 | `longcat` | LongCat-AudioDiT 1B | clone | zh, en | ~7 GB incl. venv |
@@ -99,6 +99,14 @@ reference transcript; both must be accurate or the timbre drifts.
 **Kokoro** — a lightweight 82M model that runs in real time on CPU, with 54
 official preset voices across 8 languages. No cloning: pick a built-in voice
 from the engine parameters. Pure ONNX — no Python or build toolchain.
+
+The model ships as an INT8 export and an fp32 export. The installer fetches
+the fp32 file as well on machines that run it faster — a CUDA build, or an
+x86 CPU without AVX2, where ONNX Runtime's INT8 kernels fall back to scalar
+code — and the engine then uses it automatically; elsewhere only the 135 MB
+INT8 file is downloaded. Apple Silicon stays on INT8: its NEON kernels run
+the quantized model well and there is no CUDA provider to prefer. Both files
+may coexist; deleting `model.onnx` switches back to INT8.
 
 **VoxCPM2** — 30 languages with zero-shot cloning and voice design. Runs on
 the audio.cpp native runtime (CUDA with an NVIDIA GPU on Windows), shared
@@ -285,8 +293,12 @@ INT8 exports and ONNX Runtime's CUDA provider has no kernels for their
 quantized operators, so INT8 Kokoro took 6.3 s either way and GPU memory
 stayed flat. An fp32 export of the same model, as a control, took 1.5 s for
 9.6 s of speech on the GPU against 10.2 s on four CPU threads — the GPU path
-works, it just has nothing to accelerate in the INT8 models. How to build
-that runtime is in [Development](development.md#onnx-on-the-gpu).
+works, it just has nothing to accelerate in the INT8 models. The Kokoro row
+above is the INT8 figure. Kokoro now installs that fp32 export on such a
+machine and prefers it, because on this CPU it wins even without the GPU:
+without AVX2 the INT8 kernels fall back to scalar code, and the same text
+took 6.2 s warm against 14.8 s. How to build that runtime is in
+[Development](development.md#onnx-on-the-gpu).
 
 The 8 GB of VRAM held one audio.cpp model at a time. Leaving dots, VoxCPM2
 and CosyVoice3 resident together (about 6.2 + 6.5 + 3.3 GB) crashed the

@@ -1139,6 +1139,11 @@ fn default_dots_seed() -> i64 {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct KokoroManifest {
     pub model: String,
+    /// Higher-precision export of the same model. Used when the runtime can
+    /// make it worthwhile: the CUDA provider has no INT8 kernels, and on an
+    /// x86 CPU without AVX2 the INT8 ones fall back to scalar code.
+    #[serde(default)]
+    pub model_fp32: Option<String>,
     pub voices: String,
     pub tokens: String,
     /// espeak-ng data directory.
@@ -1280,6 +1285,16 @@ mod tests {
         assert_eq!(k.num_threads, 2);
         assert_eq!(k.default_sid, 3);
         assert_eq!(k.lang, None);
+        // Installs from before the fp32 export existed have no such field.
+        assert_eq!(k.model_fp32, None);
+
+        let with_fp32 = raw.replace(
+            r#""model": "model.int8.onnx","#,
+            r#""model": "model.int8.onnx", "model_fp32": "model.onnx","#,
+        );
+        let manifest: Manifest = serde_json::from_str(&with_fp32).expect("fp32 manifest");
+        let k = manifest.kokoro.as_ref().expect("kokoro section");
+        assert_eq!(k.model_fp32.as_deref(), Some("model.onnx"));
 
         // Without a declared parameter list the kind exposes speed only;
         // the voice choice is expected from the model's own manifest.

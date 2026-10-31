@@ -363,6 +363,9 @@ fn run_install(
     cmd.arg(bash_path(&script))
         .env("LAVEROCK_MODELS_DIR", bash_path(&models_root))
         .env("LAVEROCK_SCRIPTS_DIR", bash_path(&script_dir))
+        // Let installers fetch the ONNX variant that suits *this* machine
+        // (fp32 for a usable GPU or an x86 CPU without AVX2, INT8 otherwise).
+        .env("LAVEROCK_ONNX_VARIANT", laverock_core::model_variant())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     // Pin the venv root when the workspace setting or launcher supplied
