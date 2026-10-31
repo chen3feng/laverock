@@ -9,6 +9,44 @@ let selectedCaptures = new Set();
 // Transcript produced inside the add-take card, if the user transcribed
 // before saving; otherwise the server transcribes the stored take.
 let libraryTranscript = '';
+// Which enhancement stages the installed models cover.
+let enhanceStatus = { denoise: false, vocals: false };
+
+const enhanceModeAvailable = (mode) => {
+  if (mode === 'denoise') return enhanceStatus.denoise;
+  if (mode === 'vocals') return enhanceStatus.vocals;
+  if (mode === 'both') return enhanceStatus.denoise && enhanceStatus.vocals;
+  return true;
+};
+
+const enhanceModeLabel = (mode) => t('captures.enhance.' + (mode || 'off'));
+
+async function loadEnhanceStatus() {
+  try {
+    enhanceStatus = await api('/api/enhance');
+  } catch (_) {
+    enhanceStatus = { denoise: false, vocals: false };
+  }
+  syncEnhanceSelect();
+}
+
+// Grey out modes whose models are missing and explain how to get them.
+// Denoising is the sensible default: it is fast and only removes noise,
+// so the user does not have to pick anything. The last used mode wins,
+// including an explicit "off"; a mode whose models disappeared falls
+// back to the default.
+function syncEnhanceSelect() {
+  const select = $('captureEnhance');
+  if (!select) return;
+  for (const opt of select.options) {
+    opt.disabled = !enhanceModeAvailable(opt.value);
+  }
+  const saved = localStorage.getItem('laverock.enhance');
+  const preferred = saved ?? (enhanceStatus.denoise ? 'denoise' : 'off');
+  select.value = enhanceModeAvailable(preferred) ? preferred : 'off';
+  $('captureEnhanceHint').textContent =
+    enhanceStatus.denoise && enhanceStatus.vocals ? '' : t('captures.enhance.missing');
+}
 
 const captureUrl = (id) => '/api/captures/' + encodeURIComponent(id) + '/audio';
 
@@ -68,6 +106,7 @@ function renderCaptures() {
         <label class="cap-check"><input type="checkbox" class="pick"${checked} /></label>
         <b>${esc(name)}</b>
         ${c.duplicate_of ? `<span class="chip">${esc(t('captures.duplicate'))}</span>` : ''}
+        ${c.enhancement ? `<span class="chip">${esc(t('captures.enhanced'))} · ${esc(enhanceModeLabel(c.enhancement))}</span>` : ''}
       </div>
       <div class="voice-meta">${fmtDur(c.duration_secs)} · ${fmtBytes(c.bytes)} · ${fmtDate(c.created_at)}</div>
       ${c.issues.map((i) => `<div class="voice-warn">⚠ ${esc(captureIssueText(i))}</div>`).join('')}
@@ -75,6 +114,7 @@ function renderCaptures() {
       <div class="voice-actions">
         <button class="ghost small play" type="button">${previewId === c.id ? t('stop') : t('preview')}</button>
         <button class="ghost small tr" type="button"${transcribeAvailable ? '' : ' disabled'}>${t('captures.retranscribe')}</button>
+        <button class="ghost small enh" type="button"${enhanceStatus.denoise || enhanceStatus.vocals ? '' : ' disabled'}>${t('captures.enhance.action')}</button>
         <button class="ghost small edit" type="button">${t('captures.rename')}</button>
         <button class="ghost small danger del" type="button">${t('ui.delete')}</button>
       </div>`;
@@ -85,6 +125,7 @@ function renderCaptures() {
     };
     el.querySelector('.play').onclick = () => togglePreview(c.id, captureUrl(c.id));
     el.querySelector('.tr').onclick = () => transcribeCapture(c);
+    el.querySelector('.enh').onclick = () => enhanceCapture(c);
     el.querySelector('.edit').onclick = () => editCapture(c);
     el.querySelector('.del').onclick = () => deleteCapture(c);
     grid.appendChild(el);
@@ -106,6 +147,63 @@ async function transcribeCapture(c) {
   }
   // Voices built from this take got a new transcript too.
   await Promise.all([loadCaptures(), loadProfiles()]);
+}
+
+// Apply or revert enhancement on a stored take. The server always starts
+// from the untouched upload, so switching modes never compounds; `off`
+// restores the trimmed original.
+async function enhanceCapture(c) {
+  const options = [{ value: 'off', label: t('captures.enhance.off') }];
+  if (enhanceStatus.denoise) {
+    options.push({ value: 'denoise', label: t('captures.enhance.denoise') });
+  }
+  if (enhanceStatus.vocals) {
+    options.push({ value: 'vocals', label: t('captures.enhance.vocals') });
+  }
+  if (enhanceStatus.denoise && enhanceStatus.vocals) {
+    options.push({ value: 'both', label: t('captures.enhance.both') });
+  }
+  const fields = [{
+    name: 'mode',
+    label: t('captures.enhance'),
+    type: 'select',
+    options,
+    value: c.enhancement || 'off',
+  }];
+  // An enhanced take keeps its upload, so the dialog can play both
+  // versions before the user commits to another mode.
+  if (c.enhancement) {
+    fields.push({
+      name: 'preview',
+      label: t('captures.enhance.preview'),
+      hint: t('captures.enhance.preview.hint'),
+      type: 'audio',
+      options: [
+        { label: t('captures.enhance.preview.original'), url: captureUrl(c.id) + '?original=1' },
+        { label: t('captures.enhance.preview.processed'), url: captureUrl(c.id) },
+      ],
+    });
+  }
+  const res = await showDialog({
+    title: t('captures.enhance.action'),
+    message: t('captures.enhance.dialog'),
+    okText: t('ui.save'),
+    fields,
+  });
+  if (!res) return;
+  const mode = res.values.mode || 'off';
+  if (mode === 'vocals' || mode === 'both') toast(t('captures.enhancing'));
+  try {
+    await api('/api/captures/' + encodeURIComponent(c.id) + '/enhance', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mode }),
+    });
+    toast(t('captures.enhanced.done'));
+  } catch (e) {
+    toast(t('ui.failed') + e.message, true);
+  }
+  await loadCaptures();
 }
 
 async function editCapture(c) {
@@ -169,9 +267,13 @@ async function saveCapture() {
   const fd = new FormData();
   fd.append('audio', libraryCapture.blob, libraryCapture.filename || 'take.wav');
   fd.append('name', t('captures.default_name', { n: captureList.length + 1 }));
+  const mode = $('captureEnhance').value || 'off';
+  if (mode !== 'off') fd.append('enhance', mode);
+  localStorage.setItem('laverock.enhance', mode);
   if (libraryTranscript) fd.append('prompt_text', libraryTranscript);
   let meta;
   try {
+    if (mode === 'vocals' || mode === 'both') toast(t('captures.enhancing'));
     meta = await api('/api/captures', { method: 'POST', body: fd });
   } catch (e) {
     toast(t('ui.failed') + e.message, true);

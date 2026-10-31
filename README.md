@@ -16,9 +16,10 @@ generation history and a phone remote that joins over your local network.
   real time on CPU to 2B diffusion and LLM systems. Install, update and
   remove them from the app, with live download progress.
 - **Recording library and voices** — every recording becomes a take,
-  transcribed automatically with on-device speech recognition. A voice is
-  one take or several joined together, and voices export or import as
-  `.lvvoice.zip`.
+  transcribed automatically with on-device speech recognition. A take can
+  have room noise or background music removed before it conditions a voice;
+  the original is kept, so cleanup is reversible. A voice is one take or
+  several joined together, and voices export or import as `.lvvoice.zip`.
 - **History** — every generation is kept, playable and downloadable as WAV
   or MP3, newest first.
 - **Phone remote** — turn on LAN access, scan a QR code, and use the same UI

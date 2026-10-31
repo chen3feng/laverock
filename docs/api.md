@@ -29,9 +29,11 @@ describes the loopback listener.
 | POST | `/api/profiles/export` | JSON `{ids: [...]}` → one `.lvvoices.zip` batch archive |
 | POST | `/api/profiles/import` | multipart `file`: single or batch `.lvvoice(s).zip`; `strategy=skip` (default), `copy` or `overwrite` |
 | GET | `/api/captures` | recording library: takes with transcript, issues and duplicates |
-| POST | `/api/captures` | multipart `audio` (WAV), optional `name` and `prompt_text` → new take |
+| POST | `/api/captures` | multipart `audio` (WAV), optional `name`, `prompt_text` and `enhance` (`denoise`, `vocals`, `both`) → new take |
 | POST | `/api/captures/:id` | multipart `name` and/or `prompt_text` → edit a take |
-| GET | `/api/captures/:id/audio` | the take's audio |
+| GET | `/api/captures/:id/audio` | the take's audio (`?original=1` serves the untouched upload, when the take was enhanced) |
+| POST | `/api/captures/:id/enhance` | JSON `{mode}` → re-run cleanup from the original upload, or revert with `off` |
+| GET | `/api/enhance` | which cleanup stages are installed → `{denoise, vocals}` |
 | POST | `/api/captures/:id/transcribe` | re-run speech recognition on the take |
 | DELETE | `/api/captures/:id` | delete a take (it is removed from the voices using it) |
 | POST | `/api/captures/dedupe` | delete byte-identical takes, repointing voices → `{removed}` |
