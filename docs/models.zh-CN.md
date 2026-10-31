@@ -25,7 +25,7 @@ Laverock 的安装包不含模型权重：包里是应用本身，模型按需�
 ./scripts/download-ming3tts.sh     # Ming-3.0-tts 0.5B，venv + 约 3 GB 权重
 ./scripts/download-chatterbox.sh   # Chatterbox 多语种，venv + 约 5 GB
 ./scripts/download-indextts2.sh    # IndexTTS-2，3.6 GB Q8_0 GGUF（共用运行时）
-./scripts/download-mosstts.sh      # MOSS-TTS-Delay，预编译 llama.cpp 运行时 + 约 10 GB 权重
+./scripts/download-mosstts.sh      # MOSS-TTS-Delay，仅 macOS/Linux，约 10 GB 权重
 
 # 变体
 QWEN3TTS_VARIANT=custom ./scripts/download-qwen3tts.sh    # 9 个预置音色
@@ -145,10 +145,15 @@ bfloat16，Apple MPS 用 float32（codec 上 float16 会产生 NaN），其余�
 M4 Pro 上 Q8_0 检查点实测 RTF 1.47，加载后内存约 4.1 GB（见「速度」）。
 
 **MOSS-TTS-Delay** —— 多语言零样本 TTS / 克隆模型，由原生 llama.cpp 二进制作
-推理，运行时无需 Python。安装脚本直接下载预编译运行时（macOS arm64/x64、Linux
-x64、Windows x64 各有一份，其他平台或设置 `MOSS_RUNTIME_BUILD=1` 时才回退到本地编译），并一次性把音频 tokenizer
+推理，运行时无需 Python。安装脚本直接下载预编译运行时（其他平台或设置
+`MOSS_RUNTIME_BUILD=1` 时才回退到本地编译），并一次性把音频 tokenizer
 转成 GGUF；权重来自 ModelScope，无需登录 Hugging Face。克隆可选。引擎会把长文本
 拆成按句切分的片段合成，因为解码器在超长输入下会退化。
+
+该模型只在 macOS（Metal）与 Linux（CPU）上提供。预编译的 Windows 运行时没有 GPU
+后端，而且每隔几次运行就会破坏宿主堆内存，因此模型目录不再在 Windows 上提供它。
+运行时的 `-ngl` 可以把层卸载到自编译的 CUDA 版本，但在钉住的版本上，所有触碰 GPU
+的运行都崩溃了（见「速度」），所以也没有 GPU 这条退路。
 
 **SenseVoice** —— 可选的本地语音识别，覆盖中英日韩粤。安装后，录音或上传的参考
 音频会自动转写并填入文字稿栏；「转写」按钮可以手动重跑。
@@ -239,6 +244,11 @@ MOSS-TTS 在这台机器上无法测速：预编译的 Windows 运行时没有 C
 最多重试三次；在此之前，Windows 上的重试从未生效，因为崩溃表现为退出码而不是
 信号。
 
+同一运行时的 CUDA 构建（CUDA 13.3，arch 86）确实会用 GPU——层和 KV cache 都上了
+`CUDA0`——但所有触碰 GPU 的运行都崩溃了：`-ngl -1` 5 次全崩，关闭 CUDA graph
+3 次全崩，部分卸载 `-ngl 20` 3 次全崩；而 `-ngl 0` 三次里成功两次。因此模型目录
+不再在 Windows 上提供 MOSS-TTS。
+
 即使换用 CUDA 构建，ONNX 引擎仍然跑在 CPU 上：发布模型都是 INT8 导出，
 ONNX Runtime 的 CUDA 后端没有对应的量化算子实现，所以 INT8 Kokoro 两种构建
 都是 6.3 秒，显存占用始终不变。作为对照，同一模型的 fp32 导出用 GPU 生成
@@ -266,7 +276,7 @@ INT8 模型没有可加速的算子。上表 Kokoro 一行仍是 INT8 的数字�
 | ONNX 引擎（ZipVoice、Kokoro、SenseVoice） | 除应用外无额外要求 |
 | audio.cpp 引擎（dots、CosyVoice、VoxCPM2、IndexTTS-2） | 下载预编译 CLI 与常驻服务 |
 | Python 引擎（Qwen3-TTS、LongCat、Ming、Chatterbox） | Python 3.10–3.12；脚本自动创建隔离 venv |
-| MOSS-TTS | 下载预编译运行时；一次性转换分词器需要 Python 3 |
+| MOSS-TTS | 仅 macOS/Linux（Windows 上不提供）；下载预编译运行时；一次性转换分词器需要 Python 3 |
 | Windows 上应用内安装 | Git for Windows 提供的 `bash` |
 
 需要 Python 的引擎各自运行在独立 venv 中，绝不把代码加载进核心进程。

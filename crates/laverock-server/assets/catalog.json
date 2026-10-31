@@ -496,8 +496,9 @@
     "script": "download-mosstts.sh",
     "env": {},
     "note": {
-      "en": "The runtime is downloaded prebuilt, so no C++ toolchain is needed; only the one-time tokenizer conversion uses Python 3. Voice cloning is optional. Weights come from ModelScope, so no Hugging Face login is needed.",
-      "zh": "运行时直接下载预编译版本，不需要 C++ 工具链；只有一次性转换分词器需要 Python 3。克隆参考音频可选。权重来自 ModelScope，无需登录 Hugging Face。"
-    }
+      "en": "The runtime is downloaded prebuilt, so no C++ toolchain is needed; only the one-time tokenizer conversion uses Python 3. Voice cloning is optional. Weights come from ModelScope, so no Hugging Face login is needed. Not offered on Windows: the prebuilt Windows runtime has no GPU backend and crashes intermittently with heap corruption (roughly one run in three, measured); macOS runs it on Metal, Linux on the CPU.",
+      "zh": "运行时直接下载预编译版本，不需要 C++ 工具链；只有一次性转换分词器需要 Python 3。克隆参考音频可选。权重来自 ModelScope，无需登录 Hugging Face。Windows 上不提供安装：预编译的 Windows 运行时没有 GPU 后端，并会间歇性堆损坏崩溃（实测约每三次运行一次）；macOS 使用 Metal，Linux 使用 CPU。"
+    },
+    "unsupported_on": ["windows"]
   }
 ]

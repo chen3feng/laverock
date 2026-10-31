@@ -68,6 +68,12 @@ either way. On an RTX 3060 Ti, an fp32 Kokoro export took 1.5 s for 9.6 s of
 speech on the GPU against 10.2 s on four CPU threads, while the INT8 Kokoro
 took 6.3 s in both builds.
 
+audio.cpp also packages Kokoro (`kokoro_tts`), but it is not used: on the RTX
+3060 Ti the two implementations measured the same RTF on the GPU (0.152
+against 0.156) while the ONNX export was faster on the CPU (1.06 against
+1.89), with a ~1 s load against ~95 s and a 325 MB download against 889 MB.
+The ONNX path stays.
+
 Installers therefore choose their files for the machine they run on, not for
 the machine that built the app: the server exports `LAVEROCK_ONNX_VARIANT`
 (`fp32` or `int8`, from the runtime provider and a local AVX2 check), and
