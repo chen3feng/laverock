@@ -165,7 +165,7 @@ impl MossTtsEngine {
         Ok(Some(path))
     }
 
-    /// Run one text piece, retrying when the runtime dies from a signal.
+    /// Run one text piece, retrying when the runtime dies inside itself.
     /// `build` must produce a fresh command because `Command` is not
     /// cloneable and a retry needs a new process.
     fn run_chunk<F>(&self, out_wav: &Path, build: F) -> Result<(Vec<f32>, i32)>
@@ -175,8 +175,8 @@ impl MossTtsEngine {
         for attempt in 1..=CHUNK_ATTEMPTS {
             match self.run_once(build(), out_wav) {
                 Ok(samples) => return Ok(samples),
-                // A signal death means the native runtime crashed inside
-                // ggml; a fresh process usually gets through.
+                // The native runtime crashed inside ggml; a fresh process
+                // usually gets through.
                 Err((true, _)) if attempt < CHUNK_ATTEMPTS => {
                     let _ = std::fs::remove_file(out_wav);
                     std::thread::sleep(CHUNK_RETRY_PAUSE);
@@ -188,7 +188,7 @@ impl MossTtsEngine {
     }
 
     /// Run the native runtime once and decode the WAV it wrote. The error
-    /// flag is true when the process was killed by a signal (retryable).
+    /// flag is true when the process crashed (retryable).
     fn run_once(
         &self,
         mut cmd: Command,
@@ -248,7 +248,7 @@ impl MossTtsEngine {
                 tail = format!("{tail}\n{}", stdout_tail.join("\n"));
             }
             return Err((
-                status.code().is_none(),
+                crashed(status.code()),
                 format!(
                     "MOSS-TTS 推理失败（退出码 {:?}）：\n{}",
                     status.code(),
@@ -395,6 +395,20 @@ impl SpeechEngine for MossTtsEngine {
     }
 }
 
+/// Whether an exit status means the runtime died inside itself rather than
+/// exiting with an ordinary error.
+///
+/// On Unix a crash is a signal, so there is no exit code. Windows instead
+/// reports access violations and heap corruption as NTSTATUS exit codes at or
+/// above 0xC0000000 (negative as `i32`); those used to look like ordinary
+/// failures and skipped the retry that this runtime's crash rate needs.
+fn crashed(code: Option<i32>) -> bool {
+    match code {
+        None => true,
+        Some(code) => cfg!(windows) && (code as u32) >= 0xC000_0000,
+    }
+}
+
 /// Split text into pieces of at most `max_chars` characters, breaking after
 /// sentence punctuation whenever possible and backing off to the last space
 /// for scripts written without it. Whitespace around the cut is dropped.
@@ -500,7 +514,21 @@ fn resolve_path(dir: &Path, value: &str) -> PathBuf {
 
 #[cfg(test)]
 mod tests {
-    use super::{fade_edges, split_text};
+    use super::{crashed, fade_edges, split_text};
+
+    #[test]
+    fn ordinary_failure_is_not_a_crash() {
+        assert!(crashed(None));
+        assert!(!crashed(Some(1)));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_crash_codes_are_retried() {
+        // 0xC0000374 heap corruption and 0xC0000005 access violation.
+        assert!(crashed(Some(-1073740940)));
+        assert!(crashed(Some(-1073741819)));
+    }
 
     #[test]
     fn fades_piece_edges_to_zero() {
