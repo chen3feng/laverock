@@ -279,7 +279,11 @@ The 8 GB of VRAM held one audio.cpp model at a time. Leaving dots, VoxCPM2
 and CosyVoice3 resident together (about 6.2 + 6.5 + 3.3 GB) crashed the
 CosyVoice3 server on its second request, and the engine fell back to the
 one-shot CLI, so every row above was measured against a freshly started
-server. Method otherwise as above, except that LongCat got three text
+server. The app now stops the previously used engine's resident server as
+soon as another engine synthesizes (about 800 MB of VRAM came back switching
+from dots to VoxCPM2), so only one model is ever resident; the measurements
+still used one engine per server process so every engine paid the same
+start-up cost. Method otherwise as above, except that LongCat got three text
 lengths (5, 12.5 and 17.6 s of speech) after the two-length fit came out
 with a negative slope.
 
