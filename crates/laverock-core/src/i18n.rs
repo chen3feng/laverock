@@ -128,6 +128,9 @@ messages! {
         { en: "The reference transcript cannot be empty.", zh: "参考音频对应的文字不能为空。" },
     ReferenceTooLarge = "reference_too_large"
         { en: "The reference audio exceeds 20 MB.", zh: "参考音频超过 20 MB。" },
+    EnhanceModelsMissing = "enhance_models_missing"
+        { en: "Voice enhancement needs its models first; install them from the Models page (about 165 MB).",
+          zh: "人声增强需要先安装模型；请在「模型」页下载（约 165 MB）。" },
     ReferenceSilent = "reference_silent"
         { en: "The reference audio is silent; record or upload a clip with speech.",
           zh: "参考音频几乎全是静音，请重新录制或上传一段有人声的音频。" },

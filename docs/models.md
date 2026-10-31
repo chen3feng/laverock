@@ -74,10 +74,21 @@ endpoint call the model.
 | `chatterbox` | Chatterbox Multilingual | clone | 23 languages | ~5 GB incl. venv |
 | `indextts2` | IndexTTS-2 Q8_0 | clone | zh, en | ~3.6 GB |
 | `mosstts` | MOSS-TTS-Delay | clone, multilingual | 20 languages | ~10 GB (peak ~16 GB) |
+| `enhance` | Voice cleanup (GTCRN + BS-RoFormer) | recording cleanup | — | ~165 MB |
 
 The four Ming entries share one checkpoint, one venv and one runtime, so
 only the first one costs a full download; the rest add a few kilobytes of
 manifest.
+
+`enhance` is not an engine: it adds two optional stages to the recording
+library. Denoising (GTCRN, 16 kHz) removes room noise, fans and
+traffic; vocal isolation (BS-RoFormer, 44.1 kHz) drops background music
+and keeps the voice. Denoising is on by default and takes well under a
+second for a short take. Separation reuses the audio.cpp runtime and
+costs roughly real time to twice real time per take, so it is chosen
+explicitly. Takes are processed after upload; the untouched recording is
+kept, so a take can be re-processed with another mode or reverted from
+its card.
 
 ## Capabilities
 

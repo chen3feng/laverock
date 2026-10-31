@@ -436,8 +436,29 @@
     },
     "size": "~5 GB（含 venv/权重）",
     "languages": [
-      "zh", "en", "ar", "da", "de", "el", "es", "fi", "fr", "he", "hi", "it",
-      "ja", "ko", "ms", "nl", "no", "pl", "pt", "ru", "sv", "sw", "tr"
+      "zh",
+      "en",
+      "ar",
+      "da",
+      "de",
+      "el",
+      "es",
+      "fi",
+      "fr",
+      "he",
+      "hi",
+      "it",
+      "ja",
+      "ko",
+      "ms",
+      "nl",
+      "no",
+      "pl",
+      "pt",
+      "ru",
+      "sv",
+      "sw",
+      "tr"
     ],
     "capabilities": [
       "tts",
@@ -485,8 +506,26 @@
     },
     "size": "~10 GB（安装峰值约 16 GB）",
     "languages": [
-      "zh", "en", "de", "es", "fr", "ja", "it", "he", "ko", "ru", "fa",
-      "ar", "pl", "pt", "cs", "da", "sv", "hu", "el", "tr"
+      "zh",
+      "en",
+      "de",
+      "es",
+      "fr",
+      "ja",
+      "it",
+      "he",
+      "ko",
+      "ru",
+      "fa",
+      "ar",
+      "pl",
+      "pt",
+      "cs",
+      "da",
+      "sv",
+      "hu",
+      "el",
+      "tr"
     ],
     "capabilities": [
       "tts",
@@ -500,5 +539,26 @@
       "zh": "运行时直接下载预编译版本，不需要 C++ 工具链；只有一次性转换分词器需要 Python 3。克隆参考音频可选。权重来自 ModelScope，无需登录 Hugging Face。Windows 上不提供安装：预编译的 Windows 运行时没有 GPU 后端，并会间歇性堆损坏崩溃（实测约每三次运行一次）；macOS 使用 Metal，Linux 使用 CPU。"
     },
     "unsupported_on": ["windows"]
+  },
+  {
+    "id": "enhance",
+    "dir": "enhance",
+    "name": "Voice cleanup",
+    "description": {
+      "en": "Removes room noise and background music from recordings before they become voice references: GTCRN denoising plus BS-RoFormer vocal isolation. Both run locally, and the original recording is kept so you can compare or switch back.",
+      "zh": "在录音成为声音参考之前去掉环境噪音和背景音乐：GTCRN 降噪 + BS-RoFormer 人声分离。全部本地运行，原始录音会保留，可随时对比或换回。"
+    },
+    "size": "~165 MB",
+    "languages": [],
+    "capabilities": [
+      "enhance"
+    ],
+    "script": "download-enhance.sh",
+    "env": {},
+    "marker": "bs-roformer.gguf",
+    "note": {
+      "en": "Vocal isolation also needs the audio.cpp runtime; the installer downloads it when no audio.cpp engine installed it yet.",
+      "zh": "人声分离还需要 audio.cpp 运行时；如果还没有安装过 audio.cpp 引擎，安装脚本会自动下载。"
+    }
   }
 ]

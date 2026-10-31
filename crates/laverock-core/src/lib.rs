@@ -7,6 +7,7 @@
 mod audio;
 mod audiocpp;
 mod chatterbox;
+mod enhance;
 pub mod i18n;
 mod kokoro;
 mod legacy_i18n;
@@ -24,6 +25,7 @@ pub use audio::{
     cap_silences, decode_wav, decode_wav_channels, encode_wav, resample_mono, silence_profile,
     trim_reference, trim_silence, SilenceProfile, VOXCPM2_MAX_REFERENCE_SECS,
 };
+pub use enhance::{EnhanceMode, Enhancer, DENOISE_MODELS, ENHANCE_DIR, SEPARATION_MODEL};
 pub use manager::{
     EngineInfo, EngineManager, ProgressEvent, ProgressSink, SpeechEngine, SynthRequest,
 };

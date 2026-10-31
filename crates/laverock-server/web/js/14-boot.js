@@ -13,7 +13,7 @@ function showPage(page) {
     clearInterval(modelsTimer);
     modelsTimer = null;
   }
-  if (page === 'captures') loadCaptures();
+  if (page === 'captures') { loadCaptures(); loadEnhanceStatus(); }
   if (page === 'voices') loadProfiles();
   if (page === 'history') loadHistory();
   if (page === 'models') loadModels();

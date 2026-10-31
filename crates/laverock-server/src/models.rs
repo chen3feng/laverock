@@ -48,6 +48,12 @@ struct CatalogEntry {
     /// hides the download and the API refuses to start it.
     #[serde(default)]
     unsupported_on: Vec<String>,
+    /// A file under `dir` whose presence means the download is complete.
+    /// Engine installs use `engine.json`; non-engine packs (such as the
+    /// voice-cleanup models) have no manifest and name one of their
+    /// weights instead.
+    #[serde(default)]
+    marker: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -166,7 +172,11 @@ impl ModelService {
         for entry in catalog() {
             let manifest = self.models_root.join(&entry.dir).join("engine.json");
             let engine_id = read_engine_id(&manifest);
-            let installed = manifest.is_file();
+            let installed = manifest.is_file()
+                || entry
+                    .marker
+                    .as_ref()
+                    .is_some_and(|name| self.models_root.join(&entry.dir).join(name).is_file());
             let problem = if installed {
                 manifest_problem(&manifest, lang)
             } else {
@@ -1097,6 +1107,7 @@ mod tests {
             env: BTreeMap::new(),
             note: None,
             unsupported_on: Vec::new(),
+            marker: None,
         };
         run_install(
             entry,
@@ -1203,6 +1214,7 @@ mod tests {
                 zh: Some("中文备注".into()),
             }),
             unsupported_on: Vec::new(),
+            marker: None,
         };
         assert_eq!(entry.description.for_lang("en"), "English");
         assert_eq!(entry.description.for_lang("zh"), "中文");
@@ -1297,6 +1309,7 @@ mod tests {
             env: BTreeMap::new(),
             note: None,
             unsupported_on: vec![std::env::consts::OS.to_string()],
+            marker: None,
         };
         let reason = unsupported_here(&entry, "en").expect("current OS is listed");
         assert!(reason.contains('M'), "message names the model: {reason}");
