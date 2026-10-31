@@ -89,6 +89,9 @@ messages! {
     TranscriptRequired = "transcript_required"
         { en: "{engine} needs the transcript of the reference clip.",
           zh: "{engine} 需要参考音频对应的文字。" },
+    TranscriptWithoutWords = "transcript_without_words"
+        { en: "{engine} needs a transcript with words in it; punctuation alone makes the model run away.",
+          zh: "{engine} 的参考文字里没有可朗读的内容；只有标点会让模型失控。" },
     ZeroShotTranscriptRequired = "zero_shot_transcript_required"
         { en: "Zero-shot cloning needs the reference transcript; switch to the cross-lingual template if unsure.",
           zh: "零样本克隆需要参考音频对应的文字；不确定时可改用「跨语种」模板。" },
