@@ -171,13 +171,16 @@ impl ModelService {
 
         for entry in catalog() {
             let manifest = self.models_root.join(&entry.dir).join("engine.json");
+            let has_manifest = manifest.is_file();
             let engine_id = read_engine_id(&manifest);
-            let installed = manifest.is_file()
+            let installed = has_manifest
                 || entry
                     .marker
                     .as_ref()
                     .is_some_and(|name| self.models_root.join(&entry.dir).join(name).is_file());
-            let problem = if installed {
+            // Marker packs (voice cleanup) have no manifest by design; only
+            // engine installs are checked for one.
+            let problem = if has_manifest {
                 manifest_problem(&manifest, lang)
             } else {
                 None
@@ -1292,6 +1295,44 @@ mod tests {
         } else {
             assert!(hidden.is_empty(), "nothing is excluded here: {hidden:?}");
         }
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn marker_packs_are_installed_without_a_manifest() {
+        // Voice cleanup ships model files and no engine.json; it must not be
+        // reported as a broken engine install.
+        let base = std::env::temp_dir().join(format!(
+            "laverock-marker-test-{}-{}",
+            std::process::id(),
+            now_secs()
+        ));
+        let models = base.join("models");
+        std::fs::create_dir_all(models.join("enhance")).unwrap();
+        std::fs::write(models.join("enhance/bs-roformer.gguf"), b"stub").unwrap();
+        let settings = Arc::new(SettingsStore::open(&base).unwrap());
+        let manager = Arc::new(EngineManager::open(&models).unwrap());
+        let service = ModelService::new(&models, None, None, settings, manager);
+
+        let entry = service
+            .list("zh")
+            .models
+            .into_iter()
+            .find(|m| m.id == "enhance")
+            .expect("the enhance pack is cataloged");
+        assert!(entry.installed);
+        assert_eq!(entry.problem, None);
+
+        // Removing the marker file returns it to "not installed" with no error.
+        std::fs::remove_file(models.join("enhance/bs-roformer.gguf")).unwrap();
+        let entry = service
+            .list("zh")
+            .models
+            .into_iter()
+            .find(|m| m.id == "enhance")
+            .unwrap();
+        assert!(!entry.installed);
+        assert_eq!(entry.problem, None);
         let _ = std::fs::remove_dir_all(&base);
     }
 
