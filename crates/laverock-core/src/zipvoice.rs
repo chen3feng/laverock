@@ -132,6 +132,17 @@ impl SpeechEngine for ZipVoiceEngine {
                 )
             })?;
 
+        // sherpa-onnx has no length guard: a transcript with no word tokens
+        // (punctuation only, or characters the lexicon cannot map) makes the
+        // duration predictor emit a huge frame count, and the decoder's
+        // attention then allocates O(T²) — tens of GB in practice. Refuse it
+        // with a clear error instead of aborting the whole process.
+        if !has_word_tokens(reference_text) {
+            return Err(CoreError::UserError(
+                i18n::Message::new(Key::TranscriptWithoutWords).arg("engine", &self.name),
+            ));
+        }
+
         let gen_config = GenerationConfig {
             speed: req.speed,
             reference_audio: Some(req.prompt_samples.clone()),
@@ -150,5 +161,26 @@ impl SpeechEngine for ZipVoiceEngine {
             samples: audio.samples().to_vec(),
             sample_rate: audio.sample_rate(),
         })
+    }
+}
+
+/// Whether a transcript contains anything the lexicon can turn into speech.
+/// Digits and Latin letters count: the frontend phonemizes them with espeak.
+fn has_word_tokens(text: &str) -> bool {
+    text.chars().any(char::is_alphanumeric)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::has_word_tokens;
+
+    #[test]
+    fn transcripts_need_at_least_one_letter_or_digit() {
+        assert!(has_word_tokens("你好"));
+        assert!(has_word_tokens("1987年"));
+        assert!(has_word_tokens("Hello"));
+        assert!(!has_word_tokens("???"));
+        assert!(!has_word_tokens("，。！？ "));
+        assert!(!has_word_tokens(""));
     }
 }

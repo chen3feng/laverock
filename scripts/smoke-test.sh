@@ -15,6 +15,17 @@ fail=0
 ok()   { echo "  ok   $1"; pass=$((pass + 1)); }
 bad()  { echo "  FAIL $1"; fail=$((fail + 1)); }
 
+# Windows shells cannot carry non-ASCII through a command line: Git Bash
+# replaces every CJK character with '?' before curl sees it, which turns a
+# Chinese transcript into punctuation and makes ZipVoice's duration predictor
+# run away. Hand those values over in a file and let curl read the bytes.
+field() { # field <name> <value> -> one -F argument
+  local f
+  f="$(mktemp "$OUT/field.XXXXXX")"
+  printf '%s' "$2" >"$f"
+  printf '%s=<%s' "$1" "$f"
+}
+
 # An MP3 starts with an ID3v2 tag ("ID3") or an MPEG frame sync (0xFFE).
 # The built-in encoder writes a LAME-style Info tag frame, so there is no
 # ID3v2 header: accept either shape.
@@ -87,7 +98,8 @@ synth() { # name text wav prompt_text [extra...]
   local code
   code=$(curl -s -o "$OUT/$name.wav" -w '%{http_code}' -X POST \
     "$BASE/api/engines/$MODEL/synthesize" \
-    -F "text=$text" -F "prompt=@$DIR/test_wavs/$wav" -F "prompt_text=$ptext" "$@")
+    -F "$(field text "$text")" -F "prompt=@$DIR/test_wavs/$wav" \
+    -F "$(field prompt_text "$ptext")" "$@")
   if [ "$code" = "200" ] && head -c 4 "$OUT/$name.wav" | grep -q RIFF; then
     ok "$name ($(wc -c <"$OUT/$name.wav" | tr -d ' ') bytes)"
   else
@@ -129,7 +141,7 @@ code=$(curl -s -o /dev/null -w '%{http_code}' -X POST \
 echo "profiles"
 pid=$(curl -s -X POST "$BASE/api/profiles" \
   -F 'name=smoke-test-voice' \
-  -F 'prompt_text=那还是36年前, 1987年. 我呢考上了武汉大学的计算机系.' \
+  -F "$(field prompt_text '那还是36年前, 1987年. 我呢考上了武汉大学的计算机系.')" \
   -F "prompt=@$DIR/test_wavs/leijun-1.wav" \
   | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')
 [ -n "$pid" ] && ok "create profile ($pid)" || bad "create profile"
@@ -144,7 +156,7 @@ curl -sf "$BASE/api/profiles/$pid/audio" -o "$OUT/ref.wav" \
 
 code=$(curl -s -o "$OUT/from-profile.wav" -w '%{http_code}' -X POST \
   "$BASE/api/engines/$MODEL/synthesize" \
-  -F 'text=你好，我是 Laverock。' -F "profile_id=$pid")
+  -F "$(field text '你好，我是 Laverock。')" -F "profile_id=$pid")
 [ "$code" = "200" ] && head -c 4 "$OUT/from-profile.wav" | grep -q RIFF \
   && ok "synthesize from profile" || bad "synthesize from profile (HTTP $code)"
 
@@ -213,15 +225,17 @@ if [ -n "$duo" ]; then
     || bad "joined reference too short ($d <= $a)"
   code=$(curl -s -o "$OUT/duo-synth.wav" -w '%{http_code}' -X POST \
     "$BASE/api/engines/$MODEL/synthesize" \
-    -F 'text=这是用两段素材拼成的声音。' -F "profile_id=$duo")
+    -F "$(field text '这是用两段素材拼成的声音。')" -F "profile_id=$duo")
   [ "$code" = "200" ] && head -c 4 "$OUT/duo-synth.wav" | grep -q RIFF \
     && ok "synthesize from a two-take voice" \
     || bad "synthesize from a two-take voice (HTTP $code)"
   # The OpenAI-compatible endpoint resolves the same voice by name, so it
   # must join the takes too (not just hand over the single fallback clip).
+  printf '{"model":"%s","voice":"smoke-test-duo","input":"通过 OpenAI 接口合成。"}' \
+    "$MODEL" >"$OUT/oai.json"
   code=$(curl -s -o "$OUT/duo-oai.wav" -w '%{http_code}' -X POST \
     "$BASE/v1/audio/speech" -H 'Content-Type: application/json' \
-    -d "{\"model\":\"$MODEL\",\"voice\":\"smoke-test-duo\",\"input\":\"通过 OpenAI 接口合成。\"}")
+    --data-binary @"$OUT/oai.json")
   [ "$code" = "200" ] && head -c 4 "$OUT/duo-oai.wav" | grep -q RIFF \
     && ok "openai speech from a two-take voice" \
     || bad "openai speech from a two-take voice (HTTP $code)"
@@ -251,7 +265,7 @@ if case "$engines_json" in *'"id":"voxcpm2"'*) true ;; *) false ;; esac; then
   echo "voxcpm2"
   code=$(curl -s -o "$OUT/vox-zh.wav" -w '%{http_code}' -X POST \
     "$BASE/api/engines/voxcpm2/synthesize" \
-    -F 'text=你好，我是 VoxCPM2，这里不需要参考文本。' \
+    -F "$(field text '你好，我是 VoxCPM2，这里不需要参考文本。')" \
     -F "prompt=@$DIR/test_wavs/leijun-1.wav")
   [ "$code" = "200" ] && head -c 4 "$OUT/vox-zh.wav" | grep -q RIFF \
     && ok "voxcpm2 clone without transcript" || bad "voxcpm2 (HTTP $code)"
@@ -263,7 +277,7 @@ if case "$engines_json" in *'"id":"qwen3tts"'*) true ;; *) false ;; esac; then
   echo "qwen3tts"
   code=$(curl -s -o "$OUT/qwen.wav" -w '%{http_code}' -X POST \
     "$BASE/api/engines/qwen3tts/synthesize" \
-    -F 'text=你好，我是 Qwen3-TTS，通过 laverock 调用。' \
+    -F "$(field text '你好，我是 Qwen3-TTS，通过 laverock 调用。')" \
     -F "prompt=@$DIR/test_wavs/leijun-1.wav")
   [ "$code" = "200" ] && head -c 4 "$OUT/qwen.wav" | grep -q RIFF \
     && ok "qwen3tts clone" || bad "qwen3tts (HTTP $code)"
@@ -275,9 +289,9 @@ if case "$engines_json" in *'"id":"cosyvoice"'*) true ;; *) false ;; esac; then
   echo "cosyvoice"
   code=$(curl -s -o "$OUT/cosy.wav" -w '%{http_code}' --max-time 600 -X POST \
     "$BASE/api/engines/cosyvoice/synthesize" \
-    -F 'text=你好，我是 CosyVoice3，通过 laverock 调用。' \
+    -F "$(field text '你好，我是 CosyVoice3，通过 laverock 调用。')" \
     -F "prompt=@$DIR/test_wavs/leijun-1.wav" \
-    -F 'prompt_text=那还是36年前, 1987年. 我呢考上了武汉大学的计算机系.')
+    -F "$(field prompt_text '那还是36年前, 1987年. 我呢考上了武汉大学的计算机系.')")
   [ "$code" = "200" ] && head -c 4 "$OUT/cosy.wav" | grep -q RIFF \
     && ok "cosyvoice clone" || bad "cosyvoice (HTTP $code)"
 else
@@ -288,7 +302,7 @@ if case "$engines_json" in *'"id":"dots"'*) true ;; *) false ;; esac; then
   echo "dots"
   code=$(curl -s -o "$OUT/dots.wav" -w '%{http_code}' --max-time 600 -X POST \
     "$BASE/api/engines/dots/synthesize" \
-    -F 'text=你好，我是 dots.tts，通过 laverock 调用。' \
+    -F "$(field text '你好，我是 dots.tts，通过 laverock 调用。')" \
     -F "prompt=@$DIR/test_wavs/leijun-1.wav")
   [ "$code" = "200" ] && head -c 4 "$OUT/dots.wav" | grep -q RIFF \
     && ok "dots clone" || bad "dots (HTTP $code)"
@@ -300,9 +314,9 @@ if case "$engines_json" in *'"id":"longcat"'*) true ;; *) false ;; esac; then
   echo "longcat"
   code=$(curl -s -o "$OUT/longcat.wav" -w '%{http_code}' --max-time 600 -X POST \
     "$BASE/api/engines/longcat/synthesize" \
-    -F 'text=你好，我是 LongCat AudioDiT，通过 laverock 调用。' \
+    -F "$(field text '你好，我是 LongCat AudioDiT，通过 laverock 调用。')" \
     -F "prompt=@$DIR/test_wavs/leijun-1.wav" \
-    -F 'prompt_text=那还是36年前, 1987年. 我呢考上了武汉大学的计算机系.')
+    -F "$(field prompt_text '那还是36年前, 1987年. 我呢考上了武汉大学的计算机系.')")
   [ "$code" = "200" ] && head -c 4 "$OUT/longcat.wav" | grep -q RIFF \
     && ok "longcat clone" || bad "longcat (HTTP $code)"
 else
@@ -313,7 +327,7 @@ if case "$engines_json" in *'"kind":"kokoro"'*) true ;; *) false ;; esac; then
   echo "kokoro"
   code=$(curl -s -o "$OUT/kokoro.wav" -w '%{http_code}' --max-time 120 -X POST \
     "$BASE/api/engines/kokoro-int8-multi-lang-v1_0/synthesize" \
-    -F 'text=你好，我是 Kokoro，通过 laverock 调用。' \
+    -F "$(field text '你好，我是 Kokoro，通过 laverock 调用。')" \
     -F 'voice=47')
   [ "$code" = "200" ] && head -c 4 "$OUT/kokoro.wav" | grep -q RIFF \
     && ok "kokoro preset voice (no reference audio)" || bad "kokoro (HTTP $code)"

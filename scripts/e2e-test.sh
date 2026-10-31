@@ -28,6 +28,17 @@ fail=0
 ok()  { echo "  ok   $1"; pass=$((pass + 1)); }
 bad() { echo "  FAIL $1"; fail=$((fail + 1)); }
 say() { echo "$1"; }
+
+# Windows shells cannot carry non-ASCII through a command line: Git Bash
+# replaces every CJK character with '?' before curl sees it, which turns a
+# Chinese transcript into punctuation and makes ZipVoice's duration predictor
+# run away. Hand those values over in a file and let curl read the bytes.
+field() { # field <name> <value> -> one -F argument
+  local f
+  f="$(mktemp "$OUT/field.XXXXXX")"
+  printf '%s' "$2" >"$f"
+  printf '%s=<%s' "$1" "$f"
+}
 # Ids currently in history; a failed grep must not abort the script.
 ids() {
   curl -s "$BASE/api/history" | grep -o '"id":"[^"]*"' | cut -d'"' -f4 | sort || true
@@ -84,8 +95,8 @@ say "transcribe -> synthesize"
 before=$(ids)
 code=$(curl -s -o "$OUT/chain.wav" -w '%{http_code}' -X POST \
   "$BASE/api/engines/$MODEL/synthesize" \
-  -F 'text=这是一次端到端测试：录音、转写、合成、导出。' \
-  -F "prompt=@$REF" -F "prompt_text=$text")
+  -F "$(field text '这是一次端到端测试：录音、转写、合成、导出。')" \
+  -F "prompt=@$REF" -F "$(field prompt_text "$text")")
 if [ "$code" = "200" ] && head -c 4 "$OUT/chain.wav" | grep -q RIFF; then
   ok "clone synthesized from the ASR transcript ($(wc -c <"$OUT/chain.wav" | tr -d ' ') bytes)"
 else
@@ -118,7 +129,7 @@ if [ -n "$hid" ]; then
 
   say "export -> import"
   pid=$(curl -s -X POST "$BASE/api/profiles" \
-    -F "name=$NAME" -F "prompt_text=$text" -F "prompt=@$REF" \
+    -F "name=$NAME" -F "$(field prompt_text "$text")" -F "prompt=@$REF" \
     | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')
   [ -n "$pid" ] && ok "voice saved ($pid)" || bad "voice save"
 
