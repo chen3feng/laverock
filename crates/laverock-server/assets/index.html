@@ -842,7 +842,7 @@ const I18N = {
     "ui.install_failed_see_the_log": "安装失败，请查看卡片中的日志",
     "ui.install_finished": "安装流程结束",
     "ui.delete_model": "删除模型",
-    "ui.confirm_delete_model": "确认删除？",
+    "ui.confirm_delete_message": "删除 {model}？模型文件会从磁盘移除，此操作不可撤销。",
     "ui.model_deleted": "已删除 {model}",
     "ui.could_not_delete_model": "删除失败：",
     "ui.failed_to_load_history": "读取历史失败：",
@@ -1107,7 +1107,7 @@ const I18N = {
     "ui.install_failed_see_the_log": "Install failed; see the log on the card",
     "ui.install_finished": "Install finished",
     "ui.delete_model": "Delete model",
-    "ui.confirm_delete_model": "Delete?",
+    "ui.confirm_delete_message": "Delete {model}? Its files are removed from disk; this cannot be undone.",
     "ui.model_deleted": "Deleted {model}",
     "ui.could_not_delete_model": "Could not delete: ",
     "ui.failed_to_load_history": "Failed to load history: ",
@@ -3001,28 +3001,19 @@ function modelCard(model, installed) {
   return el;
 }
 
-// Deleting is irreversible, so the first click only arms the button; the
-// second one within a few seconds actually removes the model directory.
+// Deleting removes files from disk, so it goes through the same
+// confirmation dialog as the other destructive actions.
 function deleteButton(model) {
   const btn = document.createElement('button');
   btn.type = 'button';
   btn.className = 'ghost danger';
   btn.textContent = t('ui.delete_model');
-  let armed = false;
-  let timer = null;
-  const disarm = () => {
-    armed = false;
-    clearTimeout(timer);
-    btn.textContent = t('ui.delete_model');
-  };
   btn.onclick = async () => {
-    if (!armed) {
-      armed = true;
-      btn.textContent = t('ui.confirm_delete_model');
-      timer = setTimeout(disarm, 4000);
-      return;
-    }
-    disarm();
+    const ok = await confirmAction(
+      t('ui.confirm_delete_message', { model: model.name }),
+      { title: t('ui.delete_model'), okText: t('ui.delete_model') },
+    );
+    if (!ok) return;
     btn.disabled = true;
     try {
       await api(`/api/models/${encodeURIComponent(model.id)}`, { method: 'DELETE' });

@@ -152,28 +152,19 @@ function modelCard(model, installed) {
   return el;
 }
 
-// Deleting is irreversible, so the first click only arms the button; the
-// second one within a few seconds actually removes the model directory.
+// Deleting removes files from disk, so it goes through the same
+// confirmation dialog as the other destructive actions.
 function deleteButton(model) {
   const btn = document.createElement('button');
   btn.type = 'button';
   btn.className = 'ghost danger';
   btn.textContent = t('ui.delete_model');
-  let armed = false;
-  let timer = null;
-  const disarm = () => {
-    armed = false;
-    clearTimeout(timer);
-    btn.textContent = t('ui.delete_model');
-  };
   btn.onclick = async () => {
-    if (!armed) {
-      armed = true;
-      btn.textContent = t('ui.confirm_delete_model');
-      timer = setTimeout(disarm, 4000);
-      return;
-    }
-    disarm();
+    const ok = await confirmAction(
+      t('ui.confirm_delete_message', { model: model.name }),
+      { title: t('ui.delete_model'), okText: t('ui.delete_model') },
+    );
+    if (!ok) return;
     btn.disabled = true;
     try {
       await api(`/api/models/${encodeURIComponent(model.id)}`, { method: 'DELETE' });
