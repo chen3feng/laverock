@@ -117,6 +117,17 @@ impl MossTtsEngine {
         let audio_encoder = require("audio encoder", &c.audio_encoder)?;
         let audio_decoder = require("audio decoder", &c.audio_decoder)?;
 
+        // The prebuilt Windows runtime has no GPU backend and corrupts its
+        // host heap every few runs; the retry loop absorbs some of that,
+        // but a user who kept an install from before the catalog stopped
+        // offering it should know why requests fail.
+        #[cfg(windows)]
+        tracing::warn!(
+            engine = %manifest.id,
+            "the Windows MOSS runtime is CPU-only and crashes intermittently; \
+             requests may fail and are retried"
+        );
+
         Ok(Self {
             id: manifest.id.clone(),
             name: manifest.name.clone(),

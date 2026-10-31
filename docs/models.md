@@ -28,7 +28,7 @@ installs and CI use them directly:
 ./scripts/download-ming3tts.sh     # Ming-3.0-tts 0.5B, venv + ~3 GB weights
 ./scripts/download-chatterbox.sh   # Chatterbox multilingual, venv + ~5 GB
 ./scripts/download-indextts2.sh    # IndexTTS-2, 3.6 GB Q8_0 GGUF (shares the runtime)
-./scripts/download-mosstts.sh      # MOSS-TTS-Delay, prebuilt llama.cpp runtime + ~10 GB weights
+./scripts/download-mosstts.sh      # MOSS-TTS-Delay, macOS/Linux only, ~10 GB weights
 
 # Variants
 QWEN3TTS_VARIANT=custom ./scripts/download-qwen3tts.sh    # 9 preset speakers
@@ -177,13 +177,19 @@ RTF 1.47 with about 4.1 GB of memory once loaded (see **Speed**).
 
 **MOSS-TTS-Delay** — a multilingual zero-shot TTS/clone model driven by a
 native llama.cpp binary, with no Python at inference time. The installer
-downloads that runtime prebuilt (one build per platform is published for
-macOS arm64/x64, Linux x64 and Windows x64) and converts the audio tokenizer
-to GGUF once; it falls back to compiling the runtime locally only on other
+downloads that runtime prebuilt and converts the audio tokenizer to GGUF
+once; it falls back to compiling the runtime locally only on other
 platforms, or with `MOSS_RUNTIME_BUILD=1`. Weights come from ModelScope, so
 no Hugging Face login is needed. Cloning is optional. The engine synthesizes
 long text in sentence-sized pieces, because the decoder degrades on very long
 inputs.
+
+The model is offered on macOS (Metal) and Linux (CPU) only. The prebuilt
+Windows runtime has no GPU backend and corrupts its host heap every few
+runs, so the catalog no longer offers it on Windows. The runtime's `-ngl`
+option can offload layers to a CUDA build, but at the pinned revision every
+run that touched the GPU crashed (see **Speed**), so there is no GPU escape
+hatch either.
 
 **SenseVoice** — optional on-device speech recognition covering zh/en/ja/
 ko/yue. Once installed, a recorded or uploaded reference clip is transcribed
@@ -288,6 +294,12 @@ fit meaningless. The engine now retries a crashed process up to three times;
 before, the retry never ran on Windows because the crash arrives as an exit
 code rather than a signal.
 
+A CUDA build of the same runtime (CUDA 13.3, arch 86) does use the GPU —
+layers and KV cache land on `CUDA0` — but every run that touched it crashed:
+5 of 5 with `-ngl -1`, 3 of 3 with CUDA graphs disabled, 3 of 3 with a
+partial `-ngl 20`, while `-ngl 0` succeeded in two of three runs. The catalog
+therefore no longer offers MOSS-TTS on Windows.
+
 The ONNX engines ran on the CPU even in a CUDA build: the shipped models are
 INT8 exports and ONNX Runtime's CUDA provider has no kernels for their
 quantized operators, so INT8 Kokoro took 6.3 s either way and GPU memory
@@ -320,7 +332,7 @@ with a negative slope.
 | ONNX engines (ZipVoice, Kokoro, SenseVoice) | none beyond the app |
 | audio.cpp engines (dots, CosyVoice, VoxCPM2, IndexTTS-2) | prebuilt CLI and resident server are downloaded |
 | Python engines (Qwen3-TTS, LongCat, Ming, Chatterbox) | Python 3.10–3.12; the scripts create an isolated venv |
-| MOSS-TTS | prebuilt runtime is downloaded; Python 3 for the one-time tokenizer conversion |
+| MOSS-TTS | macOS/Linux only (not offered on Windows); prebuilt runtime is downloaded; Python 3 for the one-time tokenizer conversion |
 | In-app installs on Windows | `bash` from Git for Windows |
 
 Engines that need Python run in their own venv and never load code into the

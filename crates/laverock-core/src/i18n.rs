@@ -178,6 +178,9 @@ messages! {
     ScriptsDirMissing = "scripts_dir_missing"
         { en: "Download scripts directory not found. Set LAVEROCK_SCRIPTS_DIR to the repository's scripts/ directory.",
           zh: "找不到下载脚本目录。请设置 LAVEROCK_SCRIPTS_DIR 指向仓库的 scripts/ 目录。" },
+    UnsupportedPlatform = "unsupported_platform"
+        { en: "{model} is not supported on this platform; see the model notes for details.",
+          zh: "当前平台不支持 {model}，原因见该模型的说明。" },
     ScriptMissing = "script_missing"
         { en: "Download script missing: {path}", zh: "缺少下载脚本：{path}" },
     ManifestReadFailed = "manifest_read_failed"

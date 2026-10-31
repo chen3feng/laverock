@@ -43,6 +43,11 @@ struct CatalogEntry {
     env: BTreeMap<String, String>,
     #[serde(default)]
     note: Option<Localized>,
+    /// Operating systems where this model cannot be used, spelled as
+    /// `std::env::consts::OS` (`windows`, `macos`, `linux`). The UI then
+    /// hides the download and the API refuses to start it.
+    #[serde(default)]
+    unsupported_on: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -99,6 +104,9 @@ pub struct ModelView {
     pub languages: Vec<String>,
     pub capabilities: Vec<String>,
     pub note: Option<String>,
+    /// Set when the catalog excludes this model on the current OS; the
+    /// UI shows it and disables the download.
+    pub unsupported: Option<String>,
     pub installed: bool,
     /// Set when the installed directory exists but cannot be used (old
     /// runner layout, unparsable manifest): the UI offers a reinstall.
@@ -182,6 +190,7 @@ impl ModelService {
                     .as_ref()
                     .map(|n| n.for_lang(lang).to_string())
                     .filter(|n| !n.is_empty()),
+                unsupported: unsupported_here(entry, lang),
                 installed,
                 problem,
                 engine_id,
@@ -213,6 +222,7 @@ impl ModelService {
                 languages: engine.languages,
                 capabilities: engine.capabilities,
                 note: None,
+                unsupported: None,
                 installed: true,
                 problem: None,
                 engine_id: Some(engine.id.clone()),
@@ -237,6 +247,19 @@ impl ModelService {
             .ok_or_else(|| {
                 CoreError::UserError(i18n::Message::new(Key::UnknownModel).arg("model", id))
             })?;
+
+        // Some runtimes do not work on every OS; the catalog lists those
+        // platforms so the UI can explain the refusal instead of letting
+        // the user download a model that will crash.
+        if entry
+            .unsupported_on
+            .iter()
+            .any(|os| os == std::env::consts::OS)
+        {
+            return Err(CoreError::UserError(
+                i18n::Message::new(Key::UnsupportedPlatform).arg("model", &entry.name),
+            ));
+        }
 
         // A healthy install is left alone; a broken/outdated one (e.g. the
         // VoxCPM2 layout from the retired llama.cpp runner) may be
@@ -643,6 +666,22 @@ fn read_engine_id(manifest: &Path) -> Option<String> {
         .map(std::string::ToString::to_string)
 }
 
+/// Why the catalog excludes this model on the current OS, if it does.
+fn unsupported_here(entry: &CatalogEntry, lang: &str) -> Option<String> {
+    if !entry
+        .unsupported_on
+        .iter()
+        .any(|os| os == std::env::consts::OS)
+    {
+        return None;
+    }
+    Some(
+        i18n::Message::new(Key::UnsupportedPlatform)
+            .arg("model", &entry.name)
+            .render(laverock_core::i18n::Lang::parse(lang)),
+    )
+}
+
 /// Why an installed directory is unusable, if it is. An unparsable
 /// manifest counts: the engine never registers in that case, so the
 /// model page must offer a reinstall rather than claiming it is fine.
@@ -949,6 +988,7 @@ mod tests {
             script: "fake.sh".to_string(),
             env: BTreeMap::new(),
             note: None,
+            unsupported_on: Vec::new(),
         };
         run_install(
             entry,
@@ -1054,6 +1094,7 @@ mod tests {
                 en: Some("English note".into()),
                 zh: Some("中文备注".into()),
             }),
+            unsupported_on: Vec::new(),
         };
         assert_eq!(entry.description.for_lang("en"), "English");
         assert_eq!(entry.description.for_lang("zh"), "中文");
@@ -1063,5 +1104,30 @@ mod tests {
         // Plain strings (third-party manifests) pass through unchanged.
         let plain = Localized::Text("raw".into());
         assert_eq!(plain.for_lang("zh"), "raw");
+    }
+
+    #[test]
+    fn unsupported_models_are_flagged_only_on_the_listed_os() {
+        let mut entry = CatalogEntry {
+            id: "m".into(),
+            dir: "m".into(),
+            name: "M".into(),
+            description: Localized::Text(String::new()),
+            size: String::new(),
+            languages: Vec::new(),
+            capabilities: Vec::new(),
+            script: "m.sh".into(),
+            env: BTreeMap::new(),
+            note: None,
+            unsupported_on: vec![std::env::consts::OS.to_string()],
+        };
+        let reason = unsupported_here(&entry, "en").expect("current OS is listed");
+        assert!(reason.contains('M'), "message names the model: {reason}");
+        assert!(unsupported_here(&entry, "zh").is_some());
+
+        entry.unsupported_on = vec!["plan9".into()];
+        assert_eq!(unsupported_here(&entry, "en"), None);
+        entry.unsupported_on.clear();
+        assert_eq!(unsupported_here(&entry, "en"), None);
     }
 }
