@@ -108,6 +108,7 @@ function modelCard(model, installed) {
     <div class="model-desc">${esc(model.description)}</div>
     <div class="chips">${(model.languages || []).map((l) => `<span class="chip">${esc(l)}</span>`).join('')}</div>
     ${model.note ? `<div class="hint">${esc(model.note)}</div>` : ''}
+    ${model.unsupported ? `<div class="hint err">${esc(model.unsupported)}</div>` : ''}
     ${stale ? `<div class="hint err">${esc(model.problem)}</div>` : ''}
     ${installed && !stale && engine ? `<div class="hint">${esc(engine.kind)} · ${engine.loaded
       ? (t("ui.loaded_in_memory"))
@@ -131,7 +132,7 @@ function modelCard(model, installed) {
       : failed
         ? (t("ui.retry_install"))
         : (t("ui.download_install"));
-  btn.disabled = running || !modelsData.scripts_dir;
+  btn.disabled = running || !modelsData.scripts_dir || !!model.unsupported;
   btn.onclick = () => installModel(model.id);
   actions.appendChild(btn);
   if (installed) {

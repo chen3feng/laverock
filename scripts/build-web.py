@@ -31,13 +31,13 @@ OUT = ROOT / "crates/laverock-server/assets/index.html"
 
 
 def build() -> str:
-    shell = (WEB / "index.html").read_text()
-    styles = (WEB / "styles.css").read_text().strip("\n")
-    body = (WEB / "body.html").read_text()
+    shell = (WEB / "index.html").read_text(encoding="utf-8")
+    styles = (WEB / "styles.css").read_text(encoding="utf-8").strip("\n")
+    body = (WEB / "body.html").read_text(encoding="utf-8")
     scripts = sorted((WEB / "js").glob("*.js"))
     if not scripts:
         raise SystemExit(f"no JavaScript sources under {WEB / 'js'}")
-    js = "\n\n".join(p.read_text().rstrip("\n") for p in scripts)
+    js = "\n\n".join(p.read_text(encoding="utf-8").rstrip("\n") for p in scripts)
 
     for token in ("{{styles.css}}", "{{body.html}}", "{{js}}"):
         if token not in shell:
@@ -57,7 +57,7 @@ def main() -> int:
     args = parser.parse_args()
 
     generated = build()
-    current = OUT.read_text() if OUT.exists() else ""
+    current = OUT.read_text(encoding="utf-8") if OUT.exists() else ""
     if args.check:
         if generated == current:
             return 0
@@ -70,7 +70,7 @@ def main() -> int:
         sys.stderr.write("\n".join(list(diff)[:60]) + "\n")
         return 1
 
-    OUT.write_text(generated)
+    OUT.write_text(generated, encoding="utf-8", newline="\n")
     print(f"wrote {OUT.relative_to(ROOT)} ({len(generated.splitlines())} lines)")
     return 0
 
