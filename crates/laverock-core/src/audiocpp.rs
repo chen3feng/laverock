@@ -311,27 +311,30 @@ impl SpeechEngine for AudioCppEngine {
         let seed = self.param_i64(req, "seed", self.seed);
 
         // The resident server keeps the weights loaded between requests,
-        // which saves the model load on every call. Any failure falls back
-        // to the one-shot CLI below, so a missing or broken server binary
-        // only costs speed.
+        // which saves the model load on every call. A failed request never
+        // falls back to the one-shot CLI: that would load the model a second
+        // time and, on a card that holds one model, is exactly the memory
+        // pressure the resident server exists to avoid. Instead the server is
+        // stopped and started again for the next attempt, which is also how a
+        // switch to another engine's model works.
         if self.server_bin.is_some() {
-            match self.synthesize_resident(req, ref_wav.as_deref(), seed) {
-                Ok(audio) => {
-                    let _ = std::fs::remove_dir_all(&tmp);
-                    return Ok(audio);
-                }
-                // Bad input (a missing transcript, an empty instruction)
-                // would fail the same way on the CLI; report it as-is.
-                Err(e @ CoreError::UserError(_)) => return Err(e),
-                Err(e) => {
+            let audio = match self.synthesize_resident(req, ref_wav.as_deref(), seed) {
+                Ok(audio) => audio,
+                Err(failure) if !failure.retryable => return Err(failure.error),
+                Err(failure) => {
                     tracing::warn!(
                         target: "audiocpp",
                         family = self.family.cli_name(),
-                        "resident server failed, falling back to audiocpp_cli: {e}"
+                        "resident server failed, restarting it: {}",
+                        failure.error
                     );
                     self.stop_resident();
+                    self.synthesize_resident(req, ref_wav.as_deref(), seed)
+                        .map_err(|failure| failure.error)?
                 }
-            }
+            };
+            let _ = std::fs::remove_dir_all(&tmp);
+            return Ok(audio);
         }
 
         let mut cmd = Command::new(&self.binary);
@@ -635,7 +638,14 @@ impl AudioCppEngine {
     /// `max_loaded_models` at 1 bounds memory when a family alternates
     /// between tasks: the other session is evicted and reloaded.
     fn server_config(&self, port: u16) -> Value {
-        let model = self.model.to_string_lossy().to_string();
+        // The server resolves a relative path against its own working
+        // directory, not ours, so a relative LAVEROCK_MODELS_DIR made it fail
+        // to find the weights. Resolve here, where the path is known to be
+        // right.
+        let model = std::path::absolute(&self.model)
+            .unwrap_or_else(|_| self.model.clone())
+            .to_string_lossy()
+            .to_string();
         let models: Vec<Value> = self
             .server_tasks()
             .iter()
@@ -873,15 +883,25 @@ impl AudioCppEngine {
         req: &SynthRequest,
         ref_wav: Option<&Path>,
         seed: i64,
-    ) -> Result<Audio> {
-        let port = self.ensure_server()?;
+    ) -> std::result::Result<Audio, ResidentFailure> {
+        let retry = |error: CoreError| ResidentFailure {
+            error,
+            retryable: true,
+        };
+        let port = self.ensure_server().map_err(retry)?;
         if let Some(cb) = &req.progress {
             cb(ProgressEvent::Stage(format!(
                 "正在合成（{} 常驻运行时）",
                 self.family.label()
             )));
         }
-        let body = self.resident_body(req, ref_wav, seed)?;
+        // A malformed request fails the same way on a fresh server.
+        let body = self
+            .resident_body(req, ref_wav, seed)
+            .map_err(|error| ResidentFailure {
+                error,
+                retryable: false,
+            })?;
         let agent = ureq::AgentBuilder::new()
             .timeout_connect(Duration::from_secs(3))
             .timeout_read(RESIDENT_READ_TIMEOUT)
@@ -894,30 +914,44 @@ impl AudioCppEngine {
         let mut bytes = Vec::new();
         match response {
             Ok(resp) => {
-                resp.into_reader()
-                    .read_to_end(&mut bytes)
-                    .map_err(|e| CoreError::Synth(format!("cannot read the server audio: {e}")))?;
+                resp.into_reader().read_to_end(&mut bytes).map_err(|e| {
+                    retry(CoreError::Synth(format!(
+                        "cannot read the server audio: {e}"
+                    )))
+                })?;
             }
             Err(ureq::Error::Status(code, resp)) => {
                 let mut text = String::new();
                 let _ = resp.into_reader().read_to_string(&mut text);
-                return Err(CoreError::Synth(format!(
-                    "audiocpp_server HTTP {code}: {}",
-                    text.trim()
-                )));
+                // 4xx means this request is wrong, not that the server is
+                // unhealthy: restarting it would only repeat the failure.
+                return Err(ResidentFailure {
+                    error: CoreError::Synth(format!(
+                        "audiocpp_server HTTP {code}: {}",
+                        text.trim()
+                    )),
+                    retryable: code >= 500,
+                });
             }
             Err(e) => {
-                return Err(CoreError::Synth(format!(
+                return Err(retry(CoreError::Synth(format!(
                     "audiocpp_server request failed: {e}"
-                )))
+                ))))
             }
         }
-        let (samples, sample_rate) = decode_wav(&bytes)?;
+        let (samples, sample_rate) = decode_wav(&bytes).map_err(retry)?;
         Ok(Audio {
             samples,
             sample_rate,
         })
     }
+}
+
+/// A failed resident request. `retryable` separates a broken server (process
+/// gone, port taken, 5xx) from a request the server correctly rejected.
+struct ResidentFailure {
+    error: CoreError,
+    retryable: bool,
 }
 
 /// Join relative paths onto the model directory; absolute paths pass through.
