@@ -271,9 +271,14 @@ only sees the per-request cost, a fresh Python process loading the weights
 each time. Generation itself is much faster than real time on the 3060 Ti,
 but the duration term falls below the noise of that load.
 
-MOSS-TTS could not be timed here: the prebuilt Windows runtime has no CUDA
-backend (every layer is assigned to the CPU) and generation aborts inside the
-binary with exit code 0xC0000374, a heap-corruption crash.
+MOSS-TTS could not be benchmarked here: the prebuilt Windows runtime has no
+CUDA backend (every layer is assigned to the CPU) and it dies inside the
+binary every few runs with 0xC0000374 (heap corruption) or 0xC0000409. It
+does sometimes complete — one request through the engine returned 0.64 s of
+audio after 171.8 s, model load included — but the crash rate makes a timed
+fit meaningless. The engine now retries a crashed process up to three times;
+before, the retry never ran on Windows because the crash arrives as an exit
+code rather than a signal.
 
 The ONNX engines ran on the CPU even in a CUDA build: the shipped models are
 INT8 exports and ONNX Runtime's CUDA provider has no kernels for their
@@ -285,13 +290,14 @@ that runtime is in [Development](development.md#onnx-on-the-gpu).
 
 The 8 GB of VRAM held one audio.cpp model at a time. Leaving dots, VoxCPM2
 and CosyVoice3 resident together (about 6.2 + 6.5 + 3.3 GB) crashed the
-CosyVoice3 server on its second request, and the engine fell back to the
-one-shot CLI, so every row above was measured against a freshly started
-server. The app now stops the previously used engine's resident server as
+CosyVoice3 server on its second request, so every row above was measured
+against a freshly started server. The app now stops the previously used engine's resident server as
 soon as another engine synthesizes (about 800 MB of VRAM came back switching
 from dots to VoxCPM2), so only one model is ever resident; the measurements
 still used one engine per server process so every engine paid the same
-start-up cost. Method otherwise as above, except that LongCat got three text
+start-up cost. The audio.cpp rows are therefore warm numbers: switching back
+to an engine pays its model load again — dots took 44.5 s from a cold start
+against 11.1 s with its server already up. Method otherwise as above, except that LongCat got three text
 lengths (5, 12.5 and 17.6 s of speech) after the two-length fit came out
 with a negative slope.
 
