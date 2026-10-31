@@ -1381,6 +1381,14 @@ function pauseOtherAudio(except) {
 // confirmation and form goes through this dialog instead.
 let dialogResolve = null;
 
+function appendHint(wrap, field) {
+  if (!field.hint) return;
+  const hint = document.createElement('div');
+  hint.className = 'hint';
+  hint.textContent = field.hint;
+  wrap.appendChild(hint);
+}
+
 function showDialog({ title, message = '', fields = [], okText, danger = false }) {
   okText = okText ?? t('dialog.ok');
   return new Promise((resolve) => {
@@ -1420,7 +1428,8 @@ function showDialog({ title, message = '', fields = [], okText, danger = false }
         input.style.color = 'var(--muted)';
       } else if (f.type === 'audio') {
         // A row of play buttons for comparing two renditions of the same
-        // clip. It carries no value: the buttons are not form fields.
+        // clip. It carries no value: the buttons are not form fields, so
+        // only the id (for the label) is set below.
         input = document.createElement('div');
         input.className = 'compare-audio';
         const player = new Audio();
@@ -1449,15 +1458,6 @@ function showDialog({ title, message = '', fields = [], okText, danger = false }
           };
           input.appendChild(btn);
         }
-        wrap.appendChild(input);
-        if (f.hint) {
-          const h = document.createElement('div');
-          h.className = 'hint';
-          h.textContent = f.hint;
-          wrap.appendChild(h);
-        }
-        host.appendChild(wrap);
-        continue;
       } else {
         input = document.createElement('input');
         input.type = 'text';
@@ -1465,15 +1465,12 @@ function showDialog({ title, message = '', fields = [], okText, danger = false }
         if (f.placeholder) input.placeholder = f.placeholder;
       }
       input.id = 'dialog-f-' + f.name;
-      input.dataset.field = f.name;
-      input.dataset.fieldType = f.type || 'text';
-      wrap.appendChild(input);
-      if (f.hint) {
-        const h = document.createElement('div');
-        h.className = 'hint';
-        h.textContent = f.hint;
-        wrap.appendChild(h);
+      if (f.type !== 'audio') {
+        input.dataset.field = f.name;
+        input.dataset.fieldType = f.type || 'text';
       }
+      wrap.appendChild(input);
+      appendHint(wrap, f);
       host.appendChild(wrap);
     }
 
