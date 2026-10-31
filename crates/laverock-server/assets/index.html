@@ -841,6 +841,10 @@ const I18N = {
     "ui.download_started_progress_is_shown": "已开始下载，进度会显示在卡片里",
     "ui.install_failed_see_the_log": "安装失败，请查看卡片中的日志",
     "ui.install_finished": "安装流程结束",
+    "ui.delete_model": "删除模型",
+    "ui.confirm_delete_model": "确认删除？",
+    "ui.model_deleted": "已删除 {model}",
+    "ui.could_not_delete_model": "删除失败：",
     "ui.failed_to_load_history": "读取历史失败：",
     "ui.download_failed": "下载失败：",
     "ui.converting": "转换中…",
@@ -1102,6 +1106,10 @@ const I18N = {
     "ui.download_started_progress_is_shown": "Download started; progress is shown on the card",
     "ui.install_failed_see_the_log": "Install failed; see the log on the card",
     "ui.install_finished": "Install finished",
+    "ui.delete_model": "Delete model",
+    "ui.confirm_delete_model": "Delete?",
+    "ui.model_deleted": "Deleted {model}",
+    "ui.could_not_delete_model": "Could not delete: ",
     "ui.failed_to_load_history": "Failed to load history: ",
     "ui.download_failed": "Download failed: ",
     "ui.converting": "Converting\u2026",
@@ -2961,6 +2969,7 @@ function modelCard(model, installed) {
   const actions = el.querySelector('.model-actions');
   if (installed && !stale) {
     actions.innerHTML = `<span class="hint">${t("ui.directory")}: models/${esc(model.dir)}</span>`;
+    actions.appendChild(deleteButton(model));
     return el;
   }
 
@@ -2981,6 +2990,7 @@ function modelCard(model, installed) {
     dir.className = 'hint';
     dir.textContent = `${t("ui.directory")}: models/${model.dir}`;
     actions.appendChild(dir);
+    actions.appendChild(deleteButton(model));
   }
   if (!modelsData.scripts_dir) {
     const hint = document.createElement('span');
@@ -2989,6 +2999,41 @@ function modelCard(model, installed) {
     actions.appendChild(hint);
   }
   return el;
+}
+
+// Deleting is irreversible, so the first click only arms the button; the
+// second one within a few seconds actually removes the model directory.
+function deleteButton(model) {
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'ghost danger';
+  btn.textContent = t('ui.delete_model');
+  let armed = false;
+  let timer = null;
+  const disarm = () => {
+    armed = false;
+    clearTimeout(timer);
+    btn.textContent = t('ui.delete_model');
+  };
+  btn.onclick = async () => {
+    if (!armed) {
+      armed = true;
+      btn.textContent = t('ui.confirm_delete_model');
+      timer = setTimeout(disarm, 4000);
+      return;
+    }
+    disarm();
+    btn.disabled = true;
+    try {
+      await api(`/api/models/${encodeURIComponent(model.id)}`, { method: 'DELETE' });
+      toast(t('ui.model_deleted', { model: model.name }));
+      await Promise.all([loadEngines(), loadModels()]);
+    } catch (e) {
+      btn.disabled = false;
+      toast(t('ui.could_not_delete_model') + e.message, true);
+    }
+  };
+  return btn;
 }
 
 async function installModel(id) {

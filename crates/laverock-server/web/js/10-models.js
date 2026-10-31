@@ -120,6 +120,7 @@ function modelCard(model, installed) {
   const actions = el.querySelector('.model-actions');
   if (installed && !stale) {
     actions.innerHTML = `<span class="hint">${t("ui.directory")}: models/${esc(model.dir)}</span>`;
+    actions.appendChild(deleteButton(model));
     return el;
   }
 
@@ -140,6 +141,7 @@ function modelCard(model, installed) {
     dir.className = 'hint';
     dir.textContent = `${t("ui.directory")}: models/${model.dir}`;
     actions.appendChild(dir);
+    actions.appendChild(deleteButton(model));
   }
   if (!modelsData.scripts_dir) {
     const hint = document.createElement('span');
@@ -148,6 +150,41 @@ function modelCard(model, installed) {
     actions.appendChild(hint);
   }
   return el;
+}
+
+// Deleting is irreversible, so the first click only arms the button; the
+// second one within a few seconds actually removes the model directory.
+function deleteButton(model) {
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'ghost danger';
+  btn.textContent = t('ui.delete_model');
+  let armed = false;
+  let timer = null;
+  const disarm = () => {
+    armed = false;
+    clearTimeout(timer);
+    btn.textContent = t('ui.delete_model');
+  };
+  btn.onclick = async () => {
+    if (!armed) {
+      armed = true;
+      btn.textContent = t('ui.confirm_delete_model');
+      timer = setTimeout(disarm, 4000);
+      return;
+    }
+    disarm();
+    btn.disabled = true;
+    try {
+      await api(`/api/models/${encodeURIComponent(model.id)}`, { method: 'DELETE' });
+      toast(t('ui.model_deleted', { model: model.name }));
+      await Promise.all([loadEngines(), loadModels()]);
+    } catch (e) {
+      btn.disabled = false;
+      toast(t('ui.could_not_delete_model') + e.message, true);
+    }
+  };
+  return btn;
 }
 
 async function installModel(id) {

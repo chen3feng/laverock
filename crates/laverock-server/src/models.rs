@@ -16,7 +16,7 @@ use laverock_core::i18n::{self, Key};
 use laverock_core::{CoreError, EngineManager, Localized, Result};
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::{BTreeMap, HashMap},
+    collections::{BTreeMap, HashMap, HashSet},
     io::Read,
     path::{Path, PathBuf},
     process::{Command, Stdio},
@@ -320,6 +320,88 @@ impl ModelService {
             .map_err(|e| CoreError::Synth(format!("无法启动下载线程：{e}")))?;
 
         Ok(())
+    }
+
+    /// Delete an installed model. The engine is unloaded first, because a
+    /// resident server keeps its files open and Windows refuses to remove
+    /// them; then the whole model directory goes and the registry rescans.
+    pub fn remove(&self, id: &str) -> Result<()> {
+        let dir = self.model_dir(id).ok_or_else(|| {
+            CoreError::UserError(i18n::Message::new(Key::UnknownModel).arg("model", id))
+        })?;
+
+        {
+            let jobs = self.jobs.lock().expect("jobs lock poisoned");
+            if jobs
+                .get(id)
+                .is_some_and(|job| job.status == JobStatus::Running)
+            {
+                return Err(CoreError::UserError(i18n::Message::new(
+                    Key::DownloadInProgress,
+                )));
+            }
+        }
+
+        if let Some(engine_id) = read_engine_id(&dir.join("engine.json")) {
+            self.manager.unload(&engine_id);
+        }
+        std::fs::remove_dir_all(&dir).map_err(|e| {
+            CoreError::UserError(
+                i18n::Message::new(Key::ModelDeleteFailed)
+                    .arg("model", id)
+                    .arg("error", e.to_string()),
+            )
+        })?;
+        self.manager.reload()?;
+        Ok(())
+    }
+
+    /// Engine ids the catalog excludes on this OS. They stay hidden from
+    /// the engine list even when an older install is still on disk.
+    pub fn hidden_engine_ids(&self) -> HashSet<String> {
+        let mut hidden = HashSet::new();
+        for entry in catalog() {
+            if !entry
+                .unsupported_on
+                .iter()
+                .any(|os| os == std::env::consts::OS)
+            {
+                continue;
+            }
+            hidden.insert(entry.id.clone());
+            hidden.insert(entry.dir.clone());
+            let manifest = self.models_root.join(&entry.dir).join("engine.json");
+            if let Some(id) = read_engine_id(&manifest) {
+                hidden.insert(id);
+            }
+        }
+        hidden
+    }
+
+    /// The directory holding a model: the catalog's directory when the id
+    /// is a catalog entry, otherwise the installed manifest that names it.
+    fn model_dir(&self, id: &str) -> Option<PathBuf> {
+        if let Some(entry) = catalog().iter().find(|e| e.id == id) {
+            let dir = self.models_root.join(&entry.dir);
+            if dir.is_dir() {
+                return Some(dir);
+            }
+        }
+        let entries = std::fs::read_dir(&self.models_root).ok()?;
+        for entry in entries.flatten() {
+            let dir = entry.path();
+            if !dir.is_dir() {
+                continue;
+            }
+            let name = entry.file_name();
+            if name.to_string_lossy() == id && dir.join("engine.json").is_file() {
+                return Some(dir);
+            }
+            if read_engine_id(&dir.join("engine.json")).as_deref() == Some(id) {
+                return Some(dir);
+            }
+        }
+        None
     }
 
     pub fn reload(&self) -> Result<usize> {
@@ -696,12 +778,38 @@ fn manifest_problem(manifest: &Path, lang: &str) -> Option<String> {
         }
     };
     match serde_json::from_str::<laverock_core::Manifest>(&raw) {
-        Ok(m) => m.problem().map(|p| p.for_lang(lang).to_string()),
+        Ok(m) => m
+            .problem()
+            .map(|p| p.for_lang(lang).to_string())
+            .or_else(|| kokoro_fp32_problem(&m, manifest, lang)),
         Err(e) => Some(match lang {
             "en" => format!("engine.json cannot be parsed: {e}"),
             _ => format!("engine.json 无法解析：{e}"),
         }),
     }
+}
+
+/// A Kokoro install that only has the INT8 file on a machine that runs the
+/// fp32 export faster still works, but the Models page should offer the
+/// reinstall that fetches the faster file instead of hiding the option.
+fn kokoro_fp32_problem(
+    manifest: &laverock_core::Manifest,
+    path: &Path,
+    lang: &str,
+) -> Option<String> {
+    let kokoro = manifest.kokoro.as_ref()?;
+    if laverock_core::model_variant() != "fp32" {
+        return None;
+    }
+    let installed = kokoro
+        .model_fp32
+        .as_deref()
+        .zip(path.parent())
+        .is_some_and(|(rel, dir)| dir.join(rel).is_file());
+    if installed {
+        return None;
+    }
+    Some(i18n::Message::new(Key::KokoroFp32Missing).render(laverock_core::i18n::Lang::parse(lang)))
 }
 
 fn catalog() -> &'static [CatalogEntry] {
@@ -1104,6 +1212,75 @@ mod tests {
         // Plain strings (third-party manifests) pass through unchanged.
         let plain = Localized::Text("raw".into());
         assert_eq!(plain.for_lang("zh"), "raw");
+    }
+
+    #[test]
+    fn kokoro_without_the_fp32_file_is_flagged_where_it_helps() {
+        // On AVX2 x86 and Apple Silicon INT8 is the right file, so there is
+        // nothing to reinstall.
+        if laverock_core::model_variant() != "fp32" {
+            return;
+        }
+        let base = r#"{"id":"k","kind":"kokoro","name":"K","kokoro":{"model":"model.int8.onnx","voices":"voices.bin","tokens":"tokens.txt","data_dir":"espeak-ng-data"}}"#;
+        let manifest: laverock_core::Manifest = serde_json::from_str(base).unwrap();
+        let path = Path::new("/nonexistent/k/engine.json");
+        assert!(kokoro_fp32_problem(&manifest, path, "en").is_some());
+
+        let declared = base.replace(
+            r#""model":"model.int8.onnx""#,
+            r#""model":"model.int8.onnx","model_fp32":"model.onnx""#,
+        );
+        let manifest: laverock_core::Manifest = serde_json::from_str(&declared).unwrap();
+        assert!(kokoro_fp32_problem(&manifest, path, "en").is_some());
+    }
+
+    #[test]
+    fn removing_a_model_deletes_its_directory_and_unregisters_it() {
+        let base = std::env::temp_dir().join(format!(
+            "laverock-remove-test-{}-{}",
+            std::process::id(),
+            now_secs()
+        ));
+        let models = base.join("models");
+        std::fs::create_dir_all(models.join("manual")).unwrap();
+        std::fs::write(
+            models.join("manual/engine.json"),
+            r#"{"id":"manual","kind":"kokoro","name":"M","kokoro":{
+                "model":"m.onnx","voices":"v.bin","tokens":"t.txt","data_dir":"d"}}"#,
+        )
+        .unwrap();
+        let settings = Arc::new(SettingsStore::open(&base).unwrap());
+        let manager = Arc::new(EngineManager::open(&models).unwrap());
+        let service = ModelService::new(&models, None, None, settings, manager.clone());
+        assert!(manager.list().iter().any(|e| e.id == "manual"));
+
+        service.remove("manual").unwrap();
+        assert!(!models.join("manual").exists());
+        assert!(manager.list().is_empty());
+        assert!(service.remove("manual").is_err());
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn unsupported_models_are_hidden_from_the_engine_list() {
+        let base = std::env::temp_dir().join(format!(
+            "laverock-hidden-test-{}-{}",
+            std::process::id(),
+            now_secs()
+        ));
+        let models = base.join("models");
+        std::fs::create_dir_all(&models).unwrap();
+        let settings = Arc::new(SettingsStore::open(&base).unwrap());
+        let manager = Arc::new(EngineManager::open(&models).unwrap());
+        let service = ModelService::new(&models, None, None, settings, manager);
+
+        let hidden = service.hidden_engine_ids();
+        if cfg!(windows) {
+            assert!(hidden.contains("mosstts"));
+        } else {
+            assert!(hidden.is_empty(), "nothing is excluded here: {hidden:?}");
+        }
+        let _ = std::fs::remove_dir_all(&base);
     }
 
     #[test]

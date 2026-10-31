@@ -188,7 +188,12 @@ async fn health(State(state): State<AppState>) -> impl IntoResponse {
 }
 
 async fn engines(State(state): State<AppState>) -> impl IntoResponse {
-    Json(state.manager.list())
+    // Models the catalog excludes on this OS stay out of the picker even
+    // when an older install is still on disk.
+    let hidden = state.models.hidden_engine_ids();
+    let mut list = state.manager.list();
+    list.retain(|engine| !hidden.contains(&engine.id));
+    Json(list)
 }
 
 // ---------------------------------------------------------------- remote
@@ -496,6 +501,18 @@ async fn install_model(
     }
     state.models.install(&id)?;
     Ok(Json(serde_json::json!({ "started": true, "id": id })))
+}
+
+async fn delete_model(
+    Path(id): Path<String>,
+    State(state): State<AppState>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    if !is_loopback(&peer) {
+        return Err(ApiError::forbidden());
+    }
+    state.models.remove(&id)?;
+    Ok(Json(serde_json::json!({ "deleted": true, "id": id })))
 }
 
 async fn reload_models(
@@ -1742,6 +1759,7 @@ async fn main() {
         .route("/api/models", get(list_models))
         .route("/api/models/reload", post(reload_models))
         .route("/api/models/{id}/install", post(install_model))
+        .route("/api/models/{id}", delete(delete_model))
         .layer(middleware::from_fn_with_state(
             state.clone(),
             auth_middleware,
