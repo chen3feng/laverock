@@ -72,7 +72,11 @@ jobs:
         run: cargo fmt --all -- --check
 
       - name: Clippy
-        run: cargo clippy --all-targets --all-features -- -D warnings
+        # Not --all-features: onnx-cpu and onnx-cuda are mutually exclusive
+        # link modes (static CPU runtime vs shared CUDA runtime), and the
+        # CUDA build needs NVIDIA's libraries. CI covers the default build;
+        # check the CUDA one on a machine that has them.
+        run: cargo clippy --all-targets -- -D warnings
 
       - name: Test
         run: cargo test --workspace

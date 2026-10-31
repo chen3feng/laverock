@@ -15,6 +15,7 @@ mod manager;
 mod manifest;
 mod ming3tts;
 mod mosstts;
+mod onnx;
 mod qwen3tts;
 mod transcribe;
 mod zipvoice;

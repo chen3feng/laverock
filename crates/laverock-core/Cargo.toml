@@ -7,7 +7,9 @@ repository.workspace = true
 description = "Core engine abstraction and TTS backends for Laverock"
 
 [dependencies]
-sherpa-onnx = "1.13"
+# The CPU and CUDA builds are selected by this crate's features below, and
+# sherpa-onnx refuses both link modes at once.
+sherpa-onnx = { version = "1.13", default-features = false }
 hound = "3.5"
 serde.workspace = true
 serde_json.workspace = true
@@ -15,3 +17,17 @@ serde_json.workspace = true
 ureq = { version = "2.12", default-features = false }
 thiserror.workspace = true
 tracing.workspace = true
+
+[features]
+default = ["onnx-cpu"]
+# Static, CPU-only sherpa-onnx: no extra libraries, works on every target.
+onnx-cpu = ["sherpa-onnx/static"]
+# Shared sherpa-onnx built with the CUDA execution provider. Needs
+# SHERPA_ONNX_LIB_DIR at build time (the `lib` directory of a k2-fsa *cuda*
+# archive) and the CUDA + cuDNN runtime DLLs at run time. Mutually exclusive
+# with `onnx-cpu`, so `--all-features` cannot be used.
+onnx-cuda = ["sherpa-onnx/shared"]
+
+[target.'cfg(windows)'.dependencies]
+# Preflight for the CUDA provider: load nvcuda.dll and ask for a device.
+windows-sys = { version = "0.61", features = ["Win32_System_LibraryLoader"] }

@@ -11,7 +11,7 @@ name = "laverock"
 path = "src/main.rs"
 
 [dependencies]
-laverock-core = { path = "../laverock-core" }
+laverock-core = { path = "../laverock-core", default-features = false }
 axum = { version = "0.8", features = ["multipart", "macros"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "sync", "net"] }
 qrcode = { version = "0.14", default-features = false, features = ["svg"] }
@@ -36,3 +36,9 @@ windows-sys = { version = "0.61", features = ["Win32_System_Console"] }
 
 [dev-dependencies]
 hound = "3.5"
+
+[features]
+default = ["onnx-cpu"]
+onnx-cpu = ["laverock-core/onnx-cpu"]
+# CUDA-enabled ONNX runtime; see laverock-core's features for the build setup.
+onnx-cuda = ["laverock-core/onnx-cuda"]
