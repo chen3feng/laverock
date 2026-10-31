@@ -144,6 +144,57 @@ def use_float32_istft(torch) -> None:
     ISTFTHead.forward = forward
 
 
+# Ming splits long text into fragments and generates each one separately.
+# The default target is 24 semantic units, which cuts ordinary English
+# sentences in half: the seam is audible as a level step, and the model
+# sometimes swallows the first words of a fragment that starts
+# mid-sentence. Most requests fit in one fragment at 64, so raise the
+# target and only fall back to splitting for genuinely long text.
+MING_MAX_SEMANTIC_LENGTH = 64
+# Per-fragment level matching is bounded: a 4x cut is enough for the worst
+# seam seen, and capping the boost avoids amplifying a quiet, noisy chunk.
+FRAGMENT_GAIN_MIN = 0.25
+FRAGMENT_GAIN_MAX = 2.0
+
+
+def install_fragment_level_match(ming_tts, MingTTS) -> None:
+    """Even out the loudness of the fragments ``MingTTS.synthesize`` joins.
+
+    The runtime trims each fragment and then concatenates them without
+    matching levels, so a seam can step up by ~10 dB. Wrap the per-fragment
+    trim: the first fragment sets the reference RMS, and later fragments are
+    scaled towards it. The wrapper also raises ``max_length`` so short texts
+    are generated in one pass and never reach a seam.
+    """
+    original_trim = ming_tts.trim_trailing_silence
+    target_rms = {"value": None}
+
+    def trim(chunk, sample_rate, *args, **kwargs):
+        chunk = original_trim(chunk, sample_rate, *args, **kwargs)
+        if chunk.numel() == 0:
+            return chunk
+        rms = float(chunk.float().pow(2).mean().sqrt())
+        if rms <= 0:
+            return chunk
+        if target_rms["value"] is None:
+            target_rms["value"] = rms
+            return chunk
+        gain = target_rms["value"] / rms
+        gain = max(FRAGMENT_GAIN_MIN, min(FRAGMENT_GAIN_MAX, gain))
+        return chunk * gain
+
+    ming_tts.trim_trailing_silence = trim
+
+    original_synthesize = MingTTS.synthesize
+
+    def synthesize(self, *args, **kwargs):
+        target_rms["value"] = None
+        kwargs.setdefault("max_length", MING_MAX_SEMANTIC_LENGTH)
+        return original_synthesize(self, *args, **kwargs)
+
+    MingTTS.synthesize = synthesize
+
+
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser()
     p.add_argument("--model", required=True)
@@ -172,7 +223,10 @@ def main() -> int:
     import torchaudio
 
     use_soundfile_audio_io(torch, torchaudio)
+    import ming_tts
     from ming_tts import MingTTS
+
+    install_fragment_level_match(ming_tts, MingTTS)
 
     device = resolve_device(torch, args.device)
 

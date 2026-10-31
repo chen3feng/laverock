@@ -163,7 +163,9 @@ works from the clip alone; a transcript improves fidelity but is optional.
 Four installs share one checkpoint: cloning, voice design, multilingual
 (clone a voice but speak German/Spanish/French/Korean/Japanese) and
 built-in voices. FST text normalization needs `pynini` (conda-forge only)
-and is skipped automatically when absent.
+and is skipped automatically when absent. Long text is split at about 64
+semantic units and the fragments are level-matched before they are joined;
+ordinary sentences are generated in one pass, so they get no seam.
 
 **Chatterbox** — Resemble AI's 0.5B multilingual clone model: clone a clip
 and speak any of 23 languages. The transcript is not required. Defaults to
