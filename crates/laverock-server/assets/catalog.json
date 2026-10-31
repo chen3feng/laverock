@@ -130,8 +130,8 @@
     "script": "download-longcat.sh",
     "env": {},
     "note": {
-      "en": "Requires Python 3.10–3.12 and Git. Cloning needs the reference transcript; clips much longer than the transcript are trimmed automatically. Numbers are read in Chinese and long text is split into chunks. Each run is capped at ~30 s including the reference. Set LONGCAT_MODEL=meituan-longcat/LongCat-AudioDiT-3.5B for the larger ~15 GB model.",
-      "zh": "需要 Python 3.10–3.12 与 Git；克隆需要参考音频对应的文字，音频明显长于文字稿时会自动裁剪；数字会转成中文读法，长文本自动分段合成。单次最长约 30 秒（含参考音频）。可用 LONGCAT_MODEL=meituan-longcat/LongCat-AudioDiT-3.5B 安装更大的版本（~15 GB）。"
+      "en": "Requires Python 3.10–3.12 and Git. Cloning needs the reference transcript; a clip that carries clearly more speech than the transcript is trimmed automatically, while a slow but complete reading is kept whole. Numbers are read in Chinese and long text is split into chunks. Each run is capped at ~30 s including the reference. Set LONGCAT_MODEL=meituan-longcat/LongCat-AudioDiT-3.5B for the larger ~15 GB model.",
+      "zh": "需要 Python 3.10–3.12 与 Git；克隆需要参考音频对应的文字；只有参考音频里的语音明显多于文字稿时才自动裁剪，读得慢但完整的参考保持原样；数字会转成中文读法，长文本自动分段合成。单次最长约 30 秒（含参考音频）。可用 LONGCAT_MODEL=meituan-longcat/LongCat-AudioDiT-3.5B 安装更大的版本（~15 GB）。"
     }
   },
   {

@@ -130,9 +130,10 @@ memory once loaded.
 waveform latent space, with per-request NFE steps and guidance strength (APG
 vs CFG). fp16 on CUDA, fp32 elsewhere; about 6 GB of RAM for the 1B variant.
 One request produces at most ~30 s including the reference, so prefer 3–10 s
-prompts. Cloning needs the transcript and trims clips that run much longer
-than it; digit strings are read as Chinese numerals and long text is split
-into chunks with short pauses.
+prompts. Cloning needs the transcript; a clip that carries clearly more
+speech than the transcript is trimmed, while a slow but complete reading is
+kept whole. Digit strings are read as Chinese numerals and long text is
+split into chunks with short pauses.
 
 **dots.tts** — 2B continuous-AR model with a 48 kHz AudioVAE, run through
 audio.cpp (Metal on macOS, CPU elsewhere). Cloning defaults to the x-vector
