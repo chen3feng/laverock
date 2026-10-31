@@ -195,6 +195,29 @@ def trim_to_silence(audio, limit_sec: float, sr: int):
     return torch.cat([trimmed, pause], dim=-1)
 
 
+def speech_extent_secs(audio, sr: int, floor_db: float = -40.0) -> float:
+    """Seconds from the first to the last 50 ms frame that carries speech.
+
+    A clip's file length includes leading and trailing silence, which adds
+    no content. Measuring the voiced span keeps a recording with a quiet
+    room at either end from looking like a clip that carries extra speech.
+    `audio` is a ``(1, samples)`` tensor already normalized to -6 dBFS
+    peak, so the threshold is absolute.
+    """
+    mono = audio.reshape(-1)
+    win = max(1, int(0.05 * sr))
+    if mono.numel() < win:
+        return mono.numel() / sr
+    frames = mono[: mono.numel() // win * win].reshape(-1, win)
+    rms = frames.pow(2).mean(dim=1).sqrt()
+    voiced = (rms > 10 ** (floor_db / 20.0)).nonzero()
+    if voiced.numel() == 0:
+        return 0.0
+    start = int(voiced[0].item()) * win
+    end = min(mono.numel(), (int(voiced[-1].item()) + 1) * win)
+    return (end - start) / sr
+
+
 def load_audio(path: str, sr: int):
     """Reference clip at `sr`, mono, volume-normalized like upstream."""
     import librosa
@@ -203,6 +226,13 @@ def load_audio(path: str, sr: int):
     audio, _ = librosa.load(path, sr=sr, mono=True)
     audio = torch.from_numpy(audio).unsqueeze(0)
     return normalize_volume(audio, -6)
+
+
+# `approx_duration_from_text` charges an English letter 0.082 s, the rate
+# inside a word. A run of capitals ("ABCDEFG") is read letter by letter and
+# takes roughly 0.35 s each, so the difference is added when deciding
+# whether a reference clip carries more speech than its transcript.
+SPELLED_LETTER_EXTRA_SECS = 0.35 - 0.082
 
 
 def approx_duration_from_text(text: str, max_duration: float = 30.0) -> float:
@@ -269,23 +299,37 @@ def main() -> int:
             return 2
 
         # LongCat aligns the text condition against the prompt *duration*.
-        # If the clip runs much longer than its transcript implies, the
-        # start of the target text lands in the prompt region that is
-        # sliced away before decoding — the first sentence disappears.
-        # Trim the clip to a duration consistent with the transcript.
+        # A clip that carries more speech than its transcript accounts for
+        # pushes the start of the target text into the prompt region that
+        # is sliced away before decoding — the first sentence disappears.
+        # Trim such a clip to a duration consistent with the transcript.
+        #
+        # The duration estimate is a normal-pace baseline, so it cannot be
+        # the only test. Counting digits and spelling out a run of capitals
+        # is much slower than reading words, and a slow but complete
+        # reading carries no extra speech. Cutting it would leave the rest
+        # of the transcript to be spoken as the start of the generated
+        # audio, i.e. the reference tail leaks into the take.
         approx_pd = approx_duration_from_text(prompt_text, max_duration=max_duration)
+        spelled = sum(len(run) for run in re.findall(r"[A-Z]{2,}", args.ref_text or ""))
+        plausible_pd = min(
+            max_duration, approx_pd + spelled * SPELLED_LETTER_EXTRA_SECS
+        )
         audio = load_audio(args.ref_audio, sr)
-        clip_secs = audio.shape[-1] / sr
-        # Only intervene when the mismatch is extreme; moderate differences
-        # are handled fine by the model and trimming risks cutting mid-word.
-        if clip_secs > max(2.0, approx_pd * 2.0):
+        speech_secs = speech_extent_secs(audio, sr)
+        if speech_secs > max(2.0, plausible_pd * 2.0):
             audio = trim_to_silence(audio, max(2.0, approx_pd * 1.4), sr)
             emit(
                 "stage",
-                f"Reference clip was longer than the transcript; trimmed to {audio.shape[-1] / sr:.1f}s",
+                "Reference clip carries more speech than the transcript; "
+                f"trimmed to {audio.shape[-1] / sr:.1f}s",
             )
-        elif clip_secs < approx_pd / 1.8:
-            emit("stage", "Note: the transcript is much longer than the reference clip; the start may be clipped")
+        elif speech_secs < approx_pd / 1.8:
+            emit(
+                "stage",
+                "Note: the transcript is much longer than the reference "
+                "speech; the start may be clipped",
+            )
         prompt_wav = audio.unsqueeze(0).to(device)
 
         # Upstream pads one hop of margin, then drops it, so the VAE sees
