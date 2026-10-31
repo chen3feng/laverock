@@ -118,6 +118,13 @@ impl ApiError {
         }
     }
 
+    fn not_found(message: impl Into<String>) -> Self {
+        Self {
+            status: StatusCode::NOT_FOUND,
+            message: message.into(),
+        }
+    }
+
     fn internal(message: impl Into<String>) -> Self {
         Self {
             status: StatusCode::INTERNAL_SERVER_ERROR,
@@ -716,6 +723,7 @@ async fn create_capture(
 ) -> Result<Json<captures::CaptureMeta>, ApiError> {
     let mut name = String::new();
     let mut prompt_text = String::new();
+    let mut enhance = laverock_core::EnhanceMode::Off;
     let mut wav: Option<Vec<u8>> = None;
     while let Some(field) = multipart
         .next_field()
@@ -735,6 +743,14 @@ async fn create_capture(
                     .await
                     .map_err(|e| ApiError::bad_request(format!("bad prompt_text: {e}")))?;
             }
+            Some("enhance") => {
+                let raw = field
+                    .text()
+                    .await
+                    .map_err(|e| ApiError::bad_request(format!("bad enhance mode: {e}")))?;
+                enhance = laverock_core::EnhanceMode::parse(&raw)
+                    .ok_or_else(|| ApiError::bad_request(format!("unknown enhance mode: {raw}")))?;
+            }
             Some("audio") | Some("prompt") => {
                 wav = Some(
                     field
@@ -750,12 +766,62 @@ async fn create_capture(
     let wav = wav
         .filter(|b| !b.is_empty())
         .ok_or_else(|| ApiError::bad_request("missing required field: audio"))?;
-    Ok(Json(state.profiles.captures().create(
-        &name,
-        &prompt_text,
-        &wav,
-        true,
-    )?))
+
+    // Denoising takes a fraction of a second; vocal separation runs at
+    // about half real time, so keep both off the async runtime.
+    let store = state.profiles.captures().clone();
+    let models = state.models.models_dir().to_path_buf();
+    let tools = state.models.tools_dir().map(std::path::Path::to_path_buf);
+    let meta = tokio::task::spawn_blocking(move || {
+        let enhancer = (!enhance.is_off())
+            .then(|| laverock_core::Enhancer::discover(&models, tools.as_deref()));
+        store.create_enhanced(&name, &prompt_text, &wav, true, enhance, enhancer.as_ref())
+    })
+    .await
+    .map_err(|e| ApiError {
+        status: StatusCode::INTERNAL_SERVER_ERROR,
+        message: format!("enhance task panicked: {e}"),
+    })??;
+    Ok(Json(meta))
+}
+
+/// `POST /api/captures/{id}/enhance` — JSON `{"mode": "denoise"|"vocals"|"both"|"off"}`.
+/// Re-runs enhancement from the untouched upload, or reverts with `off`.
+async fn enhance_capture(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(body): Json<EnhanceBody>,
+) -> Result<Json<captures::CaptureMeta>, ApiError> {
+    let mode = laverock_core::EnhanceMode::parse(&body.mode)
+        .ok_or_else(|| ApiError::bad_request(format!("unknown enhance mode: {}", body.mode)))?;
+    let store = state.profiles.captures().clone();
+    let models = state.models.models_dir().to_path_buf();
+    let tools = state.models.tools_dir().map(std::path::Path::to_path_buf);
+    let meta = tokio::task::spawn_blocking(move || {
+        let enhancer = laverock_core::Enhancer::discover(&models, tools.as_deref());
+        store.enhance(&id, mode, &enhancer)
+    })
+    .await
+    .map_err(|e| ApiError {
+        status: StatusCode::INTERNAL_SERVER_ERROR,
+        message: format!("enhance task panicked: {e}"),
+    })??;
+    Ok(Json(meta))
+}
+
+#[derive(serde::Deserialize)]
+struct EnhanceBody {
+    mode: String,
+}
+
+/// `GET /api/enhance` — which enhancement stages the installed pack covers.
+async fn enhance_status(State(state): State<AppState>) -> Json<serde_json::Value> {
+    let enhancer =
+        laverock_core::Enhancer::discover(state.models.models_dir(), state.models.tools_dir());
+    Json(serde_json::json!({
+        "denoise": enhancer.has_denoise(),
+        "vocals": enhancer.has_separation(),
+    }))
 }
 
 /// `POST /api/captures/{id}` — multipart: `name` and/or `prompt_text`.
@@ -806,11 +872,37 @@ async fn delete_capture(
     Ok(StatusCode::NO_CONTENT)
 }
 
+#[derive(serde::Deserialize, Default)]
+struct CaptureAudioQuery {
+    /// `1`, `true` or `yes` serves the untouched upload instead of the
+    /// enhanced take. Kept as a string so both spellings work.
+    #[serde(default)]
+    original: Option<String>,
+}
+
+impl CaptureAudioQuery {
+    fn wants_original(&self) -> bool {
+        matches!(
+            self.original.as_deref(),
+            Some("1" | "true" | "yes" | "TRUE" | "YES")
+        )
+    }
+}
+
 async fn capture_audio(
     State(state): State<AppState>,
     Path(id): Path<String>,
+    Query(query): Query<CaptureAudioQuery>,
 ) -> Result<Response, ApiError> {
-    let (_, wav) = state.profiles.captures().get(&id)?;
+    let wav = if query.wants_original() {
+        state
+            .profiles
+            .captures()
+            .get_original(&id)?
+            .ok_or_else(|| ApiError::not_found("this take has no original recording"))?
+    } else {
+        state.profiles.captures().get(&id)?.1
+    };
     Ok((
         StatusCode::OK,
         [(header::CONTENT_TYPE, "audio/wav".to_string())],
@@ -1722,11 +1814,13 @@ async fn main() {
         .route("/api/profiles/{id}/captures", post(set_profile_captures))
         .route("/api/captures", get(list_captures).post(create_capture))
         .route("/api/captures/dedupe", post(dedupe_captures))
+        .route("/api/enhance", get(enhance_status))
         .route(
             "/api/captures/{id}",
             post(update_capture).delete(delete_capture),
         )
         .route("/api/captures/{id}/audio", get(capture_audio))
+        .route("/api/captures/{id}/enhance", post(enhance_capture))
         .route("/api/captures/{id}/transcribe", post(transcribe_capture))
         .route("/api/profiles/{id}/export", get(export_profile))
         .route("/api/profiles/export", post(export_profiles_batch))

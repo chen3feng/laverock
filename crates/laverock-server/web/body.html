@@ -129,6 +129,14 @@
         <label data-i18n="captures.audio">录音或上传 WAV</label>
         <div id="libraryCapture"></div>
         <div class="hint" data-i18n="captures.hint">录音会在浏览器内转成 24kHz 单声道 WAV；安装了 SenseVoice 会自动转写。</div>
+        <label for="captureEnhance" data-i18n="captures.enhance">人声增强</label>
+        <select id="captureEnhance">
+          <option value="off" data-i18n="captures.enhance.off">不处理（保留原声）</option>
+          <option value="denoise" data-i18n="captures.enhance.denoise">降噪（背景噪音）</option>
+          <option value="vocals" data-i18n="captures.enhance.vocals">去除背景音乐</option>
+          <option value="both" data-i18n="captures.enhance.both">降噪 + 去除背景音乐</option>
+        </select>
+        <div class="hint" id="captureEnhanceHint"></div>
         <div class="actions" style="margin-top:16px">
           <button id="newCaptureSave" type="button" data-i18n="captures.save">加入素材库</button>
           <button class="ghost" id="newCaptureCancel" type="button" data-i18n="cancel">取消</button>

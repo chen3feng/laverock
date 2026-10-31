@@ -68,9 +68,17 @@ DOTS_MODEL=dots.tts-mf ./scripts/download-dots.sh         # 4 步 MeanFlow 导�
 | `chatterbox` | Chatterbox Multilingual | 克隆 | 23 种语言 | 约 5 GB（含 venv） |
 | `indextts2` | IndexTTS-2 Q8_0 | 克隆 | 中、英 | 约 3.6 GB |
 | `mosstts` | MOSS-TTS-Delay | 克隆、多语种 | 20 种语言 | 约 10 GB（安装峰值约 16 GB） |
+| `enhance` | 人声清理（GTCRN + BS-RoFormer） | 录音清理 | — | 约 165 MB |
 
 四个 Ming 条目共用同一份权重、同一个 venv 和同一份运行时，只有第一个需要完整
 下载，其余只增加几 KB 的清单。
+
+`enhance` 不是引擎：它为素材库增加两个可选的清理步骤。降噪（GTCRN，
+16 kHz）去掉室内底噪、风扇和车流声；人声分离（BS-RoFormer，44.1 kHz）去掉
+背景音乐、只保留人声。降噪默认开启，一段短录音不到一秒即可完成；分离复用
+audio.cpp 运行时，每段录音大约耗时 1–2 倍时长，因此需要手动选择。处理在
+录音上传后进行，原始录音会保留，随时能在素材卡上换一种方式重新处理或恢复
+原声。
 
 ## 能力标记
 

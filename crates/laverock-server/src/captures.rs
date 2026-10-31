@@ -16,7 +16,10 @@ use crate::reference::{
     self, clip_facts, is_valid_id, new_id, sha256_hex, write_atomic, PreparedReference,
     ReferenceFacts,
 };
-use laverock_core::{decode_wav, encode_wav, resample_mono, trim_reference, CoreError, Result};
+use laverock_core::{
+    decode_wav, encode_wav, resample_mono, trim_reference, trim_silence, CoreError, EnhanceMode,
+    Enhancer, Result,
+};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
@@ -47,6 +50,11 @@ pub struct CaptureMeta {
     /// Content hash of `capture.wav`; the identity used for de-duplication.
     #[serde(default)]
     pub sha256: String,
+    /// Which enhancement stages produced `capture.wav`: `denoise`,
+    /// `vocals` or `both`. Missing when the take is the raw upload
+    /// (only its ends may have been trimmed).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub enhancement: Option<String>,
 }
 
 /// Something about a capture that will condition synthesis badly, or that
@@ -106,6 +114,7 @@ pub fn issues_for(meta: &CaptureMeta) -> Vec<CaptureIssue> {
     out
 }
 
+#[derive(Clone)]
 pub struct CaptureStore {
     root: PathBuf,
 }
@@ -214,6 +223,17 @@ impl CaptureStore {
         Ok((meta, audio))
     }
 
+    /// The upload exactly as it arrived, before trimming and enhancement.
+    /// Only enhanced takes keep one; `None` means there is nothing to
+    /// compare against.
+    pub fn get_original(&self, id: &str) -> Result<Option<Vec<u8>>> {
+        let path = self.dir(id)?.join(ORIGINAL_CAPTURE_FILE);
+        if !path.is_file() {
+            return Ok(None);
+        }
+        Ok(Some(fs::read(path)?))
+    }
+
     /// Duration (seconds) and size of a stored take, measured from disk.
     pub fn facts(&self, id: &str) -> (f32, u64) {
         clip_facts(&self.root.join(id).join(CAPTURE_FILE))
@@ -232,9 +252,25 @@ impl CaptureStore {
         wav: &[u8],
         clean: bool,
     ) -> Result<(CaptureMeta, Vec<u8>)> {
+        self.ingest_enhanced(name, prompt_text, wav, clean, EnhanceMode::Off, None)
+    }
+
+    /// Like [`Self::ingest`], then run the requested enhancement stages on
+    /// the stored take. The untouched upload is kept as `capture.original.wav`
+    /// so the user can compare, revert, or re-run a different mode later.
+    pub fn ingest_enhanced(
+        &self,
+        name: &str,
+        prompt_text: &str,
+        wav: &[u8],
+        clean: bool,
+        enhance: EnhanceMode,
+        enhancer: Option<&Enhancer>,
+    ) -> Result<(CaptureMeta, Vec<u8>)> {
         reference::check_size(wav)?;
-        let prepared = reference::prepare(wav, clean)?;
-        let meta = self.write_new(name, prompt_text, &prepared)?;
+        let mut prepared = reference::prepare(wav, clean)?;
+        let enhancement = Self::apply_enhancement(&mut prepared, wav, enhance, enhancer)?;
+        let meta = self.write_new(name, prompt_text, &prepared, enhancement)?;
         Ok((meta, prepared.wav))
     }
 
@@ -248,11 +284,99 @@ impl CaptureStore {
         self.ingest(name, prompt_text, wav, clean).map(|(m, _)| m)
     }
 
+    pub fn create_enhanced(
+        &self,
+        name: &str,
+        prompt_text: &str,
+        wav: &[u8],
+        clean: bool,
+        enhance: EnhanceMode,
+        enhancer: Option<&Enhancer>,
+    ) -> Result<CaptureMeta> {
+        self.ingest_enhanced(name, prompt_text, wav, clean, enhance, enhancer)
+            .map(|(m, _)| m)
+    }
+
+    /// Re-run enhancement on a stored take, starting from the untouched
+    /// upload. `Off` reverts to the trimmed original and clears the flag.
+    pub fn enhance(&self, id: &str, mode: EnhanceMode, enhancer: &Enhancer) -> Result<CaptureMeta> {
+        let dir = self.dir(id)?;
+        let raw = fs::read_to_string(dir.join("capture.json"))?;
+        let mut meta: CaptureMeta = serde_json::from_str(&raw)?;
+
+        let original = dir.join(ORIGINAL_CAPTURE_FILE);
+        let source = if original.is_file() {
+            fs::read(&original)?
+        } else if mode.is_off() {
+            // Nothing was processed before; there is nothing to revert.
+            return Ok(meta);
+        } else {
+            fs::read(dir.join(CAPTURE_FILE))?
+        };
+
+        let mut prepared = reference::prepare(&source, true)?;
+        let enhancement = Self::apply_enhancement(&mut prepared, &source, mode, Some(enhancer))?;
+
+        fs::write(dir.join(CAPTURE_FILE), &prepared.wav)?;
+        if let Some(original) = &prepared.original {
+            fs::write(dir.join(ORIGINAL_CAPTURE_FILE), original)?;
+        }
+        meta.reference = Some(prepared.facts.clone());
+        meta.sha256 = sha256_hex(&prepared.wav);
+        meta.enhancement = enhancement;
+        write_atomic(
+            &dir.join("capture.json"),
+            &serde_json::to_vec_pretty(&meta)?,
+        )?;
+        Ok(meta)
+    }
+
+    /// Run the stages on `prepared`, replacing its bytes and facts. The
+    /// parameter list mirrors what both entry points have on hand; the
+    /// untouched upload is passed as `raw`.
+    fn apply_enhancement(
+        prepared: &mut PreparedReference,
+        raw: &[u8],
+        mode: EnhanceMode,
+        enhancer: Option<&Enhancer>,
+    ) -> Result<Option<String>> {
+        if mode.is_off() {
+            return Ok(None);
+        }
+        let enhancer = enhancer.ok_or_else(|| {
+            CoreError::UserError(laverock_core::i18n::Message::new(
+                laverock_core::i18n::Key::EnhanceModelsMissing,
+            ))
+        })?;
+        let (samples, rate) = decode_wav(&prepared.wav)?;
+        let processed = enhancer.apply(mode, &samples, rate.max(1) as u32)?;
+        let rate = processed.sample_rate.max(1) as u32;
+        // Processing changes what counts as dead air: denoising turns a
+        // mic thump into silence and separation can leave a quiet tail.
+        // Trim both ends again, with the same margin ingest keeps, so the
+        // stored take starts and ends at the voice.
+        let trimmed = trim_silence(
+            &processed.samples,
+            rate,
+            reference::REFERENCE_EDGE_KEEP_SECS,
+        );
+        let kept = if trimmed.is_empty() {
+            &processed.samples[..]
+        } else {
+            trimmed.as_ref()
+        };
+        prepared.facts = reference::facts_for(&processed.samples, rate, kept.len());
+        prepared.wav = encode_wav(kept, processed.sample_rate)?;
+        prepared.original = Some(raw.to_vec());
+        Ok(Some(mode.as_str().to_string()))
+    }
+
     fn write_new(
         &self,
         name: &str,
         prompt_text: &str,
         prepared: &PreparedReference,
+        enhancement: Option<String>,
     ) -> Result<CaptureMeta> {
         let created_at = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -268,6 +392,7 @@ impl CaptureStore {
             created_at,
             reference: Some(prepared.facts.clone()),
             sha256: sha256_hex(&prepared.wav),
+            enhancement,
         };
         // Manifest last and atomically, like the voice store: a directory
         // without capture.json is ignored by list().
@@ -440,7 +565,19 @@ mod tests {
             created_at: 0,
             reference: None,
             sha256: String::new(),
+            enhancement: None,
         }
+    }
+
+    #[test]
+    fn meta_without_enhancement_field_still_loads() {
+        let legacy = r#"{"id":"c1","name":"take","prompt_text":"你好","created_at":1}"#;
+        let meta: CaptureMeta = serde_json::from_str(legacy).expect("legacy meta");
+        assert_eq!(meta.id, "c1");
+        assert_eq!(meta.enhancement, None);
+        assert_eq!(meta.sha256, "");
+        let round = serde_json::to_string(&meta).expect("serialize");
+        assert!(!round.contains("enhancement"), "unset field is skipped");
     }
 
     #[test]
@@ -500,6 +637,28 @@ mod tests {
         assert_eq!(removed, vec![(dropped.clone(), kept.clone())]);
         assert!(store.get(&dropped).is_err());
         assert!(store.get(&kept).is_ok());
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn original_audio_exists_only_for_enhanced_takes() {
+        let (store, dir) = store();
+        let wav = tone(2.0);
+        let take = store.create("a", "文字", &wav, false).expect("create");
+        assert!(store.get_original(&take.id).expect("read").is_none());
+
+        fs::write(
+            dir.join("captures")
+                .join(&take.id)
+                .join(ORIGINAL_CAPTURE_FILE),
+            &wav,
+        )
+        .expect("write");
+        assert_eq!(
+            store.get_original(&take.id).expect("read"),
+            Some(wav),
+            "the untouched upload is served back verbatim"
+        );
         fs::remove_dir_all(&dir).ok();
     }
 }

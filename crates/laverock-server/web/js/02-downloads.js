@@ -88,11 +88,55 @@ function showDialog({ title, message = '', fields = [], okText, danger = false }
         input = document.createElement('textarea');
         input.rows = 3;
         input.value = f.value || '';
+      } else if (f.type === 'select') {
+        input = document.createElement('select');
+        for (const o of f.options || []) {
+          const opt = document.createElement('option');
+          opt.value = o.value;
+          opt.textContent = o.label;
+          if (o.value === f.value) opt.selected = true;
+          input.appendChild(opt);
+        }
       } else if (f.type === 'file') {
         input = document.createElement('input');
         input.type = 'file';
         input.accept = f.accept || 'audio/wav,.wav';
         input.style.color = 'var(--muted)';
+      } else if (f.type === 'audio') {
+        // A row of play buttons for comparing two renditions of the same
+        // clip. It carries no value: the buttons are not form fields.
+        input = document.createElement('div');
+        input.className = 'compare-audio';
+        const player = new Audio();
+        player.preload = 'none';
+        input.appendChild(player);
+        for (const o of f.options || []) {
+          const btn = document.createElement('button');
+          btn.type = 'button';
+          btn.className = 'ghost';
+          btn.textContent = o.label;
+          btn.onclick = () => {
+            if (player.dataset.url === o.url) {
+              if (player.paused) player.play().catch(() => {});
+              else player.pause();
+              return;
+            }
+            player.pause();
+            player.dataset.url = o.url;
+            player.src = o.url;
+            player.play().catch(() => {});
+          };
+          input.appendChild(btn);
+        }
+        wrap.appendChild(input);
+        if (f.hint) {
+          const h = document.createElement('div');
+          h.className = 'hint';
+          h.textContent = f.hint;
+          wrap.appendChild(h);
+        }
+        host.appendChild(wrap);
+        continue;
       } else {
         input = document.createElement('input');
         input.type = 'text';
@@ -116,12 +160,14 @@ function showDialog({ title, message = '', fields = [], okText, danger = false }
     ok.textContent = okText;
     ok.className = danger ? 'ghost danger' : '';
     $('dialogOverlay').classList.add('show');
-    (host.querySelector('input[type="text"], textarea') || ok).focus();
+    (host.querySelector('input[type="text"], textarea, select') || ok).focus();
   });
 }
 
 function closeDialog(result) {
   $('dialogOverlay').classList.remove('show');
+  // Stop any comparison preview that was playing inside the dialog.
+  for (const a of document.querySelectorAll('#dialogFields audio')) a.pause();
   const resolve = dialogResolve;
   dialogResolve = null;
   if (resolve) resolve(result);

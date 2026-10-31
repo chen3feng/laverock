@@ -27,9 +27,11 @@ Cookie）；以下均指回环监听。
 | POST | `/api/profiles/export` | JSON `{ids: [...]}` → 打包为单个 `.lvvoices.zip` |
 | POST | `/api/profiles/import` | multipart `file`：单个或批量 `.lvvoice(s).zip`；`strategy=skip`（默认）/`copy`/`overwrite` |
 | GET | `/api/captures` | 素材库：转写、检查项与重复标记 |
-| POST | `/api/captures` | multipart：`audio`（WAV）、可选 `name` 与 `prompt_text` → 新素材 |
+| POST | `/api/captures` | multipart：`audio`（WAV）、可选 `name`、`prompt_text` 与 `enhance`（`denoise` / `vocals` / `both`）→ 新素材 |
 | POST | `/api/captures/:id` | multipart：`name` / `prompt_text` → 编辑素材 |
-| GET | `/api/captures/:id/audio` | 素材音频 |
+| GET | `/api/captures/:id/audio` | 素材音频（`?original=1` 返回增强前的原始上传） |
+| POST | `/api/captures/:id/enhance` | JSON `{mode}` → 从原始录音重新处理，`off` 恢复原声 |
+| GET | `/api/enhance` | 已安装的增强阶段 → `{denoise, vocals}` |
 | POST | `/api/captures/:id/transcribe` | 对素材重新做语音识别 |
 | DELETE | `/api/captures/:id` | 删除素材（引用它的声音同步去掉这一段） |
 | POST | `/api/captures/dedupe` | 删除内容完全相同的素材并重指向声音 → `{removed}` |
