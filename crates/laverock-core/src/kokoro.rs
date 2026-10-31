@@ -8,7 +8,7 @@
 //! sid-to-name choices for a particular export; a request may also pass
 //! the chosen sid directly as a `voice` parameter.
 
-use crate::{Audio, CoreError, Manifest, Result, SpeechEngine, SynthRequest};
+use crate::{onnx, Audio, CoreError, Manifest, Result, SpeechEngine, SynthRequest};
 use sherpa_onnx::{
     GenerationConfig, OfflineTts, OfflineTtsConfig, OfflineTtsKokoroModelConfig,
     OfflineTtsModelConfig,
@@ -75,7 +75,7 @@ impl KokoroEngine {
             }
         }
 
-        let config = OfflineTtsConfig {
+        let mut config = OfflineTtsConfig {
             model: OfflineTtsModelConfig {
                 kokoro: OfflineTtsKokoroModelConfig {
                     model: Some(resolve(&k.model)),
@@ -95,7 +95,11 @@ impl KokoroEngine {
             ..Default::default()
         };
 
-        let tts = OfflineTts::create(&config).ok_or_else(|| {
+        let tts = onnx::with_fallback(&manifest.id, |provider| {
+            config.model.provider = Some(provider.to_string());
+            OfflineTts::create(&config)
+        })
+        .ok_or_else(|| {
             CoreError::Load(format!(
                 "{}: sherpa-onnx refused the model (check that all files in engine.json exist)",
                 manifest.id

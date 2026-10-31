@@ -39,6 +39,26 @@ cargo run -p laverock-server     # 然后打开 http://127.0.0.1:8787
 `LAVEROCK_SERVER_BIN` 可指定具体的服务端二进制，`LAVEROCK_URL` 可连接其它机器
 上的服务端。
 
+## ONNX 用 GPU
+
+ZipVoice、Kokoro、SenseVoice 默认跑在 CPU 上：默认构建链接的是静态、仅 CPU 的
+sherpa-onnx 运行时。CUDA 构建改为链接共享运行时，并请求 `cuda` 执行后端：
+
+```sh
+./scripts/setup-onnx-cuda.sh   # 下载运行时并打印 SHERPA_ONNX_LIB_DIR
+SHERPA_ONNX_LIB_DIR=<上面打印的路径> \
+  cargo build -p laverock-server --no-default-features --features onnx-cuda
+```
+
+运行时需要 PATH 上有 CUDA 13 与 cuDNN 9 的 DLL；装了 PyTorch 的话一般已经在
+`Lib/site-packages/torch/lib` 里。如果驱动没有可用设备或缺少 cuDNN，各引擎会打一条
+警告并留在 CPU 上——后端启动失败会直接终止进程，所以检查放在创建会话之前。
+CUDA 构建下也可用 `LAVEROCK_ONNX_PROVIDER=cpu` 强制走 CPU。
+
+只有非量化模型能受益：CUDA 后端没有随发布模型导出的 INT8 算子实现，量化模型在两种
+构建下一样快。在 RTX 3060 Ti 上，fp32 Kokoro 生成 9.6 秒语音用 1.5 秒，四个 CPU
+线程要 10.2 秒；而 INT8 Kokoro 两种构建都是 6.3 秒。
+
 ## 架构
 
 ```text
@@ -123,7 +143,8 @@ Python 探测）在 `scripts/laverock-lib.sh` 中。各引擎的变体见
 
 ```sh
 cargo fmt --all -- --check
-cargo clippy --all-targets --all-features -- -D warnings
+# onnx-cpu（默认）与 onnx-cuda 互斥，因此不用 --all-features。
+cargo clippy --all-targets -- -D warnings
 cargo test --workspace
 ./scripts/check-shell.sh          # bash 3.2 兼容性 + shellcheck
 

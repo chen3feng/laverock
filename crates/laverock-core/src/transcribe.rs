@@ -99,8 +99,11 @@ impl Recognizer {
         config.model_config.num_threads = stt.num_threads.max(1);
         config.model_config.debug = false;
 
-        let recognizer = OfflineRecognizer::create(&config)
-            .ok_or_else(|| CoreError::Load("failed to create the SenseVoice recognizer".into()))?;
+        let recognizer = crate::onnx::with_fallback("sensevoice", |provider| {
+            config.model_config.provider = Some(provider.to_string());
+            OfflineRecognizer::create(&config)
+        })
+        .ok_or_else(|| CoreError::Load("failed to create the SenseVoice recognizer".into()))?;
         Ok(Self { recognizer })
     }
 }

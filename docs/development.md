@@ -43,6 +43,31 @@ hides it; the tray menu has show/hide, autostart at login, open data
 directory and quit. `LAVEROCK_SERVER_BIN` points it at a specific server
 binary, `LAVEROCK_URL` at a server elsewhere.
 
+## ONNX on the GPU
+
+ZipVoice, Kokoro and SenseVoice normally run on the CPU: the default build
+links the static, CPU-only sherpa-onnx runtime. A CUDA build links the shared
+runtime instead and asks for the `cuda` execution provider:
+
+```sh
+./scripts/setup-onnx-cuda.sh   # downloads the runtime, prints SHERPA_ONNX_LIB_DIR
+SHERPA_ONNX_LIB_DIR=<printed above> \
+  cargo build -p laverock-server --no-default-features --features onnx-cuda
+```
+
+The CUDA 13 and cuDNN 9 DLLs must be on `PATH` at run time; a PyTorch install
+usually already provides them under `Lib/site-packages/torch/lib`. If the
+driver has no usable device or cuDNN is missing, the engines log a warning
+and stay on the CPU — a failed provider start would abort the process, so the
+check happens before the session is created. `LAVEROCK_ONNX_PROVIDER=cpu`
+forces the CPU in a CUDA build.
+
+Only non-quantized models gain. The CUDA provider has no kernels for the INT8
+operators the shipped models are exported with, so they run at CPU speed
+either way. On an RTX 3060 Ti, an fp32 Kokoro export took 1.5 s for 9.6 s of
+speech on the GPU against 10.2 s on four CPU threads, while the INT8 Kokoro
+took 6.3 s in both builds.
+
 ## Architecture
 
 ```text
@@ -134,7 +159,8 @@ discovery). See [Models](models.md#installing) for the per-engine variants.
 
 ```sh
 cargo fmt --all -- --check
-cargo clippy --all-targets --all-features -- -D warnings
+# onnx-cpu (default) and onnx-cuda are mutually exclusive, so no --all-features.
+cargo clippy --all-targets -- -D warnings
 cargo test --workspace
 ./scripts/check-shell.sh          # bash 3.2 compatibility + shellcheck
 

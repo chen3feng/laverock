@@ -275,6 +275,14 @@ MOSS-TTS could not be timed here: the prebuilt Windows runtime has no CUDA
 backend (every layer is assigned to the CPU) and generation aborts inside the
 binary with exit code 0xC0000374, a heap-corruption crash.
 
+The ONNX engines ran on the CPU even in a CUDA build: the shipped models are
+INT8 exports and ONNX Runtime's CUDA provider has no kernels for their
+quantized operators, so INT8 Kokoro took 6.3 s either way and GPU memory
+stayed flat. An fp32 export of the same model, as a control, took 1.5 s for
+9.6 s of speech on the GPU against 10.2 s on four CPU threads — the GPU path
+works, it just has nothing to accelerate in the INT8 models. How to build
+that runtime is in [Development](development.md#onnx-on-the-gpu).
+
 The 8 GB of VRAM held one audio.cpp model at a time. Leaving dots, VoxCPM2
 and CosyVoice3 resident together (about 6.2 + 6.5 + 3.3 GB) crashed the
 CosyVoice3 server on its second request, and the engine fell back to the

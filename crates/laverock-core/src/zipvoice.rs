@@ -4,7 +4,7 @@
 //! prebuilt static sherpa-onnx + onnxruntime at build time.
 
 use crate::i18n::{self, Key};
-use crate::{Audio, CoreError, Manifest, Result, SpeechEngine, SynthRequest};
+use crate::{onnx, Audio, CoreError, Manifest, Result, SpeechEngine, SynthRequest};
 use sherpa_onnx::{
     GenerationConfig, OfflineTts, OfflineTtsConfig, OfflineTtsModelConfig,
     OfflineTtsZipvoiceModelConfig,
@@ -60,7 +60,7 @@ impl ZipVoiceEngine {
             }
         }
 
-        let config = OfflineTtsConfig {
+        let mut config = OfflineTtsConfig {
             model: OfflineTtsModelConfig {
                 zipvoice: OfflineTtsZipvoiceModelConfig {
                     tokens: Some(resolve(&z.tokens)),
@@ -81,7 +81,11 @@ impl ZipVoiceEngine {
             ..Default::default()
         };
 
-        let tts = OfflineTts::create(&config).ok_or_else(|| {
+        let tts = onnx::with_fallback(&manifest.id, |provider| {
+            config.model.provider = Some(provider.to_string());
+            OfflineTts::create(&config)
+        })
+        .ok_or_else(|| {
             CoreError::Load(format!(
                 "{}: sherpa-onnx refused the model (check that all files in engine.json exist)",
                 manifest.id
