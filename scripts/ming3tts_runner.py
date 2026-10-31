@@ -18,6 +18,7 @@ Modes:
 import argparse
 import importlib.util
 import os
+import random
 import sys
 import traceback
 import wave
@@ -155,6 +156,23 @@ MING_MAX_SEMANTIC_LENGTH = 64
 # seam seen, and capping the boost avoids amplifying a quiet, noisy chunk.
 FRAGMENT_GAIN_MIN = 0.25
 FRAGMENT_GAIN_MAX = 2.0
+# The released runtime seeds every inference with 1895 (infer.py) before it
+# builds the model. The prompt latent is sampled from the VAE posterior, so
+# without the same seed the model's start alignment drifts between runs and
+# can swallow the first words of the target text.
+MING_SEED = 1895
+
+
+def seed_everything(torch, seed: int = MING_SEED) -> None:
+    """Match the released runtime's seeding order (before the model loads)."""
+    import numpy as np
+
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
 
 
 def install_fragment_level_match(ming_tts, MingTTS) -> None:
@@ -195,6 +213,23 @@ def install_fragment_level_match(ming_tts, MingTTS) -> None:
     MingTTS.synthesize = synthesize
 
 
+def with_text_boundary(prompt_text: str) -> str:
+    """End the reference transcript with a sentence boundary.
+
+    The runtime concatenates the transcript and the target text in one
+    ``Text input:`` field with no separator. When the transcript ends in a
+    letter or digit (an auto-transcribed clip often does), the model reads
+    the first target words as a continuation of the transcript and can
+    swallow them. A terminal period restores the boundary; a space or a
+    newline is not enough.
+    """
+    text = prompt_text.rstrip()
+    if not text or text[-1] in ".!?。！？":
+        return prompt_text
+    has_cjk = any("一" <= char <= "鿿" for char in text)
+    return text + ("。" if has_cjk else ".")
+
+
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser()
     p.add_argument("--model", required=True)
@@ -223,6 +258,7 @@ def main() -> int:
     import torchaudio
 
     use_soundfile_audio_io(torch, torchaudio)
+    seed_everything(torch)
     import ming_tts
     from ming_tts import MingTTS
 
@@ -260,7 +296,7 @@ def main() -> int:
         # The acoustic prompt is only used together with its transcript; a
         # missing transcript falls back to speaker-embedding-only cloning.
         if args.ref_text:
-            kwargs["prompt_text"] = args.ref_text
+            kwargs["prompt_text"] = with_text_boundary(args.ref_text)
     elif args.mode == "voice_design":
         if not args.instruct:
             print("voice_design mode requires --instruct", file=sys.stderr)
