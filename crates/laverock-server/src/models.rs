@@ -135,6 +135,11 @@ pub struct ModelService {
     settings: Arc<SettingsStore>,
     manager: Arc<EngineManager>,
     jobs: Arc<Mutex<HashMap<String, Job>>>,
+    /// One install at a time per installer script. Entries that share a
+    /// script also share a weights directory or venv (Ming's four variants,
+    /// Qwen's three), and two concurrent scripts corrupt each other's
+    /// resumable `.part` files.
+    install_locks: Arc<Mutex<HashMap<String, Arc<Mutex<()>>>>>,
 }
 
 impl ModelService {
@@ -160,6 +165,7 @@ impl ModelService {
             settings,
             manager,
             jobs: Arc::new(Mutex::new(HashMap::new())),
+            install_locks: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -315,6 +321,15 @@ impl ModelService {
         let tools_root = self.tools_root.clone();
         let script_dir = scripts.clone();
         let entry_for_thread = entry.clone();
+        // Variants that share an installer also share its weights/venv;
+        // queue behind a running install instead of racing it.
+        let install_lock = {
+            let mut locks = self
+                .install_locks
+                .lock()
+                .expect("install locks lock poisoned");
+            locks.entry(entry.script.clone()).or_default().clone()
+        };
 
         std::thread::Builder::new()
             .name(format!("install-{}", entry.id))
@@ -328,6 +343,7 @@ impl ModelService {
                     jobs,
                     settings,
                     manager,
+                    install_lock,
                 );
             })
             .map_err(|e| CoreError::Synth(format!("无法启动下载线程：{e}")))?;
@@ -466,7 +482,25 @@ fn run_install(
     jobs: Arc<Mutex<HashMap<String, Job>>>,
     settings: Arc<SettingsStore>,
     manager: Arc<EngineManager>,
+    install_lock: Arc<Mutex<()>>,
 ) {
+    // Show why a queued install has not started yet, then wait for the
+    // script that shares this weights/venv directory to finish.
+    if matches!(
+        install_lock.try_lock(),
+        Err(std::sync::TryLockError::WouldBlock)
+    ) {
+        set_progress(
+            &jobs,
+            &entry.id,
+            Some(Key::StageWaitingOther.id().to_string()),
+            None,
+        );
+    }
+    let _guard = install_lock
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+
     let settings = settings.get();
     let system_proxy = match settings.proxy_mode {
         ProxyMode::System => proxy::system(),
@@ -1146,6 +1180,7 @@ mod tests {
             jobs.clone(),
             settings,
             manager,
+            Arc::new(Mutex::new(())),
         );
 
         let jobs = jobs.lock().unwrap();

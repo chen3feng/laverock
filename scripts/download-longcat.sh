@@ -45,7 +45,7 @@ fi
 # 2. Isolated environment. lv_prepare_python_venv creates the venv, upgrades
 #    pip, and pre-installs CUDA torch on Windows+NVIDIA; VPY points at its
 #    interpreter (also used by the HF helpers for JSON parsing via LV_PY).
-lv_prepare_python_venv "$VENV" "$PYTHON"
+lv_prepare_python_venv "$VENV" "$PYTHON" 3.10
 lv_stage_key stage_install_deps
 "$VPY" -m pip install -r "$SRC/requirements.txt"
 # The UMT5 tokenizer ships a SentencePiece model; transformers can fall

@@ -237,6 +237,8 @@ messages! {
     // ---- install script stages (emitted as ids by download-*.sh) ----
     StageWaiting = "stage_waiting"
         { en: "Waiting to start", zh: "等待开始" },
+    StageWaitingOther = "stage_waiting_other"
+        { en: "Waiting for another download to finish", zh: "等待另一个下载完成" },
     StageDownloadFile = "stage_download_file"
         { en: "Downloading {name} ({size})", zh: "下载 {name}（{size}）" },
     StageDownloadArchive = "stage_download_archive"

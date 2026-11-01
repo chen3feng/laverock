@@ -38,7 +38,7 @@ mkdir -p "$DEST" "$TOOLS"
 #    torch==2.6.0 (CPU-only on PyPI); on Windows+NVIDIA we re-assert the CUDA
 #    build afterwards so it stays put instead of being replaced by a generic
 #    wheel.
-lv_prepare_python_venv "$VENV" "$PYTHON"
+lv_prepare_python_venv "$VENV" "$PYTHON" 3.10
 lv_stage_key stage_install_pip_deps
 "$VPY" -m pip install --upgrade "chatterbox-tts"
 # chatterbox's Perth audio-watermarker (resemble-perth) does
