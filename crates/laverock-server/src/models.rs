@@ -1006,6 +1006,31 @@ mod tests {
     }
 
     #[test]
+    fn catalog_installers_are_bundled() {
+        // The packaged app runs installers from Contents/Resources/scripts,
+        // so a catalog entry whose script is missing from the Tauri
+        // resources fails on every install but the development checkout.
+        let conf: serde_json::Value =
+            serde_json::from_str(include_str!("../../laverock-desktop/tauri.conf.json"))
+                .expect("valid tauri config");
+        let bundled: Vec<&str> = conf["bundle"]["resources"]
+            .as_object()
+            .expect("bundle resources")
+            .values()
+            .filter_map(|value| value.as_str())
+            .filter_map(|value| value.strip_prefix("scripts/"))
+            .collect();
+        for entry in catalog() {
+            assert!(
+                bundled.contains(&entry.script.as_str()),
+                "{} installer {} is not bundled by tauri.conf.json",
+                entry.id,
+                entry.script
+            );
+        }
+    }
+
+    #[test]
     fn meter_percentages() {
         assert_eq!(
             parse_meter("Receiving objects: 45% (1234/9000)"),
