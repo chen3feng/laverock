@@ -5,10 +5,11 @@ The pages ship as one self-contained HTML file (no second request for
 styles or scripts, no bundler at build time). Editing a 3,000-line HTML
 file is miserable, so the sources live in `crates/laverock-server/web/`:
 
-  index.html    shell; `{{styles.css}}`, `{{body.html}}`, `{{js}}`
+  index.html    shell; `{{styles.css}}`, `{{body.html}}`, `{{js}}`, `{{favicon}}`
   styles.css    the stylesheet
   body.html     the markup, including <template> blocks
   js/NN-*.js    one file per section, concatenated in filename order
+  favicon.png   32px tab icon, inlined as a data URI so the tab needs no request
 
 The JavaScript is a plain script, not ES modules: the sections share
 top-level declarations, and joining them in order reproduces exactly the
@@ -21,6 +22,7 @@ file that used to be written by hand.
 from __future__ import annotations
 
 import argparse
+import base64
 import difflib
 import sys
 from pathlib import Path
@@ -38,14 +40,17 @@ def build() -> str:
     if not scripts:
         raise SystemExit(f"no JavaScript sources under {WEB / 'js'}")
     js = "\n\n".join(p.read_text(encoding="utf-8").rstrip("\n") for p in scripts)
+    favicon = "data:image/png;base64," + base64.b64encode(
+        (WEB / "favicon.png").read_bytes()).decode("ascii")
 
-    for token in ("{{styles.css}}", "{{body.html}}", "{{js}}"):
+    for token in ("{{styles.css}}", "{{body.html}}", "{{js}}", "{{favicon}}"):
         if token not in shell:
             raise SystemExit(f"index.html is missing {token}")
     return (
         shell.replace("{{styles.css}}", styles)
         .replace("{{body.html}}", body)
         .replace("{{js}}", js)
+        .replace("{{favicon}}", favicon)
     )
 
 
