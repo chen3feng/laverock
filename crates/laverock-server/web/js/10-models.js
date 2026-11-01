@@ -187,6 +187,14 @@ async function installModel(id) {
   }
   toast(t("ui.download_started_progress_is_shown"));
   await loadModels();
+  // A small or cached install can finish before the first poll, and the
+  // poll is what normally refreshes the engine registry. Check once here
+  // so the new engine appears in Synthesize either way.
+  const model = modelsData && modelsData.models.find((m) => m.id === id);
+  if (!model || !model.job || model.job.status !== 'running') {
+    await loadEngines();
+    loadHealth();
+  }
 }
 
 function schedulePoll() {
@@ -196,7 +204,10 @@ function schedulePoll() {
   }
   if (!modelsData || !modelsData.models.some((m) => m.job && m.job.status === 'running')) return;
   modelsTimer = setInterval(async () => {
-    if (currentPage() !== 'models' || !session.loopback) {
+    // The install runs on the server, so keep watching even after the
+    // user leaves Models: the engine list must be current the next time
+    // they open Synthesize.
+    if (!session.loopback) {
       clearInterval(modelsTimer);
       modelsTimer = null;
       return;
@@ -206,7 +217,7 @@ function schedulePoll() {
     } catch (_) {
       return;
     }
-    renderModels();
+    if (currentPage() === 'models') renderModels();
     const running = modelsData.models.some((m) => m.job && m.job.status === 'running');
     if (!running) {
       clearInterval(modelsTimer);

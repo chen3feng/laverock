@@ -9,6 +9,16 @@ async function loadEngines() {
   }
   const sel = $('engine');
   const current = sel.value;
+  // Rebuilding the list also rebuilds the parameter controls, dropping
+  // values the user tuned. When the set of engines did not change (the
+  // usual case when revisiting Models), leave the select and its
+  // controls alone.
+  const unchanged = engines.length === sel.options.length
+    && engines.every((e, i) => sel.options[i].value === e.id);
+  if (unchanged) {
+    if (currentPage() === 'models' && modelsData) renderModels();
+    return;
+  }
   sel.innerHTML = '';
   if (!engines.length) {
     const o = document.createElement('option');

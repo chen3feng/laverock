@@ -9,14 +9,13 @@ function showPage(page) {
   for (const p of PAGES) $('page-' + p).classList.toggle('active', p === page);
   document.querySelectorAll('nav a').forEach((a) => a.classList.toggle('active', a.dataset.page === page));
   document.title = `${t('nav.' + page)} · Laverock`;
-  if (page !== 'models' && modelsTimer) {
-    clearInterval(modelsTimer);
-    modelsTimer = null;
-  }
   if (page === 'captures') { loadCaptures(); loadEnhanceStatus(); }
   if (page === 'voices') loadProfiles();
   if (page === 'history') loadHistory();
-  if (page === 'models') loadModels();
+  // Installs run on the server and can finish while another page is open,
+  // so pick up the registry before drawing the catalog. Engines load first
+  // because the cards read the per-engine kind and load state.
+  if (page === 'models') loadEngines().then(loadModels);
   if (page === 'settings') loadSettingsPage();
 }
 
