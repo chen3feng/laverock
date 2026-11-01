@@ -116,14 +116,32 @@ lv_venv_python() {
   fi
 }
 
+# lv_python_supported <interpreter>: true for Python 3.10-3.12.
+lv_python_supported() {
+  "$1" -c 'import sys; sys.exit(0 if (3, 10) <= sys.version_info[:2] <= (3, 12) else 1)' \
+    >/dev/null 2>&1
+}
+
 # lv_find_python [explicit]: echo a usable Python 3.10-3.12 interpreter.
 # Prefers the explicit override, then versioned names (newest first); on
 # Windows plain `python` comes before the often-broken `python3` alias.
+#
+# Check the version instead of trusting the name: a GUI-launched macOS app
+# inherits only /usr/bin:/bin:/usr/sbin:/sbin, where `python3` is 3.9 and
+# Homebrew's 3.12 is not on PATH at all. Looking in the usual prefixes and
+# rejecting unsupported interpreters keeps pip from failing later with an
+# opaque dependency-resolution error.
 lv_find_python() {
-  local explicit="${1:-}" candidate
-  if [ -n "$explicit" ] && command -v "$explicit" >/dev/null 2>&1; then
-    printf '%s\n' "$explicit"
-    return 0
+  local explicit="${1:-}" candidate dir
+  if [ -n "$explicit" ]; then
+    if command -v "$explicit" >/dev/null 2>&1; then
+      if lv_python_supported "$explicit"; then
+        printf '%s\n' "$explicit"
+        return 0
+      fi
+      echo "$explicit is $("$explicit" --version 2>&1), but Python 3.10-3.12 is required" >&2
+      return 1
+    fi
   fi
   local candidates="python3.12 python3.11 python3.10"
   if lv_is_windows; then
@@ -132,23 +150,52 @@ lv_find_python() {
     candidates="$candidates python3"
   fi
   for candidate in $candidates; do
-    if command -v "$candidate" >/dev/null 2>&1; then
+    if command -v "$candidate" >/dev/null 2>&1 && lv_python_supported "$candidate"; then
       printf '%s\n' "$candidate"
       return 0
     fi
   done
+  # Common install prefixes that a desktop-launched process does not
+  # inherit in PATH (Homebrew on Apple Silicon/Intel, MacPorts).
+  local prefixes=""
+  if ! lv_is_windows; then
+    prefixes="/opt/homebrew/bin /usr/local/bin /opt/local/bin"
+  fi
+  for dir in $prefixes; do
+    for candidate in $candidates; do
+      if [ -x "$dir/$candidate" ] && lv_python_supported "$dir/$candidate"; then
+        printf '%s\n' "$dir/$candidate"
+        return 0
+      fi
+    done
+  done
   return 1
 }
 
-# lv_prepare_python_venv <venv_dir> <python>
+# lv_python_at_least <interpreter> <major.minor>: true when the interpreter
+# is at least that version.
+lv_python_at_least() {
+  "$1" -c 'import sys
+maj, minor = map(int, sys.argv[1].split("."))
+sys.exit(0 if sys.version_info[:2] >= (maj, minor) else 1)' "$2" >/dev/null 2>&1
+}
+
+# lv_prepare_python_venv <venv_dir> <python> [min_version]
 #
 # Create the isolated venv if needed, export LV_PY to its interpreter (the
 # download helpers parse JSON with it), upgrade pip, and on Windows with an
 # NVIDIA GPU pre-install the CUDA torch build so the default CPU-only PyPI
 # wheel is never silently used. Sets VPY in the caller for its own pip calls.
+# With min_version (e.g. 3.10), a venv left by an older interpreter is
+# rebuilt: the desktop app once picked macOS's 3.9 from a minimal PATH, and
+# pip would then fail on packages that require 3.10+.
 lv_prepare_python_venv() {
-  local venv="$1" python="$2"
+  local venv="$1" python="$2" min="${3:-}"
   VPY="$(lv_venv_python "$venv")"
+  if [ -f "$VPY" ] && [ -n "$min" ] && ! lv_python_at_least "$VPY" "$min"; then
+    echo "Recreating $venv: $("$VPY" --version 2>&1), but Python $min+ is required" >&2
+    rm -rf "$venv"
+  fi
   if [ ! -f "$VPY" ]; then
     lv_stage_key stage_venv
     "$python" -m venv "$venv"

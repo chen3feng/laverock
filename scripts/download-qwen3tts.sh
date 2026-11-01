@@ -51,7 +51,7 @@ mkdir -p "$DEST" "$TOOLS"
 # 1. Isolated environment — Qwen's torch/transformers pins stay here.
 #    lv_prepare_python_venv creates the venv, upgrades pip, and pre-installs
 #    CUDA torch on Windows+NVIDIA; VPY then points at its interpreter.
-lv_prepare_python_venv "$VENV" "$PYTHON"
+lv_prepare_python_venv "$VENV" "$PYTHON" 3.10
 lv_stage_key stage_qwen_deps
 "$VPY" -m pip install --upgrade "qwen-tts"
 
