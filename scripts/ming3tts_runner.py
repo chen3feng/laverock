@@ -213,6 +213,28 @@ def install_fragment_level_match(ming_tts, MingTTS) -> None:
     MingTTS.synthesize = synthesize
 
 
+def install_fragment_voice_anchor(ming_tts) -> None:
+    """Keep one voice across fragments for built-in (IP) voices.
+
+    ``MingTTS.synthesize`` splits long text and reuses the first generated
+    fragment as the acoustic prompt only for the STYLE task (voice design);
+    an IP request generates every fragment from scratch, so the built-in
+    voice drifts and each seam is audible (a 24 s take changed timbre
+    twice). Both tasks take the same text-preparation branch, so relabeling
+    the request as STYLE turns the anchor on while the instruction built
+    from the ``ip`` control stays exactly as it was.
+    """
+    original = ming_tts.tts_tasks.build_task_generation_kwargs
+
+    def build_task_generation_kwargs(task, **kwargs):
+        request = original(task, **kwargs)
+        if request.get("taskname") == "IP":
+            request["taskname"] = "STYLE"
+        return request
+
+    ming_tts.tts_tasks.build_task_generation_kwargs = build_task_generation_kwargs
+
+
 def with_text_boundary(prompt_text: str) -> str:
     """End the reference transcript with a sentence boundary.
 
@@ -263,6 +285,7 @@ def main() -> int:
     from ming_tts import MingTTS
 
     install_fragment_level_match(ming_tts, MingTTS)
+    install_fragment_voice_anchor(ming_tts)
 
     device = resolve_device(torch, args.device)
 
