@@ -102,36 +102,59 @@ pub struct EngineInfo {
     pub parameters: Vec<ParamSpec>,
     /// How much of a voice's reference audio this engine uses.
     pub reference_limit_secs: f32,
+    /// Another models directory earlier in the search path already provides
+    /// this id; this copy is listed for diagnostics but cannot be loaded.
+    pub shadowed: bool,
+}
+
+/// One scanned `engine.json`, with the directory it came from. Engines are
+/// built relative to that directory, not to the models root.
+#[derive(Debug, Clone)]
+struct ManifestEntry {
+    manifest: Manifest,
+    dir: PathBuf,
+    /// A directory earlier in the search path already provides this id.
+    shadowed: bool,
 }
 
 pub struct EngineManager {
-    root: PathBuf,
-    manifests: RwLock<Vec<Manifest>>,
+    roots: Vec<PathBuf>,
+    entries: RwLock<Vec<ManifestEntry>>,
     loaded: Mutex<HashMap<String, Arc<dyn SpeechEngine>>>,
 }
 
 impl EngineManager {
-    /// Scan `root`: every immediate subdirectory containing an
+    /// Scan one models directory. Every immediate subdirectory containing an
     /// `engine.json` is a registered engine.
     pub fn open(root: impl Into<PathBuf>) -> Result<Self> {
-        let root = root.into();
-        let manifests = scan(&root)?;
+        Self::open_all(vec![root.into()])
+    }
+
+    /// Scan several models directories in order. The first directory that
+    /// provides an engine id wins; later copies are reported as shadowed so
+    /// a shared read-only weights library and a local overlay can coexist.
+    pub fn open_all(roots: Vec<PathBuf>) -> Result<Self> {
+        let entries = scan_all(&roots)?;
         Ok(Self {
-            root,
-            manifests: RwLock::new(manifests),
+            roots,
+            entries: RwLock::new(entries),
             loaded: Mutex::new(HashMap::new()),
         })
     }
 
-    /// Re-scan the models directory, e.g. after a model was downloaded
+    /// Re-scan the models directories, e.g. after a model was downloaded
     /// from the UI. Already-loaded engines stay loaded as long as their
     /// manifest still exists.
     pub fn reload(&self) -> Result<usize> {
-        let manifests = scan(&self.root)?;
-        let count = manifests.len();
-        let ids: HashSet<String> = manifests.iter().map(|m| m.id.clone()).collect();
+        let entries = scan_all(&self.roots)?;
+        let count = entries.iter().filter(|e| !e.shadowed).count();
+        let ids: HashSet<String> = entries
+            .iter()
+            .filter(|e| !e.shadowed)
+            .map(|e| e.manifest.id.clone())
+            .collect();
 
-        *self.manifests.write().expect("manifest lock poisoned") = manifests;
+        *self.entries.write().expect("manifest lock poisoned") = entries;
         self.loaded
             .lock()
             .expect("engine lock poisoned")
@@ -140,7 +163,12 @@ impl EngineManager {
     }
 
     pub fn len(&self) -> usize {
-        self.manifests.read().expect("manifest lock poisoned").len()
+        self.entries
+            .read()
+            .expect("manifest lock poisoned")
+            .iter()
+            .filter(|e| !e.shadowed)
+            .count()
     }
 
     pub fn is_empty(&self) -> bool {
@@ -148,21 +176,25 @@ impl EngineManager {
     }
 
     pub fn list(&self) -> Vec<EngineInfo> {
-        let manifests = self.manifests.read().expect("manifest lock poisoned");
+        let entries = self.entries.read().expect("manifest lock poisoned");
         let loaded = self.loaded.lock().expect("engine lock poisoned");
-        manifests
+        entries
             .iter()
-            .map(|m| EngineInfo {
-                id: m.id.clone(),
-                kind: m.kind.as_str().to_string(),
-                name: m.name.clone(),
-                description: m.description.clone(),
-                languages: m.languages.clone(),
-                capabilities: m.capabilities.clone(),
-                loaded: loaded.contains_key(&m.id),
-                defaults: serde_json::to_value(&m.defaults).unwrap_or(serde_json::json!({})),
-                parameters: m.parameters_or_defaults(),
-                reference_limit_secs: m.reference_limit_secs(),
+            .map(|entry| {
+                let m = &entry.manifest;
+                EngineInfo {
+                    id: m.id.clone(),
+                    kind: m.kind.as_str().to_string(),
+                    name: m.name.clone(),
+                    description: m.description.clone(),
+                    languages: m.languages.clone(),
+                    capabilities: m.capabilities.clone(),
+                    loaded: !entry.shadowed && loaded.contains_key(&m.id),
+                    defaults: serde_json::to_value(&m.defaults).unwrap_or(serde_json::json!({})),
+                    parameters: m.parameters_or_defaults(),
+                    reference_limit_secs: m.reference_limit_secs(),
+                    shadowed: entry.shadowed,
+                }
             })
             .collect()
     }
@@ -176,12 +208,12 @@ impl EngineManager {
     /// Manifests are cloned out so no lock is held while an engine is
     /// constructed (construction can take seconds).
     fn manifest(&self, id: &str) -> Result<Manifest> {
-        self.manifests
+        self.entries
             .read()
             .expect("manifest lock poisoned")
             .iter()
-            .find(|m| m.id == id)
-            .cloned()
+            .find(|e| !e.shadowed && e.manifest.id == id)
+            .map(|e| e.manifest.clone())
             .ok_or_else(|| CoreError::NotFound(id.to_string()))
     }
 
@@ -192,8 +224,16 @@ impl EngineManager {
             return Ok(engine.clone());
         }
 
-        let manifest = self.manifest(id)?;
-        let dir: PathBuf = self.root.join(&manifest.id);
+        let entry = self
+            .entries
+            .read()
+            .expect("manifest lock poisoned")
+            .iter()
+            .find(|e| !e.shadowed && e.manifest.id == id)
+            .cloned()
+            .ok_or_else(|| CoreError::NotFound(id.to_string()))?;
+        let manifest = entry.manifest;
+        let dir = entry.dir;
         let engine: Arc<dyn SpeechEngine> = match manifest.kind {
             EngineKind::ZipVoice => Arc::new(ZipVoiceEngine::build(&dir, &manifest)?),
             EngineKind::VoxCpm2 => {
@@ -273,13 +313,47 @@ impl EngineManager {
         Ok(self.manifest(id)?.reference_limit_secs())
     }
 
+    /// The first (highest-priority) models directory.
     pub fn root(&self) -> &Path {
-        &self.root
+        self.roots
+            .first()
+            .map(PathBuf::as_path)
+            .unwrap_or(Path::new(""))
+    }
+
+    /// Every models directory, highest priority first.
+    pub fn roots(&self) -> &[PathBuf] {
+        &self.roots
     }
 }
 
+/// Read every valid manifest under every root, highest priority first, and
+/// flag ids that a previous root already provided.
+fn scan_all(roots: &[PathBuf]) -> Result<Vec<ManifestEntry>> {
+    let mut seen = HashSet::new();
+    let mut entries = Vec::new();
+    for root in roots {
+        for (dir, manifest) in scan(root)? {
+            let shadowed = !seen.insert(manifest.id.clone());
+            if shadowed {
+                tracing::warn!(
+                    engine = %manifest.id,
+                    dir = %dir.display(),
+                    "shadowed by an earlier models directory"
+                );
+            }
+            entries.push(ManifestEntry {
+                manifest,
+                dir,
+                shadowed,
+            });
+        }
+    }
+    Ok(entries)
+}
+
 /// Read every valid manifest under `root`, sorted by engine id.
-fn scan(root: &Path) -> Result<Vec<Manifest>> {
+fn scan(root: &Path) -> Result<Vec<(PathBuf, Manifest)>> {
     let mut manifests = Vec::new();
 
     if root.is_dir() {
@@ -307,7 +381,7 @@ fn scan(root: &Path) -> Result<Vec<Manifest>> {
                     }
                     Ok(m) => {
                         tracing::info!(engine = %m.id, kind = ?m.kind, "registered engine");
-                        manifests.push(m);
+                        manifests.push((entry.path(), m));
                     }
                     Err(e) => tracing::warn!(
                         dir = %entry.path().display(),
@@ -321,7 +395,7 @@ fn scan(root: &Path) -> Result<Vec<Manifest>> {
         tracing::warn!(dir = %root.display(), "models directory does not exist yet");
     }
 
-    manifests.sort_by(|a, b| a.id.cmp(&b.id));
+    manifests.sort_by(|a, b| a.1.id.cmp(&b.1.id));
     Ok(manifests)
 }
 
@@ -354,8 +428,47 @@ mod tests {
         fs::write(models.join("notes.txt"), "not an engine").expect("file");
 
         let found = scan(&models).expect("scan");
-        assert_eq!(found.len(), 1, "found: {:?}", found.iter().map(|m| &m.id));
-        assert_eq!(found[0].id, "zipvoice");
+        assert_eq!(
+            found.len(),
+            1,
+            "found: {:?}",
+            found.iter().map(|(_, m)| &m.id)
+        );
+        assert_eq!(found[0].1.id, "zipvoice");
+
+        fs::remove_dir_all(&base).ok();
+    }
+
+    /// Two models directories: the first one that has an id wins, and the
+    /// later copy is listed as shadowed rather than loaded.
+    #[test]
+    fn later_roots_shadow_duplicate_ids() {
+        let base = std::env::temp_dir().join(format!("laverock-roots-{}", std::process::id()));
+        let first = base.join("first");
+        let second = base.join("second");
+        fs::create_dir_all(first.join("zipvoice")).expect("first");
+        fs::create_dir_all(second.join("zipvoice")).expect("second");
+        fs::write(
+            first.join("zipvoice").join("engine.json"),
+            r#"{"id":"zipvoice","kind":"zipvoice","name":"first"}"#,
+        )
+        .expect("first manifest");
+        fs::write(
+            second.join("zipvoice").join("engine.json"),
+            r#"{"id":"zipvoice","kind":"zipvoice","name":"second"}"#,
+        )
+        .expect("second manifest");
+
+        let manager = EngineManager::open_all(vec![first, second]).expect("manager");
+        assert_eq!(manager.len(), 1);
+        let list = manager.list();
+        let copies: Vec<_> = list.iter().filter(|e| e.id == "zipvoice").collect();
+        assert_eq!(copies.len(), 2);
+        assert_eq!(copies[0].name, "first");
+        assert!(!copies[0].shadowed);
+        assert_eq!(copies[1].name, "second");
+        assert!(copies[1].shadowed);
+        assert_eq!(manager.root(), base.join("first"));
 
         fs::remove_dir_all(&base).ok();
     }

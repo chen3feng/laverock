@@ -2,7 +2,7 @@
 
 async function loadEngines() {
   try {
-    engines = await api('/api/engines');
+    engines = (await api('/api/engines')).filter((e) => !e.shadowed);
   } catch (e) {
     toast((t("ui.failed_to_load_engines")) + e.message, true);
     return;

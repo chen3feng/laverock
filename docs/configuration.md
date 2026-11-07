@@ -16,7 +16,7 @@ These apply to the `laverock-server` binary.
 | `LAVEROCK_HOST` | `127.0.0.1` | bind address of the trusted loopback listener |
 | `LAVEROCK_PORT` | `8787` | port |
 | `LAVEROCK_DATA_DIR` | `data` | voices, history, settings, pairing state, TLS certificates |
-| `LAVEROCK_MODELS_DIR` | `models` | directory scanned for `*/engine.json` |
+| `LAVEROCK_MODELS_DIR` | `models` | directories scanned for `*/engine.json`; separate several with `:` (`;` on Windows), highest priority first |
 | `LAVEROCK_TOOLS_DIR` | — | Python venvs and build tools for engines |
 | `LAVEROCK_SCRIPTS_DIR` | auto-detected | `scripts/` used by the model installer |
 
@@ -49,6 +49,12 @@ the app's settings: models then live in `<workspace>/models` and venvs in
 `<workspace>/tools`. Voices and history stay in the data directory, so the
 workspace never contains the settings that define it. An explicit workspace
 also overrides `LAVEROCK_MODELS_DIR` / `LAVEROCK_TOOLS_DIR`.
+
+When `LAVEROCK_MODELS_DIR` lists several directories, they are layered: the
+first directory that provides an engine id wins, later copies are reported
+as `shadowed` by `GET /api/engines` and never loaded, and new installs go to
+the first directory. This lets a read-only shared weights library and a
+local overlay coexist.
 
 ## Download network
 

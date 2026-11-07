@@ -68,7 +68,7 @@ pub async fn list_models(State(state): State<AppState>) -> impl IntoResponse {
             owned_by: "laverock",
         })
         .collect();
-    for e in state.manager.list() {
+    for e in state.manager.list().into_iter().filter(|e| !e.shadowed) {
         data.push(ModelEntry {
             id: e.id,
             object: "model",
@@ -84,7 +84,11 @@ pub async fn get_model(
     axum::extract::Path(model_id): axum::extract::Path<String>,
 ) -> Response {
     if OPENAI_ALIASES.contains(&model_id.as_str())
-        || state.manager.list().iter().any(|e| e.id == model_id)
+        || state
+            .manager
+            .list()
+            .iter()
+            .any(|e| !e.shadowed && e.id == model_id)
     {
         return Json(json!({
             "id": model_id, "object": "model", "created": MODELS_CREATED, "owned_by": "laverock",
@@ -213,7 +217,12 @@ pub async fn create_speech(
     // Engine selection: explicit id, an OpenAI alias, or the only engine.
     let mut engine_id = match body.model.as_deref() {
         Some(m) if !OPENAI_ALIASES.contains(&m) => {
-            if state.manager.list().iter().any(|e| e.id == m) {
+            if state
+                .manager
+                .list()
+                .iter()
+                .any(|e| !e.shadowed && e.id == m)
+            {
                 m.to_string()
             } else {
                 return oai_error(
@@ -251,7 +260,7 @@ pub async fn create_speech(
     // Qwen custom speaker "Vivian"), so search across engines.
     let mut preset = engine_preset(&state.manager, &engine_id, &voice_arg);
     if preset.is_none() && was_alias && !voice_arg.is_empty() {
-        for e in state.manager.list() {
+        for e in state.manager.list().into_iter().filter(|e| !e.shadowed) {
             if let Some(found) = engine_preset(&state.manager, &e.id, &voice_arg) {
                 engine_id = e.id.clone();
                 preset = Some(found);
@@ -429,8 +438,9 @@ fn default_engine(manager: &EngineManager) -> Option<String> {
     let engines = manager.list();
     engines
         .iter()
+        .filter(|e| !e.shadowed)
         .find(|e| e.id.starts_with("kokoro"))
-        .or_else(|| engines.first())
+        .or_else(|| engines.iter().find(|e| !e.shadowed))
         .map(|e| e.id.clone())
 }
 
