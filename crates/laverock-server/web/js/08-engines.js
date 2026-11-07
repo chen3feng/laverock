@@ -78,6 +78,9 @@ function renderParamGrid(host, specs, prefix) {
   grid.style.marginTop = '10px';
   for (const p of specs) {
     const wrap = document.createElement('div');
+    // A text area (the music page's lyrics) needs the whole row; sharing
+    // one with sliders squeezes it into a narrow column.
+    if (p.type === 'text_area') wrap.className = 'param-wide';
     wrap.appendChild(paramControl(p, prefix));
     const hintText = paramHint(p);
     if (hintText) {
