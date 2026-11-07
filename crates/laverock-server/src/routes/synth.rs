@@ -8,8 +8,10 @@ use axum::{
     routing::post,
     Router,
 };
+use base64::Engine as _;
 use laverock_core::{
-    decode_wav, encode_wav_channels, trim_silence, Audio, CoreError, SynthRequest, TaskKind,
+    decode_wav, encode_wav_channels, trim_silence, Audio, AudioSink, CoreError, EngineManager,
+    SynthRequest, TaskKind,
 };
 use std::sync::Arc;
 
@@ -35,6 +37,8 @@ async fn synthesize(
     let mut prompt_text: Option<String> = None;
     let mut profile_id: Option<String> = None;
     let mut samples: u32 = 1;
+    // Stream audio as each sentence is ready (SSE path, single take only).
+    let mut stream_audio = false;
     // Raw values for manifest-declared synthesis parameters.
     let mut raw_params: std::collections::BTreeMap<String, String> =
         std::collections::BTreeMap::new();
@@ -91,6 +95,16 @@ async fn synthesize(
                     Ok(n) => n.clamp(1, MAX_SAMPLES),
                     Err(_) => 1,
                 };
+            }
+            Some("stream_audio") => {
+                let raw = field
+                    .text()
+                    .await
+                    .map_err(|e| ApiError::bad_request(format!("bad stream_audio: {e}")))?;
+                stream_audio = matches!(
+                    raw.trim().to_ascii_lowercase().as_str(),
+                    "1" | "true" | "on" | "yes"
+                );
             }
             Some(other) => {
                 // Anything else is a candidate engine parameter; validated
@@ -216,6 +230,9 @@ async fn synthesize(
         .get("x-laverock-stream")
         .and_then(|v| v.to_str().ok())
         == Some("1");
+    // Audio streaming needs the SSE path and one take: multiple takes are
+    // a variant gallery, and music has no sentence structure to stream.
+    let stream_audio = wants_stream && stream_audio && samples == 1 && task == TaskKind::Tts;
     // The `samples` field only has meaning over the streaming/SSE path
     // (multiple WAV frames in one response). A blocking request keeps its
     // single `audio/wav` contract for OpenAI/curl-style callers, so the
@@ -277,13 +294,9 @@ async fn synthesize(
     }
 
     use axum::body::Bytes;
-    use base64::Engine;
     use tokio::sync::mpsc;
     use tokio_stream::wrappers::ReceiverStream;
 
-    let sse = |event: &str, data: &str| -> Bytes {
-        Bytes::from(format!("event: {event}\ndata: {data}\n\n"))
-    };
     let (tx, rx) = mpsc::channel::<std::result::Result<Bytes, std::io::Error>>(16);
 
     let history_text = text.clone();
@@ -291,8 +304,8 @@ async fn synthesize(
         let tx2 = tx.clone();
         let sink: laverock_core::ProgressSink = Arc::new(move |event| {
             let frame = match event {
-                laverock_core::ProgressEvent::Stage(label) => sse("stage", &label),
-                laverock_core::ProgressEvent::Steps(n) => sse("steps", &n.to_string()),
+                laverock_core::ProgressEvent::Stage(label) => sse_frame("stage", &label),
+                laverock_core::ProgressEvent::Steps(n) => sse_frame("steps", &n.to_string()),
             };
             // Progress frames are lossy: never block the engine on a
             // disconnected or slow UI. The final WAV frame is allowed to
@@ -303,6 +316,58 @@ async fn synthesize(
         // One shared group id ties all takes of this request together in
         // history, so the UI can show them as variants of a single try.
         let generation = history.new_generation_id();
+        // Streamed take: each sentence is emitted as it finishes, then the
+        // complete WAV so the result card and history still work.
+        if stream_audio {
+            let request = SynthRequest {
+                text: text.clone(),
+                prompt_text: prompt_text.clone(),
+                prompt_samples: prompt_samples.clone(),
+                prompt_sr,
+                speed,
+                num_steps,
+                params: params.clone(),
+                input_samples: Vec::new(),
+                input_sr: 0,
+                progress: Some(sink.clone()),
+                audio: None,
+            };
+            match stream_take(&manager, &engine_id, &request, &tx) {
+                Ok(Audio {
+                    samples: audio,
+                    sample_rate,
+                    channels,
+                }) => match encode_wav_channels(&audio, sample_rate, channels) {
+                    Ok(wav) => {
+                        if let Err(e) = history.add_typed(
+                            &engine_id,
+                            &engine_name,
+                            task,
+                            &engine_kind,
+                            &history_text,
+                            &wav,
+                            sample_rate,
+                            channels,
+                            Some((generation, 0)),
+                        ) {
+                            tracing::warn!("history add failed: {e}");
+                        }
+                        let b64 = base64::engine::general_purpose::STANDARD.encode(&wav);
+                        let payload = serde_json::json!({ "i": 0, "n": 1, "wav": b64 });
+                        let _ = tx.blocking_send(Ok(sse_frame("wav", &payload.to_string())));
+                        let payload = serde_json::json!({ "count": 1, "channels": channels, "streamed": true });
+                        let _ = tx.blocking_send(Ok(sse_frame("done", &payload.to_string())));
+                    }
+                    Err(e) => {
+                        let _ = tx.blocking_send(Ok(error_frame(&e.to_string())));
+                    }
+                },
+                Err(e) => {
+                    let _ = tx.blocking_send(Ok(error_frame(&e.to_string())));
+                }
+            }
+            return;
+        }
         let mut produced = 0u32;
         let mut last_channels: Option<u16> = None;
         let mut failed = false;
@@ -356,17 +421,17 @@ async fn synthesize(
                         // Envelope carries index/total so the UI lays out a
                         // variant gallery without an extra batch-end marker.
                         let payload = serde_json::json!({ "i": index, "n": samples, "wav": b64 });
-                        let _ = tx.blocking_send(Ok(sse("wav", &payload.to_string())));
+                        let _ = tx.blocking_send(Ok(sse_frame("wav", &payload.to_string())));
                     }
                     Err(e) => {
                         failed = true;
-                        let _ = tx.blocking_send(Ok(error_frame(&sse, &e.to_string())));
+                        let _ = tx.blocking_send(Ok(error_frame(&e.to_string())));
                         break;
                     }
                 },
                 Err(e) => {
                     failed = true;
-                    let _ = tx.blocking_send(Ok(error_frame(&sse, &e.to_string())));
+                    let _ = tx.blocking_send(Ok(error_frame(&e.to_string())));
                     break;
                 }
             }
@@ -376,7 +441,7 @@ async fn synthesize(
                 "count": produced,
                 "channels": last_channels.unwrap_or(1),
             });
-            let _ = tx.blocking_send(Ok(sse("done", &payload.to_string())));
+            let _ = tx.blocking_send(Ok(sse_frame("done", &payload.to_string())));
         }
     });
 
@@ -412,7 +477,6 @@ fn start_job(
     params: std::collections::BTreeMap<String, serde_json::Value>,
     samples: u32,
 ) -> Result<Response, ApiError> {
-    use base64::Engine;
     use laverock_core::ProgressEvent;
 
     let job = state.jobs.create("synthesize")?;
@@ -547,9 +611,119 @@ fn start_job(
         .into_response())
 }
 
-fn error_frame(sse: &impl Fn(&str, &str) -> Bytes, message: &str) -> Bytes {
-    let json = serde_json::json!({ "message": message }).to_string();
-    sse("error", &json)
+/// Sentence budget for server-side streaming splits. Engines that declare a
+/// `LongTextPolicy` split themselves; this matches the range those policies
+/// use (80–120 characters).
+const STREAM_CHUNK_CHARS: usize = 100;
+/// Silence between streamed pieces, so the joined file does not run
+/// sentences together.
+const STREAM_PAUSE_MS: u32 = 120;
+
+/// Stream one take: emit each synthesized piece as an `audio` event and
+/// return the complete audio for history and the final `wav` frame.
+fn stream_take(
+    manager: &EngineManager,
+    engine_id: &str,
+    request: &SynthRequest,
+    tx: &tokio::sync::mpsc::Sender<std::result::Result<Bytes, std::io::Error>>,
+) -> Result<Audio, CoreError> {
+    use std::sync::atomic::{AtomicU32, Ordering};
+
+    if manager.long_text_policy(engine_id).is_some() {
+        // The engine's own splitter drives the sink, including the pause
+        // between pieces.
+        let frames = AtomicU32::new(0);
+        let sink_tx = tx.clone();
+        let sink: AudioSink = Arc::new(move |audio| {
+            let index = frames.fetch_add(1, Ordering::SeqCst);
+            send_audio_frame(&sink_tx, index, &audio)
+        });
+        let mut request = request.clone();
+        request.audio = Some(sink);
+        return manager.synthesize(engine_id, &request);
+    }
+
+    // No policy: split here so the first sentence can play while the rest
+    // is still being generated.
+    let pieces = laverock_core::segment::split(&request.text, STREAM_CHUNK_CHARS);
+    if pieces.len() < 2 {
+        let audio = manager.synthesize(engine_id, request)?;
+        send_audio_frame(tx, 0, &audio);
+        return Ok(audio);
+    }
+
+    let mut merged: Option<Audio> = None;
+    for (index, piece) in pieces.iter().enumerate() {
+        if let Some(progress) = &request.progress {
+            progress(laverock_core::ProgressEvent::Stage(format!(
+                "Synthesizing segment {}/{}",
+                index + 1,
+                pieces.len()
+            )));
+        }
+        let mut piece_request = request.clone();
+        piece_request.text = piece.clone();
+        piece_request.audio = None;
+        let audio = manager.synthesize(engine_id, &piece_request)?;
+        let audio = if index > 0 {
+            laverock_core::segment::with_leading_pause(audio, STREAM_PAUSE_MS)
+        } else {
+            audio
+        };
+        if !send_audio_frame(tx, index as u32, &audio) {
+            return Err(CoreError::Synth("audio stream closed".into()));
+        }
+        match &mut merged {
+            None => merged = Some(audio),
+            Some(merged) => {
+                if merged.sample_rate != audio.sample_rate {
+                    return Err(CoreError::Synth(format!(
+                        "engine returned mixed sample rates ({} Hz then {} Hz)",
+                        merged.sample_rate, audio.sample_rate
+                    )));
+                }
+                merged.samples.extend_from_slice(&audio.samples);
+            }
+        }
+    }
+    merged.ok_or_else(|| CoreError::Synth("streaming split produced no segments".into()))
+}
+
+/// Encode one piece and push it as an `audio` event. Returns false when the
+/// client is gone, which stops the engine before it generates more.
+fn send_audio_frame(
+    tx: &tokio::sync::mpsc::Sender<std::result::Result<Bytes, std::io::Error>>,
+    index: u32,
+    audio: &Audio,
+) -> bool {
+    let wav = match encode_wav_channels(&audio.samples, audio.sample_rate, audio.channels) {
+        Ok(wav) => wav,
+        Err(e) => {
+            tracing::warn!("streaming encode failed: {e}");
+            return true;
+        }
+    };
+    let b64 = base64::engine::general_purpose::STANDARD.encode(&wav);
+    let payload = serde_json::json!({
+        "i": index,
+        "sr": audio.sample_rate,
+        "ch": audio.channels,
+        "wav": b64,
+    });
+    tx.blocking_send(Ok(sse_frame("audio", &payload.to_string())))
+        .is_ok()
+}
+
+/// One framed Server-Sent Event.
+fn sse_frame(event: &str, data: &str) -> Bytes {
+    Bytes::from(format!("event: {event}\ndata: {data}\n\n"))
+}
+
+fn error_frame(message: &str) -> Bytes {
+    sse_frame(
+        "error",
+        &serde_json::json!({ "message": message }).to_string(),
+    )
 }
 
 /// Parse and range-check raw form fields against the engine's declared

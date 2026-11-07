@@ -335,6 +335,14 @@ impl EngineManager {
         }
     }
 
+    /// The engine's long-text policy, if it declares one. Used by the server
+    /// to decide whether it must split text itself for streaming.
+    pub fn long_text_policy(&self, id: &str) -> Option<crate::segment::LongTextPolicy> {
+        self.engine(id)
+            .ok()
+            .and_then(|engine| engine.long_text_policy())
+    }
+
     /// Convenience: load if needed and run one voice-conversion request.
     pub fn convert(&self, id: &str, req: &ConvertRequest) -> Result<Audio> {
         let engine = self.engine(id)?;

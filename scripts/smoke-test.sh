@@ -200,6 +200,31 @@ else
 fi
 fi
 
+if want stream; then
+echo "streaming synthesis"
+# Four sentences, over the server's 100-character split budget, so the
+# first audio frame must arrive before the whole text is done.
+stream_text='你好，我是 Laverock 的流式合成演示。这是一段比较长的文字，用来验证第一句生成后就能开始播放，而不是等整段完成。流式合成会按句子切分文本，每生成一段就立刻发送一个音频帧，浏览器收到后按顺序排入播放队列。这样长文本的首字节延迟就缩短到了第一句的生成时间。'
+stream_out=$(curl -sN --max-time 600 -X POST \
+  "$BASE/api/engines/$MODEL/synthesize" \
+  -H 'X-Laverock-Stream: 1' \
+  -F "$(field text "$stream_text")" \
+  -F "prompt=@$DIR/test_wavs/leijun-1.wav" \
+  -F "$(field prompt_text '那还是36年前, 1987年. 我呢考上了武汉大学的计算机系.')" \
+  -F 'stream_audio=1')
+frames=$(printf '%s\n' "$stream_out" | grep -c '^event: audio$' || true)
+[ "$frames" -ge 2 ] && ok "streamed $frames audio frames" \
+  || bad "streamed only $frames audio frames"
+case "$stream_out" in
+  *"event: wav"*) ok "stream final wav" ;;
+  *) bad "stream final wav missing" ;;
+esac
+case "$stream_out" in
+  *"event: done"*) ok "stream finished" ;;
+  *) bad "stream did not finish" ;;
+esac
+fi
+
 if want mp3; then
 echo "mp3 export (built-in encoder)"
 if curl -s "$BASE/api/health" | grep -q '"mp3":true'; then

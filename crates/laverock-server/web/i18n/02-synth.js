@@ -16,6 +16,10 @@ addI18n({
     'go': '生成语音', 'download.wav': '下载 WAV', 'download.mp3': '下载 MP3',
     'synth.samples': '候选项',
     'synth.samples_hint': '一次生成多段候选项逐一试听，选中满意的再下载。克隆引擎会通过不同的种子/采样本产生差异。',
+    'synth.stream_audio': '边生成边播放',
+    'synth.stream_audio_hint': '长文本在第一句生成后立即开始播放；仅单个候选项时生效。',
+    'synth.stop_stream': '停止播放',
+    'synth.stopped': '已停止',
   },
   en: {
     'synth.title': 'Synthesize',
@@ -34,5 +38,9 @@ addI18n({
     'go': 'Generate', 'download.wav': 'Download WAV', 'download.mp3': 'Download MP3',
     'synth.samples': 'Takes',
     'synth.samples_hint': 'Generate several takes at once to audition side by side, then download the one you like. Cloning engines vary them via seed/sampling.',
+    'synth.stream_audio': 'Play as it generates',
+    'synth.stream_audio_hint': 'Start playing once the first sentence is ready; applies to a single take.',
+    'synth.stop_stream': 'Stop playing',
+    'synth.stopped': 'Stopped',
   },
 });

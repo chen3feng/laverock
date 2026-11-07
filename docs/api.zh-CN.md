@@ -16,7 +16,7 @@ Cookie）；以下均指回环监听。
 | --- | --- | --- |
 | GET | `/api/health` | 服务状态 |
 | GET | `/api/engines` | 已注册引擎及其默认参数 |
-| POST | `/api/engines/:id/synthesize` | multipart：`text` 加 `profile_id` 或（`prompt` WAV + `prompt_text`），可附引擎参数 → WAV；加 `x-laverock-job: 1` 则作为后台任务运行 |
+| POST | `/api/engines/:id/synthesize` | multipart：`text` 加 `profile_id` 或（`prompt` WAV + `prompt_text`），可附引擎参数 → WAV；加 `x-laverock-job: 1` 则作为后台任务运行，或加 `x-laverock-stream: 1` + `stream_audio=1` 逐句流式下发 |
 | GET | `/api/jobs/:id` | 任务状态、进度与产物 |
 | GET | `/api/jobs/:id/events` | 任务的 Server-Sent Events（先发快照，再回放并跟进实时事件） |
 | POST | `/api/jobs/:id/cancel` | 请求停止任务 → `202` |
@@ -82,6 +82,24 @@ curl -X POST http://127.0.0.1:8787/api/engines/voxcpm2/synthesize \
   -F profile_id=p1793075127-c66c \
   -o out.wav
 ```
+
+## 流式音频
+
+`x-laverock-stream: 1` 已经把响应变成 Server-Sent Events（`stage`、`steps`、
+`wav`、`error`）。再加 multipart 字段 `stream_audio=1`，服务端会把长文本
+逐句合成，每完成一句就下发一段：
+
+```text
+event: audio
+data: {"i":0,"sr":24000,"ch":1,"wav":"<base64 WAV>"}
+```
+
+每个分片都是完整的 WAV 文件，客户端可以在下一句还在生成时就开始解码并
+排队播放。引擎没有长文本策略时，服务端按句子边界（约 100 字）自行切分；
+引擎自带策略时由引擎自己的分段器流式回调。全部完成后，完整音频仍以最后
+一个 `wav` 帧下发，并只在历史里记录一条。流式音频只对单个候选项
+（`samples=1`）和语音生效；音乐与多候选项请求会忽略该字段。不传该字段时
+响应与原来逐字节一致。
 
 ## 后台任务
 

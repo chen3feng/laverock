@@ -56,8 +56,17 @@
         <div class="hint" data-i18n="synth.samples_hint">一次生成多段候选项逐一试听，选中满意的再下载。</div>
       </div>
 
+      <div class="card">
+        <label class="switch">
+          <input type="checkbox" id="streamAudio" />
+          <span data-i18n="synth.stream_audio">边生成边播放</span>
+        </label>
+        <div class="hint" data-i18n="synth.stream_audio_hint">长文本在第一句生成后立即开始播放；仅单个候选项时生效。</div>
+      </div>
+
       <div class="actions">
         <button id="go" type="button" data-i18n="go">生成语音</button>
+        <button class="ghost" id="stopStream" type="button" hidden data-i18n="synth.stop_stream">停止播放</button>
         <span id="status"></span>
       </div>
       <div id="synthProgress" class="pbar" hidden><div class="pbar-fill indeterminate"></div></div>

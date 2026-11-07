@@ -18,7 +18,7 @@ describes the loopback listener.
 | --- | --- | --- |
 | GET | `/api/health` | service status |
 | GET | `/api/engines` | registered engines and their defaults |
-| POST | `/api/engines/:id/synthesize` | multipart `text` plus either `profile_id` or (`prompt` WAV + `prompt_text`); optional engine parameters → WAV. Add `x-laverock-job: 1` to run it as a background job |
+| POST | `/api/engines/:id/synthesize` | multipart `text` plus either `profile_id` or (`prompt` WAV + `prompt_text`); optional engine parameters → WAV. Add `x-laverock-job: 1` to run it as a background job, or `x-laverock-stream: 1` + `stream_audio=1` to stream sentences |
 | GET | `/api/jobs/:id` | job status, progress and artifacts |
 | GET | `/api/jobs/:id/events` | job events as Server-Sent Events (snapshot, then replay and live) |
 | POST | `/api/jobs/:id/cancel` | ask the worker to stop → `202` |
@@ -87,6 +87,27 @@ curl -X POST http://127.0.0.1:8787/api/engines/voxcpm2/synthesize \
   -F profile_id=p1793075127-c66c \
   -o out.wav
 ```
+
+## Streaming audio
+
+`x-laverock-stream: 1` already turns the response into Server-Sent Events
+(`stage`, `steps`, `wav`, `error`). Adding the multipart field
+`stream_audio=1` makes the server synthesize long text sentence by
+sentence and send each piece as it finishes:
+
+```text
+event: audio
+data: {"i":0,"sr":24000,"ch":1,"wav":"<base64 WAV>"}
+```
+
+Every chunk is a complete WAV file, so a client can decode and schedule it
+while the next sentence is still generating. The server splits text itself
+at sentence boundaries (~100 characters) when the engine has no long-text
+policy; engines that have one stream their own segments. When the run
+finishes, the complete audio still arrives as the final `wav` frame and is
+recorded once in history. Audio streaming applies only to a single take
+(`samples=1`) and to speech; music and multi-take requests ignore the
+field. Omitting it leaves the response byte-for-byte unchanged.
 
 ## Background jobs
 
