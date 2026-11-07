@@ -67,6 +67,16 @@ cat > "$DEST/engine.json" <<EOF
       ],
       "default": "3",
       "hint": {"en": "Beam search reads slightly better; greedy skips the extra beams.", "zh": "束搜索韵律更稳；贪心省掉多余搜索，明显更快。"}
+    },
+    {
+      "name": "text_chunk_size", "label": {"en": "Chunk size (characters)", "zh": "分段长度（字）"}, "type": "int",
+      "min": 40, "max": 600, "step": 10, "default": 600,
+      "hint": {"en": "Lower splits long text into more segments: 40 is roughly one sentence per segment, with clearer full stops but 10–20% slower synthesis.", "zh": "越小分段越多：约 40 字接近每句一段，句号更清楚，但合成慢 10–20%。"}
+    },
+    {
+      "name": "interval_silence_ms", "label": {"en": "Pause between segments (ms)", "zh": "分段间停顿（毫秒）"}, "type": "int",
+      "min": 0, "max": 2000, "step": 50, "default": 400,
+      "hint": {"en": "Silence audio.cpp inserts between segments; the model's own pause inside a segment is not affected.", "zh": "audio.cpp 在分段之间插入的静音；段内句号停顿不受此影响。"}
     }
   ],
   "defaults": { "speed": 1.0, "num_steps": 1 }
