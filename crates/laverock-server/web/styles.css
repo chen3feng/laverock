@@ -154,6 +154,28 @@
     text-align: center; color: var(--muted); font-size: 13.5px;
   }
   .model-desc { font-size: 13px; color: #b9bfd2; }
+  /* The head + summary is the expand toggle; actions stay outside it so
+     installing or deleting never opens the details by accident. */
+  .model-toggle {
+    display: flex; flex-direction: column; gap: 6px; width: 100%;
+    background: none; border: 0; padding: 0; color: inherit;
+    font: inherit; text-align: left; cursor: pointer;
+  }
+  .model-toggle .model-head b { flex: 1; }
+  .model-toggle:hover b { color: var(--accent2); }
+  .model-summary { font-size: 12px; color: var(--muted); }
+  .chev {
+    flex: none; width: 7px; height: 7px; margin: 0 4px 2px 0;
+    border-right: 1.5px solid var(--muted);
+    border-bottom: 1.5px solid var(--muted);
+    transform: rotate(-45deg); transition: transform .15s;
+  }
+  .model-toggle[aria-expanded="true"] .chev { transform: rotate(45deg); }
+  .model-details {
+    display: flex; flex-direction: column; gap: 8px;
+    border-top: 1px solid var(--line); padding-top: 10px;
+  }
+  .model-details[hidden] { display: none; }
   .model-card .model-actions { display: flex; align-items: center; gap: 10px; margin-top: auto; flex-wrap: wrap; }
   .log {
     background: #0b0c10; border: 1px solid var(--line); border-radius: 9px;

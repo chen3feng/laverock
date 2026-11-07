@@ -128,7 +128,10 @@ const I18N = {
     'models.desktop.only': '模型管理仅在电脑端可用',
     'models.desktop.hint': '手机上可以查看已安装的引擎并直接合成。安装新模型请在电脑上打开同一界面。',
     'models.installed': '已安装', 'models.installed.empty': '还没有安装任何模型。从下方选择一个开始下载。',
-    'models.available': '可安装',
+    'models.empty': '没有可显示的模型。',
+    'models.cat.tts': '语音合成', 'models.cat.stt': '语音识别',
+    'models.cat.music': '音乐生成', 'models.cat.audio': '音频处理', 'models.cat.other': '其他',
+    'models.show_details': '展开详情', 'models.hide_details': '收起详情',
 
     'history.title': '历史',
     'history.sub': '本机生成的语音与音乐，最多保留 100 条或 1 GB。',
@@ -167,7 +170,7 @@ const I18N = {
 
     'cap.tts': '语音合成', 'cap.clone': '声音克隆', 'cap.voice-design': '声音设计',
     'cap.instruct': '指令控制', 'cap.preset-voices': '预置音色', 'cap.stt': '语音识别',
-    'cap.music': '音乐生成',
+    'cap.music': '音乐生成', 'cap.multilingual': '多语言', 'cap.enhance': '人声增强',
 
     'cap.file': '选择文件', 'cap.record': '● 录音', 'cap.stop': '■ 停止', 'cap.none': '未选择',
     'cap.transcribe': '✎ 转写', 'transcribe.busy': '转写中…',
@@ -426,7 +429,10 @@ const I18N = {
     'models.desktop.only': 'Model management is available on desktop only',
     'models.desktop.hint': 'On a phone you can view installed engines and synthesize. Install new models from the same screen on the computer.',
     'models.installed': 'Installed', 'models.installed.empty': 'No models installed yet. Pick one below to download.',
-    'models.available': 'Available',
+    'models.empty': 'No models to show.',
+    'models.cat.tts': 'Speech synthesis', 'models.cat.stt': 'Speech recognition',
+    'models.cat.music': 'Music generation', 'models.cat.audio': 'Audio tools', 'models.cat.other': 'Other',
+    'models.show_details': 'Show details', 'models.hide_details': 'Hide details',
 
     'history.title': 'History',
     'history.sub': 'Speech and music generated on this computer, capped at 100 entries or 1 GB.',
@@ -466,7 +472,7 @@ const I18N = {
 
     'cap.tts': 'Speech synthesis', 'cap.clone': 'Voice cloning', 'cap.voice-design': 'Voice design',
     'cap.instruct': 'Voice instructions', 'cap.preset-voices': 'Preset voices', 'cap.stt': 'Speech-to-text',
-    'cap.music': 'Music generation',
+    'cap.music': 'Music generation', 'cap.multilingual': 'Multilingual', 'cap.enhance': 'Voice cleanup',
 
     'cap.file': 'Choose file', 'cap.record': '● Record', 'cap.stop': '■ Stop', 'cap.none': 'None',
     'cap.transcribe': '✎ Transcribe', 'transcribe.busy': 'Transcribing…',
