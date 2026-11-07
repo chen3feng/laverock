@@ -1,11 +1,55 @@
 // ---------------------------------------------------------------- models
 
+// Cards remember whether the user expanded them so the install poll can
+// re-render the list without collapsing everything.
+const expandedModels = new Set();
+
+const MODEL_CATEGORIES = [
+  { key: 'tts', caps: ['tts'] },
+  { key: 'stt', caps: ['stt'] },
+  { key: 'music', caps: ['music'] },
+  { key: 'audio', caps: ['enhance'] },
+];
+
+function modelCategory(caps) {
+  const list = caps || [];
+  for (const category of MODEL_CATEGORIES) {
+    if (category.caps.some((cap) => list.includes(cap))) return category.key;
+  }
+  return 'other';
+}
+
+// Manual installs have a manifest but no catalog entry; give them the
+// same shape so one card renderer serves both.
+function engineAsModel(engine) {
+  return {
+    id: engine.id,
+    dir: engine.id,
+    name: engine.name,
+    description: '',
+    size: '',
+    languages: engine.languages || [],
+    capabilities: engine.capabilities || [],
+    note: null,
+    unsupported: null,
+    installed: true,
+    problem: null,
+    engine_id: engine.id,
+    job: null,
+    manual: true,
+  };
+}
+
+// Remote clients only know the engines the server reports.
+function renderInstalledEngines() {
+  renderModelGroups(engines.map((e) => ({ model: engineAsModel(e), installed: true })), true);
+}
+
 async function loadModels() {
   if (!session.loopback) {
     $('modelPaths').hidden = true;
     $('modelsNotice').hidden = false;
-    $('catalogSection').hidden = true;
-    renderInstalledOnly();
+    renderInstalledEngines();
     return;
   }
   $('modelsNotice').hidden = true;
@@ -27,52 +71,57 @@ function engineFor(model) {
   return engines.find((e) => e.id === (model.engine_id || model.dir));
 }
 
-function renderInstalledOnly() {
-  const box = $('installedModels');
-  box.innerHTML = '';
-  for (const e of engines) {
-    const el = document.createElement('div');
-    el.className = 'model-card';
-    el.innerHTML = `
-      <div class="model-head"><b>${esc(e.name)}</b><span class="pill ok">${t('models.installed')}</span></div>
-      <div class="chips">${(e.languages || []).map((l) => `<span class="chip">${esc(l)}</span>`).join('')}</div>
-      <div class="hint">${esc(e.kind)} · ${esc((e.capabilities || []).map(capabilityLabel).join(t("ui.text")))}</div>`;
-    box.appendChild(el);
-  }
-  $('installedEmpty').hidden = engines.length > 0;
-}
-
 function renderModels() {
-  const installedBox = $('installedModels');
-  const catalogBox = $('catalogModels');
-  installedBox.innerHTML = '';
-  catalogBox.innerHTML = '';
-
-  const catalogEngineIds = new Set();
+  const known = new Set();
+  const entries = [];
   for (const model of modelsData.models) {
-    if (model.installed) {
-      catalogEngineIds.add(model.engine_id || model.dir);
-      installedBox.appendChild(modelCard(model, true));
-    } else {
-      catalogBox.appendChild(modelCard(model, false));
-    }
+    known.add(model.engine_id || model.dir);
+    entries.push({ model, installed: model.installed });
   }
 
   // Engines whose manifest is not in the catalog (manual installs).
   for (const engine of engines) {
-    if (catalogEngineIds.has(engine.id)) continue;
+    if (known.has(engine.id)) continue;
     if (modelsData.models.some((m) => m.dir === engine.id)) continue;
-    const el = document.createElement('div');
-    el.className = 'model-card';
-    el.innerHTML = `
-      <div class="model-head"><b>${esc(engine.name)}</b><span class="pill ok">${t('models.installed')}</span></div>
-      <div class="chips">${(engine.languages || []).map((l) => `<span class="chip">${esc(l)}</span>`).join('')}</div>
-      <div class="hint">${esc(engine.kind)} · ${t("ui.manually_installed_manifest")}</div>`;
-    installedBox.appendChild(el);
+    entries.push({ model: engineAsModel(engine), installed: true });
   }
 
-  $('installedEmpty').hidden = installedBox.children.length > 0;
-  $('catalogSection').hidden = catalogBox.children.length === 0;
+  renderModelGroups(entries, false);
+}
+
+function renderModelGroups(entries, readonly) {
+  const box = $('modelGroups');
+  box.innerHTML = '';
+
+  const groups = new Map();
+  for (const entry of entries) {
+    const key = modelCategory(entry.model.capabilities);
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(entry);
+  }
+
+  let shown = 0;
+  for (const key of [...MODEL_CATEGORIES.map((c) => c.key), 'other']) {
+    const items = groups.get(key);
+    if (!items || items.length === 0) continue;
+    // Installed models first; everything else keeps catalog order.
+    items.sort((a, b) => Number(b.installed) - Number(a.installed));
+    const title = document.createElement('h2');
+    title.className = 'section-title';
+    title.textContent = t('models.cat.' + key);
+    box.appendChild(title);
+    const grid = document.createElement('div');
+    grid.className = 'grid';
+    for (const entry of items) {
+      grid.appendChild(modelCard(entry.model, entry.installed, readonly));
+    }
+    box.appendChild(grid);
+    shown += items.length;
+  }
+
+  const empty = $('installedEmpty');
+  empty.textContent = t(readonly ? 'models.installed.empty' : 'models.empty');
+  empty.hidden = shown > 0;
 }
 
 function progressBarHtml(job) {
@@ -88,44 +137,75 @@ function progressBarHtml(job) {
   return `<div class="pbar">${fill}</div><div class="pbar-label"><span>${label}</span>${right}</div>`;
 }
 
-function modelCard(model, installed) {
+function modelCard(model, installed, readonly) {
   const job = model.job;
   const running = !!job && job.status === 'running';
   const stale = installed && !!model.problem;
   const failed = !!job && job.status === 'failed' && !installed;
   const engine = engineFor(model);
+  const open = expandedModels.has(model.id);
+  const caps = (model.capabilities || []).map(capabilityLabel).join(t("ui.text"));
+  const summary = [model.size, caps].filter(Boolean).join(t("ui.text"));
+  const toggleTitle = open ? t('models.hide_details') : t('models.show_details');
   const el = document.createElement('div');
   el.className = 'model-card';
   el.innerHTML = `
-    <div class="model-head">
-      <b>${esc(model.name)}</b>
-      ${installed
-        ? `<span class="pill ${stale ? 'warn' : 'ok'}">${stale
-          ? (t("ui.needs_update"))
-          : t('models.installed')}</span>`
-        : `<span class="pill">${esc(model.size || '')}</span>`}
+    <button class="model-toggle" type="button" aria-expanded="${open}" title="${esc(toggleTitle)}">
+      <span class="model-head">
+        <b>${esc(model.name)}</b>
+        ${installed
+          ? `<span class="pill ${stale ? 'warn' : 'ok'}">${stale
+            ? (t("ui.needs_update"))
+            : t('models.installed')}</span>`
+          : ''}
+        <span class="chev" aria-hidden="true"></span>
+      </span>
+      ${summary ? `<span class="model-summary">${esc(summary)}</span>` : ''}
+    </button>
+    <div class="model-details"${open ? '' : ' hidden'}>
+      ${model.description ? `<div class="model-desc">${esc(model.description)}</div>` : ''}
+      ${(model.languages || []).length
+        ? `<div class="chips">${(model.languages || []).map((l) => `<span class="chip">${esc(l)}</span>`).join('')}</div>`
+        : ''}
+      ${model.note ? `<div class="hint">${esc(model.note)}</div>` : ''}
+      ${model.unsupported ? `<div class="hint err">${esc(model.unsupported)}</div>` : ''}
+      ${stale ? `<div class="hint err">${esc(model.problem)}</div>` : ''}
+      ${model.manual ? `<div class="hint">${t("ui.manually_installed_manifest")}</div>` : ''}
+      ${installed && !stale && engine ? `<div class="hint">${esc(engine.kind)} · ${engine.loaded
+        ? (t("ui.loaded_in_memory"))
+        : (t("ui.loaded_on_first_use"))}</div>` : ''}
+      ${installed ? `<div class="hint">${t("ui.directory")}: models/${esc(model.dir)}</div>` : ''}
+      ${job && (running || failed) ? `<pre class="log">${esc(job.log || '')}</pre>` : ''}
     </div>
-    <div class="model-desc">${esc(model.description)}</div>
-    <div class="chips">${(model.languages || []).map((l) => `<span class="chip">${esc(l)}</span>`).join('')}</div>
-    ${model.note ? `<div class="hint">${esc(model.note)}</div>` : ''}
-    ${model.unsupported ? `<div class="hint err">${esc(model.unsupported)}</div>` : ''}
-    ${stale ? `<div class="hint err">${esc(model.problem)}</div>` : ''}
-    ${installed && !stale && engine ? `<div class="hint">${esc(engine.kind)} · ${engine.loaded
-      ? (t("ui.loaded_in_memory"))
-      : (t("ui.loaded_on_first_use"))}</div>` : ''}
     ${running ? progressBarHtml(job) : ''}
-    ${job && (running || failed) ? `<pre class="log">${esc(job.log || '')}</pre>` : ''}
     <div class="model-actions"></div>`;
+
+  const toggle = el.querySelector('.model-toggle');
+  const details = el.querySelector('.model-details');
+  toggle.onclick = () => {
+    const next = toggle.getAttribute('aria-expanded') !== 'true';
+    toggle.setAttribute('aria-expanded', String(next));
+    toggle.title = next ? t('models.hide_details') : t('models.show_details');
+    details.hidden = !next;
+    if (next) expandedModels.add(model.id);
+    else expandedModels.delete(model.id);
+  };
+
+  if (readonly) {
+    el.querySelector('.model-actions').remove();
+    return el;
+  }
 
   const actions = el.querySelector('.model-actions');
   if (installed && !stale) {
-    actions.innerHTML = `<span class="hint">${t("ui.directory")}: models/${esc(model.dir)}</span>`;
     actions.appendChild(deleteButton(model));
     return el;
   }
 
+  const scriptsReady = !!(modelsData && modelsData.scripts_dir);
   const btn = document.createElement('button');
   btn.type = 'button';
+  btn.className = 'small';
   btn.textContent = running
     ? (t("ui.installing"))
     : stale
@@ -133,17 +213,11 @@ function modelCard(model, installed) {
       : failed
         ? (t("ui.retry_install"))
         : (t("ui.download_install"));
-  btn.disabled = running || !modelsData.scripts_dir || !!model.unsupported;
+  btn.disabled = running || !scriptsReady || !!model.unsupported;
   btn.onclick = () => installModel(model.id);
   actions.appendChild(btn);
-  if (installed) {
-    const dir = document.createElement('span');
-    dir.className = 'hint';
-    dir.textContent = `${t("ui.directory")}: models/${model.dir}`;
-    actions.appendChild(dir);
-    actions.appendChild(deleteButton(model));
-  }
-  if (!modelsData.scripts_dir) {
+  if (installed) actions.appendChild(deleteButton(model));
+  if (!scriptsReady) {
     const hint = document.createElement('span');
     hint.className = 'hint err';
     hint.textContent = t("ui.scripts_directory_not_found");
@@ -157,7 +231,7 @@ function modelCard(model, installed) {
 function deleteButton(model) {
   const btn = document.createElement('button');
   btn.type = 'button';
-  btn.className = 'ghost danger';
+  btn.className = 'ghost danger small';
   btn.textContent = t('ui.delete_model');
   btn.onclick = async () => {
     const ok = await confirmAction(

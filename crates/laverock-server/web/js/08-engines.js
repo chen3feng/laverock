@@ -33,7 +33,7 @@ async function loadEngines() {
   syncMusicEngine();
   if (currentPage() === 'models') {
     if (modelsData) renderModels();
-    else if (!session.loopback) renderInstalledOnly();
+    else if (!session.loopback) renderInstalledEngines();
   }
 }
 
