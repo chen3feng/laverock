@@ -31,6 +31,14 @@ BACKEND="$(lv_audiocpp_backend)"
 lv_hf_download_file audio-cpp/audio.cpp-gguf "$PACKAGE" "$GGUF" 8 \
   "Downloading VoxCPM2 weights (${PRECISION}, ~2.8 GB)"
 
+# 2b. Drop what the retired llama.cpp-omni layout left behind: two GGUFs
+#     (~3.3 GB together) and the voxcpm2-cli runner. Reinstalling in place
+#     used to keep them next to the new weights forever; the engine reads
+#     only the audio.cpp package above. Remove the cached runner too.
+rm -f "$DEST"/VoxCPM2-BaseLM-*.gguf "$DEST"/VoxCPM2-Acoustic-*.gguf \
+  "$DEST/voxcpm2-cli" "$DEST/voxcpm2-cli.exe"
+rm -rf "$TOOLS/voxcpm2-runner"
+
 # 3. Manifest. VoxCPM2 supports prompt-less TTS as well as zero-shot cloning;
 #    the runner adds --voice-ref only when the request carries a prompt.
 cat > "$DEST/engine.json" <<EOF
