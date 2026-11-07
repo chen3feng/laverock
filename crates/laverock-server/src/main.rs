@@ -1754,16 +1754,27 @@ async fn main() {
     let settings = Arc::new(SettingsStore::open(&data_dir).expect("open settings"));
     let stored = settings.get();
     let workspace = stored.workspace_paths();
-    let models_dir = match &workspace {
-        Some((models, _)) => models.to_string_lossy().into_owned(),
-        None => std::env::var("LAVEROCK_MODELS_DIR").unwrap_or_else(|_| "models".to_string()),
+    // Several models directories may be layered: the first that provides an
+    // engine id wins and new installs go to the first. `split_paths` uses the
+    // platform separator (`:` on Unix, `;` on Windows).
+    let models_dirs: Vec<std::path::PathBuf> = match &workspace {
+        Some((models, _)) => vec![models.clone()],
+        None => {
+            let raw = std::env::var("LAVEROCK_MODELS_DIR").unwrap_or_else(|_| "models".into());
+            let paths: Vec<_> = std::env::split_paths(&raw).collect();
+            if paths.is_empty() {
+                vec![std::path::PathBuf::from("models")]
+            } else {
+                paths
+            }
+        }
     };
     let tools_dir: Option<std::path::PathBuf> = match workspace {
         Some((_, tools)) => Some(tools),
         None => std::env::var_os("LAVEROCK_TOOLS_DIR").map(std::path::PathBuf::from),
     };
 
-    let manager = Arc::new(EngineManager::open(&models_dir).expect("scan models dir"));
+    let manager = Arc::new(EngineManager::open_all(models_dirs.clone()).expect("scan models dir"));
     let profiles = Arc::new(ProfileStore::open(&data_dir).expect("open data dir"));
     // Voices saved before the recording library existed become one-take
     // voices. Idempotent, but only pay for it when there is something to do.
@@ -1774,15 +1785,15 @@ async fn main() {
     let history = Arc::new(history::HistoryStore::open(&data_dir).expect("open history"));
     let remote = Arc::new(RemoteState::open(&data_dir).expect("open remote state"));
     let scripts_dir = models::resolve_scripts_dir();
-    let model_service = Arc::new(ModelService::new(
-        &models_dir,
+    let model_service = Arc::new(ModelService::new_multi(
+        models_dirs.clone(),
         tools_dir.clone(),
         scripts_dir.clone(),
         settings.clone(),
         manager.clone(),
     ));
     tracing::info!(
-        dir = %models_dir,
+        dirs = ?models_dirs,
         tools = ?tools_dir,
         engines = manager.len(),
         data = %data_dir,
@@ -1801,7 +1812,7 @@ async fn main() {
         remote: remote.clone(),
         settings,
         models: model_service,
-        transcriber: Arc::new(laverock_core::Transcriber::new(&models_dir)),
+        transcriber: Arc::new(laverock_core::Transcriber::new_all(models_dirs.clone())),
         lan: lan_tx,
         port,
     };

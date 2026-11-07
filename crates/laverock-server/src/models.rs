@@ -129,7 +129,9 @@ pub struct ModelList {
 }
 
 pub struct ModelService {
-    models_root: PathBuf,
+    /// Models directories, highest priority first. Installs write to the
+    /// first; reads search all of them.
+    models_roots: Vec<PathBuf>,
     tools_root: Option<PathBuf>,
     scripts_dir: Option<PathBuf>,
     settings: Arc<SettingsStore>,
@@ -143,8 +145,8 @@ pub struct ModelService {
 }
 
 impl ModelService {
-    pub fn new(
-        models_root: impl Into<PathBuf>,
+    pub fn new_multi(
+        models_roots: Vec<PathBuf>,
         tools_root: Option<PathBuf>,
         scripts_dir: Option<PathBuf>,
         settings: Arc<SettingsStore>,
@@ -152,14 +154,19 @@ impl ModelService {
     ) -> Self {
         // Displaying an absolute path is friendlier than the default
         // relative "models"; the directory may not exist yet.
-        let models_root = models_root.into();
-        let models_root = clean_native(std::fs::canonicalize(&models_root).unwrap_or(models_root));
+        let mut models_roots: Vec<PathBuf> = models_roots
+            .into_iter()
+            .map(|root| clean_native(std::fs::canonicalize(&root).unwrap_or(root)))
+            .collect();
+        if models_roots.is_empty() {
+            models_roots.push(PathBuf::from("models"));
+        }
         let tools_root = tools_root.map(|p| clean_native(std::fs::canonicalize(&p).unwrap_or(p)));
         // Paths handed in by the desktop shell can contain `..`; show
         // clean paths in the UI and hand scripts a stable one.
         let scripts_dir = scripts_dir.map(|p| clean_native(std::fs::canonicalize(&p).unwrap_or(p)));
         Self {
-            models_root,
+            models_roots,
             tools_root,
             scripts_dir,
             settings,
@@ -169,6 +176,20 @@ impl ModelService {
         }
     }
 
+    /// The directory new installs are written to.
+    fn write_root(&self) -> &Path {
+        &self.models_roots[0]
+    }
+
+    /// First models directory containing `dir_name` (a catalog `dir` or an
+    /// engine id), highest priority first.
+    fn find_model_dir(&self, dir_name: &str) -> Option<PathBuf> {
+        self.models_roots
+            .iter()
+            .map(|root| root.join(dir_name))
+            .find(|dir| dir.is_dir())
+    }
+
     pub fn list(&self, lang: &str) -> ModelList {
         let engines = self.manager.list();
         let jobs = self.jobs.lock().expect("jobs lock poisoned");
@@ -176,20 +197,22 @@ impl ModelService {
         let mut known = Vec::new();
 
         for entry in catalog() {
-            let manifest = self.models_root.join(&entry.dir).join("engine.json");
-            let has_manifest = manifest.is_file();
-            let engine_id = read_engine_id(&manifest);
+            let dir = self.find_model_dir(&entry.dir);
+            let manifest = dir.as_ref().map(|dir| dir.join("engine.json"));
+            let has_manifest = manifest.as_ref().is_some_and(|path| path.is_file());
+            let engine_id = manifest.as_ref().and_then(|path| read_engine_id(path));
             let installed = has_manifest
-                || entry
-                    .marker
-                    .as_ref()
-                    .is_some_and(|name| self.models_root.join(&entry.dir).join(name).is_file());
+                || dir.as_ref().is_some_and(|dir| {
+                    entry
+                        .marker
+                        .as_ref()
+                        .is_some_and(|name| dir.join(name).is_file())
+                });
             // Marker packs (voice cleanup) have no manifest by design; only
             // engine installs are checked for one.
-            let problem = if has_manifest {
-                manifest_problem(&manifest, lang)
-            } else {
-                None
+            let problem = match &manifest {
+                Some(path) if has_manifest => manifest_problem(path, lang),
+                _ => None,
             };
             if let Some(id) = &engine_id {
                 known.push(id.clone());
@@ -219,10 +242,12 @@ impl ModelService {
 
         // Models placed manually (or shipped separately) still show up.
         for engine in engines {
-            if known.contains(&engine.id) {
+            if engine.shadowed || known.contains(&engine.id) {
                 continue;
             }
-            let dir = self.models_root.join(&engine.id);
+            let Some(dir) = self.find_model_dir(&engine.id) else {
+                continue;
+            };
             if !dir.join("engine.json").is_file() {
                 continue;
             }
@@ -251,7 +276,7 @@ impl ModelService {
 
         ModelList {
             models,
-            models_dir: self.models_root.display().to_string(),
+            models_dir: self.write_root().display().to_string(),
             scripts_dir: self.scripts_dir.as_ref().map(|p| p.display().to_string()),
         }
     }
@@ -283,11 +308,13 @@ impl ModelService {
         // A healthy install is left alone; a broken/outdated one (e.g. the
         // VoxCPM2 layout from the retired llama.cpp runner) may be
         // reinstalled in place — the script rewrites engine.json.
-        let manifest_path = self.models_root.join(&entry.dir).join("engine.json");
-        if manifest_path.is_file() && manifest_problem(&manifest_path, "en").is_none() {
-            return Err(CoreError::UserError(
-                i18n::Message::new(Key::AlreadyInstalled).arg("model", &entry.name),
-            ));
+        if let Some(dir) = self.find_model_dir(&entry.dir) {
+            let manifest_path = dir.join("engine.json");
+            if manifest_path.is_file() && manifest_problem(&manifest_path, "en").is_none() {
+                return Err(CoreError::UserError(
+                    i18n::Message::new(Key::AlreadyInstalled).arg("model", &entry.name),
+                ));
+            }
         }
 
         let scripts = self
@@ -317,7 +344,7 @@ impl ModelService {
         let jobs = self.jobs.clone();
         let settings = self.settings.clone();
         let manager = self.manager.clone();
-        let models_root = self.models_root.clone();
+        let models_root = self.write_root().to_path_buf();
         let tools_root = self.tools_root.clone();
         let script_dir = scripts.clone();
         let entry_for_thread = entry.clone();
@@ -399,9 +426,10 @@ impl ModelService {
             }
             hidden.insert(entry.id.clone());
             hidden.insert(entry.dir.clone());
-            let manifest = self.models_root.join(&entry.dir).join("engine.json");
-            if let Some(id) = read_engine_id(&manifest) {
-                hidden.insert(id);
+            if let Some(dir) = self.find_model_dir(&entry.dir) {
+                if let Some(id) = read_engine_id(&dir.join("engine.json")) {
+                    hidden.insert(id);
+                }
             }
         }
         hidden
@@ -411,23 +439,24 @@ impl ModelService {
     /// is a catalog entry, otherwise the installed manifest that names it.
     fn model_dir(&self, id: &str) -> Option<PathBuf> {
         if let Some(entry) = catalog().iter().find(|e| e.id == id) {
-            let dir = self.models_root.join(&entry.dir);
-            if dir.is_dir() {
+            if let Some(dir) = self.find_model_dir(&entry.dir) {
                 return Some(dir);
             }
         }
-        let entries = std::fs::read_dir(&self.models_root).ok()?;
-        for entry in entries.flatten() {
-            let dir = entry.path();
-            if !dir.is_dir() {
-                continue;
-            }
-            let name = entry.file_name();
-            if name.to_string_lossy() == id && dir.join("engine.json").is_file() {
-                return Some(dir);
-            }
-            if read_engine_id(&dir.join("engine.json")).as_deref() == Some(id) {
-                return Some(dir);
+        for root in &self.models_roots {
+            let entries = std::fs::read_dir(root).ok()?;
+            for entry in entries.flatten() {
+                let dir = entry.path();
+                if !dir.is_dir() {
+                    continue;
+                }
+                let name = entry.file_name();
+                if name.to_string_lossy() == id && dir.join("engine.json").is_file() {
+                    return Some(dir);
+                }
+                if read_engine_id(&dir.join("engine.json")).as_deref() == Some(id) {
+                    return Some(dir);
+                }
             }
         }
         None
@@ -438,7 +467,7 @@ impl ModelService {
     }
 
     pub fn models_dir(&self) -> &Path {
-        &self.models_root
+        self.write_root()
     }
 
     pub fn scripts_dir(&self) -> Option<&Path> {
@@ -1355,7 +1384,8 @@ mod tests {
         .unwrap();
         let settings = Arc::new(SettingsStore::open(&base).unwrap());
         let manager = Arc::new(EngineManager::open(&models).unwrap());
-        let service = ModelService::new(&models, None, None, settings, manager.clone());
+        let service =
+            ModelService::new_multi(vec![models.clone()], None, None, settings, manager.clone());
         assert!(manager.list().iter().any(|e| e.id == "manual"));
 
         service.remove("manual").unwrap();
@@ -1376,7 +1406,7 @@ mod tests {
         std::fs::create_dir_all(&models).unwrap();
         let settings = Arc::new(SettingsStore::open(&base).unwrap());
         let manager = Arc::new(EngineManager::open(&models).unwrap());
-        let service = ModelService::new(&models, None, None, settings, manager);
+        let service = ModelService::new_multi(vec![models.clone()], None, None, settings, manager);
 
         let hidden = service.hidden_engine_ids();
         if cfg!(windows) {
@@ -1401,7 +1431,7 @@ mod tests {
         std::fs::write(models.join("enhance/bs-roformer.gguf"), b"stub").unwrap();
         let settings = Arc::new(SettingsStore::open(&base).unwrap());
         let manager = Arc::new(EngineManager::open(&models).unwrap());
-        let service = ModelService::new(&models, None, None, settings, manager);
+        let service = ModelService::new_multi(vec![models.clone()], None, None, settings, manager);
 
         let entry = service
             .list("zh")

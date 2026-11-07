@@ -16,7 +16,7 @@ use crate::{audio::decode_wav, manifest::Manifest, CoreError, Result};
 
 /// Holds an optional loaded recognizer; one model at a time.
 pub struct Transcriber {
-    models_root: PathBuf,
+    models_roots: Vec<PathBuf>,
     inner: Mutex<Option<Recognizer>>,
 }
 
@@ -26,15 +26,21 @@ struct Recognizer {
 
 impl Transcriber {
     pub fn new(models_root: impl AsRef<Path>) -> Self {
+        Self::new_all(vec![models_root.as_ref().to_path_buf()])
+    }
+
+    /// Search several models directories for the STT model, highest
+    /// priority first (the same layering as the engine registry).
+    pub fn new_all(models_roots: Vec<PathBuf>) -> Self {
         Self {
-            models_root: models_root.as_ref().to_path_buf(),
+            models_roots,
             inner: Mutex::new(None),
         }
     }
 
     /// Whether an STT model directory exists (cheap, no model load).
     pub fn available(&self) -> bool {
-        model_manifest(&self.models_root).is_ok()
+        model_manifest_in(&self.models_roots).is_ok()
     }
 
     /// Transcribe a WAV clip to text, loading the model on first call.
@@ -49,7 +55,7 @@ impl Transcriber {
             .lock()
             .map_err(|_| CoreError::Load("transcriber lock poisoned".into()))?;
         if guard.is_none() {
-            *guard = Some(Recognizer::load(&self.models_root)?);
+            *guard = Some(Recognizer::load(&self.models_roots)?);
         }
         let recognizer = guard.as_ref().unwrap();
 
@@ -65,8 +71,8 @@ impl Transcriber {
 }
 
 impl Recognizer {
-    fn load(models_root: &Path) -> Result<Self> {
-        let (manifest, dir) = model_manifest(models_root)?;
+    fn load(models_roots: &[PathBuf]) -> Result<Self> {
+        let (manifest, dir) = model_manifest_in(models_roots)?;
         let stt = manifest
             .stt
             .as_ref()
@@ -108,8 +114,21 @@ impl Recognizer {
     }
 }
 
-/// Find the newest STT model directory: returns its manifest and directory.
-pub fn model_manifest(models_root: &Path) -> Result<(Manifest, PathBuf)> {
+/// Find the newest STT manifest across several models directories. The
+/// highest-priority directory wins; within it, the most recently installed
+/// STT model wins.
+pub fn model_manifest_in(models_roots: &[PathBuf]) -> Result<(Manifest, PathBuf)> {
+    for root in models_roots {
+        if let Ok(found) = model_manifest_one(root) {
+            return Ok(found);
+        }
+    }
+    Err(CoreError::Load(
+        "no speech-to-text model installed; download SenseVoice from the Models page".into(),
+    ))
+}
+
+fn model_manifest_one(models_root: &Path) -> Result<(Manifest, PathBuf)> {
     let mut found: Vec<(PathBuf, Manifest)> = Vec::new();
     if let Ok(entries) = std::fs::read_dir(models_root) {
         for entry in entries.flatten() {
@@ -147,7 +166,7 @@ mod tests {
     fn empty_dir_has_no_model() {
         let dir = std::env::temp_dir().join(format!("laverock-stt-empty-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
-        assert!(model_manifest(&dir).is_err());
+        assert!(model_manifest_in(std::slice::from_ref(&dir)).is_err());
         assert!(!Transcriber::new(&dir).available());
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -170,7 +189,7 @@ mod tests {
         )
         .unwrap();
 
-        let (manifest, path) = model_manifest(&dir).unwrap();
+        let (manifest, path) = model_manifest_in(std::slice::from_ref(&dir)).unwrap();
         assert_eq!(manifest.kind, crate::manifest::EngineKind::Stt);
         assert_eq!(path, stt);
         assert!(Transcriber::new(&dir).available());

@@ -14,7 +14,7 @@
 | `LAVEROCK_HOST` | `127.0.0.1` | 受信任回环监听的绑定地址 |
 | `LAVEROCK_PORT` | `8787` | 端口 |
 | `LAVEROCK_DATA_DIR` | `data` | 声音、历史、设置、配对状态、TLS 证书 |
-| `LAVEROCK_MODELS_DIR` | `models` | 扫描 `*/engine.json` 的目录 |
+| `LAVEROCK_MODELS_DIR` | `models` | 扫描 `*/engine.json` 的目录；可用 `:`（Windows 为 `;`）分隔多个，靠前的优先 |
 | `LAVEROCK_TOOLS_DIR` | — | 引擎使用的 Python venv 与构建工具 |
 | `LAVEROCK_SCRIPTS_DIR` | 自动检测 | 模型安装器使用的 `scripts/` |
 
@@ -45,6 +45,10 @@ remote.json   已配对手机（SHA-256 哈希，权限 0600）
 `<工作区>/models`、venv 位于 `<工作区>/tools`。声音和历史仍留在数据目录，因此
 工作区不会包含定义它自己的设置。显式设置的工作区也会覆盖
 `LAVEROCK_MODELS_DIR` / `LAVEROCK_TOOLS_DIR`。
+
+`LAVEROCK_MODELS_DIR` 列出多个目录时按顺序叠放：同一引擎 id 以靠前的目录为准，
+后面的副本在 `GET /api/engines` 中标记为 `shadowed` 且不会被加载；新的安装写入
+第一个目录。这样可以把只读的共享权重库与本地覆盖层放在一起。
 
 ## 下载网络
 
