@@ -33,3 +33,6 @@
 # Python bytecode
 __pycache__/
 *.pyc
+
+# Node dependencies (Playwright UI test)
+node_modules/

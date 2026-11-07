@@ -1,0 +1,11 @@
+{
+  "name": "laverock-ui-test",
+  "private": true,
+  "description": "Browser-level smoke test for the Laverock web UI.",
+  "scripts": {
+    "test": "node ui-test.cjs"
+  },
+  "dependencies": {
+    "playwright": "1.64.1"
+  }
+}

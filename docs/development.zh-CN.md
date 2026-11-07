@@ -169,10 +169,14 @@ cargo test --workspace
 ./scripts/smoke-test.sh           # 功能面扫描
 ./scripts/e2e-test.sh             # 录音 -> 转写 -> 合成 -> 导出
 
+# 用真实界面走一遍主链路（Playwright；CI 会在本地安装）
+node scripts/ui-test/ui-test.cjs  # 引擎 -> 转写 -> 合成 -> 历史 -> 声音
+
 # 需要 npm install -g playwright，并已启动服务端
 node scripts/check-web-audio.mjs  # 界面同一时间只播放一段音频
 ```
 
 CI 会在 macOS、Linux、Windows 上运行以上检查，然后在 Ubuntu 上用较小的 ZipVoice
-模型与 SenseVoice 启动服务端，执行 `scripts/smoke-test.sh` 和 `scripts/e2e-test.sh`。推送 `v*` 标签（或手动触发 Release
+模型与 SenseVoice 启动服务端，执行 `scripts/smoke-test.sh`、
+`scripts/e2e-test.sh` 和 Playwright 界面测试。推送 `v*` 标签（或手动触发 Release
 workflow）会构建 macOS 与 Windows 安装包并附加到 release。
