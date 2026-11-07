@@ -93,6 +93,10 @@ pub struct Manifest {
     pub id: String,
     pub kind: EngineKind,
     pub name: String,
+    /// One-line blurb for model pickers. Built-in installs inherit the
+    /// catalog text through the server; hand-written manifests may set it.
+    #[serde(default)]
+    pub description: Localized,
     #[serde(default)]
     pub languages: Vec<String>,
     #[serde(default)]
@@ -1194,6 +1198,25 @@ fn default_attn() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn description_is_optional_and_localized() {
+        let without: Manifest = serde_json::from_str(
+            r#"{"id":"dots","kind":"dots","name":"d",
+                "dots":{"binary":"/b","model":"/m"}}"#,
+        )
+        .expect("manifest without description");
+        assert!(without.description.is_empty());
+
+        let with: Manifest = serde_json::from_str(
+            r#"{"id":"dots","kind":"dots","name":"d",
+                "description":{"en":"Fast cloning","zh":"快速克隆"},
+                "dots":{"binary":"/b","model":"/m"}}"#,
+        )
+        .expect("manifest with description");
+        assert_eq!(with.description.for_lang("en"), "Fast cloning");
+        assert_eq!(with.description.for_lang("zh"), "快速克隆");
+    }
 
     #[test]
     fn longcat_manifest_parses_with_defaults() {

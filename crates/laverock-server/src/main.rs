@@ -200,6 +200,16 @@ async fn engines(State(state): State<AppState>) -> impl IntoResponse {
     let hidden = state.models.hidden_engine_ids();
     let mut list = state.manager.list();
     list.retain(|engine| !hidden.contains(&engine.id));
+    // Installed manifests do not repeat the catalog blurb; fill it in so
+    // every client (paired phones included) gets a description without
+    // the desktop-only /api/models route.
+    for engine in &mut list {
+        if engine.description.is_empty() {
+            if let Some(description) = models::engine_description(&engine.id) {
+                engine.description = description;
+            }
+        }
+    }
     Json(list)
 }
 

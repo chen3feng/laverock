@@ -13,7 +13,7 @@ use crate::{
     mosstts::MossTtsEngine,
     qwen3tts::Qwen3TtsEngine,
     zipvoice::ZipVoiceEngine,
-    Audio, CoreError, EngineKind, Manifest, ParamSpec, Result,
+    Audio, CoreError, EngineKind, Localized, Manifest, ParamSpec, Result,
 };
 use serde::Serialize;
 use std::{
@@ -91,6 +91,10 @@ pub struct EngineInfo {
     pub id: String,
     pub kind: String,
     pub name: String,
+    /// Localized one-line description from the manifest; empty when the
+    /// manifest has none (the server fills built-in models from the
+    /// catalog).
+    pub description: Localized,
     pub languages: Vec<String>,
     pub capabilities: Vec<String>,
     pub loaded: bool,
@@ -152,6 +156,7 @@ impl EngineManager {
                 id: m.id.clone(),
                 kind: m.kind.as_str().to_string(),
                 name: m.name.clone(),
+                description: m.description.clone(),
                 languages: m.languages.clone(),
                 capabilities: m.capabilities.clone(),
                 loaded: loaded.contains_key(&m.id),

@@ -59,7 +59,9 @@ joined reference is cut, because each engine only conditions on that much.
 
 Engine parameters (`speed`, `num_steps`, `cfg`, `seed`, …) are declared per
 engine by its manifest and validated server-side against the same list the
-UI renders; `GET /api/engines` returns them. The engine id is the model
+UI renders; `GET /api/engines` returns them. Each engine also carries a
+localized `description` (`{"en": …, "zh": …}`, or a plain string) for model
+pickers. The engine id is the model
 directory id from the [catalog](models.md#catalog).
 
 ## Example
