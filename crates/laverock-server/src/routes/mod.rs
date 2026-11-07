@@ -9,6 +9,7 @@ pub(crate) mod audio;
 pub(crate) mod captures;
 pub(crate) mod core;
 pub(crate) mod history;
+pub(crate) mod jobs;
 pub(crate) mod models;
 pub(crate) mod openai;
 pub(crate) mod profiles;
@@ -30,6 +31,7 @@ use tracing::error;
 
 use crate::{
     history::HistoryStore,
+    jobs::JobStore,
     models::ModelService,
     profiles::ProfileStore,
     remote::{LanCmd, RemoteState},
@@ -45,6 +47,7 @@ pub(crate) struct AppState {
     pub(crate) settings: Arc<SettingsStore>,
     pub(crate) models: Arc<ModelService>,
     pub(crate) transcriber: Arc<laverock_core::Transcriber>,
+    pub(crate) jobs: Arc<JobStore>,
     pub(crate) lan: tokio::sync::mpsc::Sender<LanCmd>,
     pub(crate) port: u16,
 }
@@ -239,6 +242,7 @@ pub(crate) fn router(state: AppState) -> Router {
         .merge(settings::router())
         .merge(models::router())
         .merge(openai::router())
+        .merge(jobs::router())
         .layer(middleware::from_fn_with_state(
             state.clone(),
             auth_middleware,
