@@ -64,8 +64,9 @@ function renderEngineParams(e) {
 }
 
 // Same grid on any page; the prefix keeps control ids unique when the
-// speech and music pages are both in the DOM.
-function renderParamGrid(host, specs, prefix) {
+// speech and music pages are both in the DOM. `actions` maps a parameter
+// name to an extra button rendered under its control.
+function renderParamGrid(host, specs, prefix, actions = {}) {
   host.innerHTML = '';
   host.hidden = specs.length === 0;
   if (!specs.length) return;
@@ -88,6 +89,19 @@ function renderParamGrid(host, specs, prefix) {
       h.className = 'hint';
       h.textContent = hintText;
       wrap.appendChild(h);
+    }
+    const action = actions[p.name];
+    if (action) {
+      const row = document.createElement('div');
+      row.className = 'param-action';
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'ghost small';
+      btn.textContent = action.label;
+      if (action.title) btn.title = action.title;
+      btn.onclick = action.onClick;
+      row.appendChild(btn);
+      wrap.appendChild(row);
     }
     grid.appendChild(wrap);
   }
@@ -230,7 +244,7 @@ function syncMusicEngine() {
   const caps = (e.capabilities || []).map(capabilityLabel).join(t("ui.text"));
   $('musicEngineHint').textContent =
     `${e.kind} · ${(e.languages || []).join(' / ')} · ${caps}`;
-  renderParamGrid($('musicParams'), e.parameters || [], 'music-param-');
+  renderParamGrid($('musicParams'), e.parameters || [], 'music-param-', musicParamActions());
 }
 $('musicEngine').onchange = syncMusicEngine;
 
