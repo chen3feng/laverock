@@ -325,6 +325,15 @@ impl SpeechEngine for AudioCppEngine {
         self.stop_resident();
     }
 
+    /// PID of the resident server, so the service can report which engine
+    /// currently holds the model in memory (and let the UI watch its RSS).
+    fn resident_pid(&self) -> Option<u32> {
+        self.resident
+            .lock()
+            .ok()
+            .and_then(|guard| guard.as_ref().map(|server| server.child.id()))
+    }
+
     fn synthesize(&self, req: &SynthRequest) -> Result<Audio> {
         let is_music = self.family == Family::AceStep;
         // Music never clones a voice; a stray `samples` upload must not turn
@@ -1239,7 +1248,10 @@ mod tests {
             speed: 1.0,
             num_steps: 10,
             params: map,
+            input_samples: Vec::new(),
+            input_sr: 0,
             progress: None,
+            audio: None,
         }
     }
 

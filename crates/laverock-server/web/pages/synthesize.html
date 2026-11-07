@@ -1,0 +1,68 @@
+    <!-- ================= 合成 ================= -->
+    <section id="page-synthesize" class="page">
+      <div class="page-head"><h1 data-i18n="synth.title">合成</h1><p class="sub" data-i18n="synth.sub">选择引擎与声音，输入文字，在这台电脑上生成语音。</p></div>
+
+      <div class="card">
+        <label for="engine" data-i18n="engine">引擎</label>
+        <select id="engine"></select>
+        <div class="hint" id="engineHint"></div>
+      </div>
+
+      <div class="card" id="voicePickCard">
+        <label for="profile" data-i18n="voice">声音</label>
+        <div class="prompt-box">
+          <select id="profile" style="flex:1"></select>
+          <button class="ghost" id="preview" type="button" data-i18n="preview" disabled>试听</button>
+        </div>
+        <div class="hint" id="profilehint" data-i18n="profilehint.default">选择一个已保存的声音，或使用下方的临时录音。</div>
+      </div>
+
+      <div class="card" id="adhoc">
+        <label data-i18n="adhoc.title">临时参考声音（3–10 秒干净人声）</label>
+        <div id="synthCapture"></div>
+        <div class="hint" data-i18n="adhoc.hint">录音会在浏览器内转成 24kHz 单声道 WAV；也可以直接上传 WAV。</div>
+        <div style="margin-top:14px">
+          <label for="prompt_text" data-i18n="prompttext.label">参考音频对应文字（ZipVoice / LongCat / CosyVoice 零样本必填）</label>
+          <textarea id="prompt_text" rows="2" data-i18n-ph="prompttext.ph" placeholder="例如：那还是三十六年前，一九八七年。"></textarea>
+          <div class="hint" data-i18n="prompttext.hint">录音说了什么就填什么，可多行。ZipVoice、LongCat-AudioDiT 以及 CosyVoice 的零样本模板必填；VoxCPM2、Qwen3-TTS、dots.tts 可留空。</div>
+        </div>
+        <div style="margin-top:14px">
+          <label for="profilename" data-i18n="savevoice.label">保存到声音库（可选，便于下次直接复用）</label>
+          <div class="prompt-box">
+            <input type="text" id="profilename" data-i18n-ph="profilename.ph" placeholder="给这个声音起个名字，例如：新闻女声" style="flex:1" />
+            <button class="ghost" id="saveprofile" type="button" data-i18n="saveprofile">保存声音</button>
+          </div>
+          <div class="hint" id="savehint"></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <label for="text" data-i18n="text.label">要合成的文字</label>
+        <textarea id="text" data-i18n-ph="text.ph" placeholder="输入中文或 English 文本……"></textarea>
+      </div>
+
+      <!-- Controls are generated from the engine's manifest parameters.
+           Non-diffusion engines (Qwen3-TTS) simply have none. -->
+      <div class="card" id="engineParams" hidden></div>
+
+      <div class="card">
+        <label for="samples" data-i18n="synth.samples">候选项</label>
+        <div class="prompt-box">
+          <button class="ghost" id="samplesMinus" type="button">−</button>
+          <input type="number" id="samples" min="1" max="4" value="1"
+                 style="width:74px;text-align:center" aria-label="takes" />
+          <button class="ghost" id="samplesPlus" type="button">＋</button>
+        </div>
+        <div class="hint" data-i18n="synth.samples_hint">一次生成多段候选项逐一试听，选中满意的再下载。</div>
+      </div>
+
+      <div class="actions">
+        <button id="go" type="button" data-i18n="go">生成语音</button>
+        <span id="status"></span>
+      </div>
+      <div id="synthProgress" class="pbar" hidden><div class="pbar-fill indeterminate"></div></div>
+      <div id="synthProgressLabel" class="pbar-label" hidden><span></span><b></b></div>
+      <!-- Each take (or the single result) renders as a card here. -->
+      <div id="synthResults" hidden></div>
+      <audio id="previewer" hidden></audio>
+    </section>

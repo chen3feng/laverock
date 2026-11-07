@@ -1,0 +1,39 @@
+    <!-- ================= 音乐 ================= -->
+    <section id="page-music" class="page">
+      <div class="page-head"><h1 data-i18n="music.title">音乐</h1><p class="sub" data-i18n="music.sub">用文字描述风格，可选填歌词，在这台电脑上生成完整歌曲（48 kHz 立体声）。</p></div>
+
+      <div class="card">
+        <label for="musicEngine" data-i18n="music.engine">音乐引擎</label>
+        <select id="musicEngine"></select>
+        <div class="hint" id="musicEngineHint" data-i18n="music.engine_hint">选择一个已安装的音乐模型；首次生成需要先加载数 GB 权重。</div>
+      </div>
+
+      <div class="card">
+        <label for="musicCaption" data-i18n="music.caption">风格描述</label>
+        <textarea id="musicCaption" rows="3" data-i18n-ph="music.caption.ph" placeholder="例如：温暖的民谣，木吉他，女声，中速，怀旧"></textarea>
+        <div class="hint" data-i18n="music.caption.hint">描述曲风、乐器、情绪、人声与节奏；歌词留空即生成纯音乐。</div>
+      </div>
+
+      <!-- Lyrics, duration, steps, guidance and seed come from the
+           engine manifest, so a new music family needs no UI changes. -->
+      <div class="card" id="musicParams" hidden></div>
+
+      <div class="card">
+        <label for="musicSamples" data-i18n="music.samples">候选项</label>
+        <div class="prompt-box">
+          <button class="ghost" id="musicSamplesMinus" type="button">−</button>
+          <input type="number" id="musicSamples" min="1" max="2" value="1"
+                 style="width:74px;text-align:center" aria-label="takes" />
+          <button class="ghost" id="musicSamplesPlus" type="button">＋</button>
+        </div>
+        <div class="hint" data-i18n="music.samples_hint">一次生成多个版本，逐一试听后再下载。</div>
+      </div>
+
+      <div class="actions">
+        <button id="musicGo" type="button" data-i18n="music.go">生成音乐</button>
+        <span id="musicStatus"></span>
+      </div>
+      <div id="musicProgress" class="pbar" hidden><div class="pbar-fill indeterminate"></div></div>
+      <div id="musicProgressLabel" class="pbar-label" hidden><span></span><b></b></div>
+      <div id="musicResults" hidden></div>
+    </section>

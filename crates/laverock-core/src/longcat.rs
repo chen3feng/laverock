@@ -352,7 +352,10 @@ print("@@LV stage done", flush=True)
                 speed: 1.0,
                 num_steps: 8,
                 params,
+                input_samples: Vec::new(),
+                input_sr: 0,
                 progress: Some(progress),
+                audio: None,
             })
             .expect("synthesis");
 

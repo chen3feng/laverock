@@ -90,12 +90,17 @@ laverock-desktop  Tauri 外壳：托盘、开机自启、服务托管
 上报进度并用停顿拼接。运行时已经按调好的长度自行分段的引擎（Python 运行器、
 audio.cpp、sherpa-onnx）返回 `None`，保留自己的分段器，避免同一段文本被切两次。
 
-服务端负责声音、历史、设置、配对和模型目录。单页应用是纯 HTML/CSS/JS，由
-`include_str!` 编译进服务端。源码在 `crates/laverock-server/web/`：一个外壳
-`index.html`、样式表、页面标记，以及按功能分节的多个 JavaScript 文件；
-`python3 scripts/build-web.py` 把它们拼成最终发布的单个 `assets/index.html`
-（运行时无依赖、不上打包器）。改 `web/` 下的文件、跑脚本、再重新编译服务端；
-CI 会执行 `build-web.py --check`，产物落后于源码的 PR 合不进去。
+服务端负责声音、历史、设置、配对和模型目录。HTTP 处理函数在
+`crates/laverock-server/src/routes/` 下按功能分模块，每个模块暴露 `router()`；
+`main.rs` 只负责打开各个存储并合并路由。新增接口时改对应模块（或新增模块并在
+`routes/mod.rs` 里加一行 `merge`）。
+
+单页应用是纯 HTML/CSS/JS，由 `include_str!` 编译进服务端。源码在
+`crates/laverock-server/web/`：一个外壳 `index.html`、样式表、`pages/` 下每页一个
+`<section>`（页面顺序与侧边栏由 `pages.json` 描述），以及 `i18n/` 下按功能拆分的
+翻译片段。`python3 scripts/build-web.py` 把它们拼成最终发布的单个
+`assets/index.html`（运行时无依赖、不上打包器）。改 `web/` 下的文件、跑脚本、
+再重新编译服务端；CI 会执行 `build-web.py --check`，产物落后于源码的 PR 合不进去。
 
 ## 新增模型
 

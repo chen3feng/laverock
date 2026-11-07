@@ -15,6 +15,16 @@ fail=0
 ok()   { echo "  ok   $1"; pass=$((pass + 1)); }
 bad()  { echo "  FAIL $1"; fail=$((fail + 1)); }
 
+# Feature groups can be run in isolation while a lane is being developed:
+#   SMOKE_ONLY=synthesis,mp3 ./scripts/smoke-test.sh
+# `all` (the default) runs everything. `health` and `engines` always run:
+# every other group needs the engine list and a reachable server.
+ONLY="${SMOKE_ONLY:-all}"
+want() {
+  [ "$ONLY" = "all" ] && return 0
+  case ",$ONLY," in *",$1,"*) return 0 ;; *) return 1 ;; esac
+}
+
 # Windows shells cannot carry non-ASCII through a command line: Git Bash
 # replaces every CJK character with '?' before curl sees it, which turns a
 # Chinese transcript into punctuation and makes ZipVoice's duration predictor
@@ -47,6 +57,7 @@ case "$engines_json" in
   *) bad "engine $MODEL missing" ;;
 esac
 
+if want ui; then
 echo "ui"
 index_html=$(curl -sf "$BASE/")
 case "$index_html" in
@@ -57,7 +68,9 @@ case "$index_html" in
   *'id="page-settings"'*) ok "sidebar pages" ;;
   *) bad "sidebar pages" ;;
 esac
+fi
 
+if want settings; then
 echo "settings"
 settings_json=$(curl -s "$BASE/api/settings")
 curl -sf "$BASE/api/settings" >/dev/null && ok "GET /api/settings" || bad "GET /api/settings"
@@ -79,7 +92,9 @@ code=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/settings" \
 # Put the user's settings back.
 curl -s -o /dev/null -X POST "$BASE/api/settings" \
   -H 'Content-Type: application/json' -d "$settings_json"
+fi
 
+if want models; then
 echo "models"
 models_json=$(curl -sf "$BASE/api/models")
 case "$models_json" in
@@ -92,6 +107,7 @@ code=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/models/zipvoice
 [ "$code" = "400" ] && ok "installed model -> 400" || bad "installed model -> $code"
 curl -sf -X POST "$BASE/api/models/reload" >/dev/null \
   && ok "reload engines" || bad "reload engines"
+fi
 
 synth() { # name text wav prompt_text [extra...]
   local name="$1" text="$2" wav="$3" ptext="$4"; shift 4
@@ -107,6 +123,8 @@ synth() { # name text wav prompt_text [extra...]
   fi
 }
 
+# The MP3 check reuses the WAV from the synthesis group.
+if want synthesis || want mp3; then
 echo "synthesis"
 synth zh "你好，我是 Laverock。" leijun-1.wav \
   "那还是36年前, 1987年. 我呢考上了武汉大学的计算机系."
@@ -115,7 +133,9 @@ synth en "Hello, this is Laverock." news-female.wav \
 synth mixed "人工智能 artificial intelligence 正在改变生活。" news-female-2.wav \
   "本台消息, 中共中央国务院, 近日印发关于构建数据基础制度, 更好发挥数据要素作用的意见." \
   -F 'speed=1.1'
+fi
 
+if want mp3; then
 echo "mp3 export (built-in encoder)"
 if curl -s "$BASE/api/health" | grep -q '"mp3":true'; then
   code=$(curl -s -o "$OUT/zh.mp3" -w '%{http_code}' -X POST "$BASE/api/audio/mp3" \
@@ -131,13 +151,17 @@ if curl -s "$BASE/api/health" | grep -q '"mp3":true'; then
 else
   bad "health lacks mp3 support (built-in encoder should always be available)"
 fi
+fi
 
+if want validation; then
 echo "validation"
 code=$(curl -s -o /dev/null -w '%{http_code}' -X POST \
   "$BASE/api/engines/$MODEL/synthesize" \
   -F 'text=no transcript' -F "prompt=@$DIR/test_wavs/leijun-1.wav")
 [ "$code" = "400" ] && ok "missing prompt_text -> 400" || bad "missing prompt_text -> $code"
+fi
 
+if want profiles; then
 echo "profiles"
 pid=$(curl -s -X POST "$BASE/api/profiles" \
   -F 'name=smoke-test-voice' \
@@ -164,7 +188,9 @@ code=$(curl -s -o /dev/null -w '%{http_code}' -X DELETE "$BASE/api/profiles/$pid
 [ "$code" = "204" ] && ok "delete profile" || bad "delete profile -> $code"
 curl -sf "$BASE/api/profiles" | grep -q "$pid" \
   && bad "deleted profile still listed" || ok "profile removed"
+fi
 
+if want captures; then
 echo "captures"
 # Two takes, and a byte-identical copy of the first.
 take_id() { sed -n 's/.*"id":"\([^"]*\)".*/\1/p'; }
@@ -260,7 +286,9 @@ curl -s -o /dev/null -X DELETE "$BASE/api/captures/$c1"
 curl -s -o /dev/null -X DELETE "$BASE/api/captures/$c3"
 curl -s -o /dev/null -X DELETE "$BASE/api/profiles/$solo"
 ok "cleaned up takes"
+fi
 
+if want voxcpm2; then
 if case "$engines_json" in *'"id":"voxcpm2"'*) true ;; *) false ;; esac; then
   echo "voxcpm2"
   code=$(curl -s -o "$OUT/vox-zh.wav" -w '%{http_code}' -X POST \
@@ -272,7 +300,9 @@ if case "$engines_json" in *'"id":"voxcpm2"'*) true ;; *) false ;; esac; then
 else
   echo "  skip voxcpm2 (not installed)"
 fi
+fi
 
+if want qwen3tts; then
 if case "$engines_json" in *'"id":"qwen3tts"'*) true ;; *) false ;; esac; then
   echo "qwen3tts"
   code=$(curl -s -o "$OUT/qwen.wav" -w '%{http_code}' -X POST \
@@ -284,7 +314,9 @@ if case "$engines_json" in *'"id":"qwen3tts"'*) true ;; *) false ;; esac; then
 else
   echo "  skip qwen3tts (not installed)"
 fi
+fi
 
+if want cosyvoice; then
 if case "$engines_json" in *'"id":"cosyvoice"'*) true ;; *) false ;; esac; then
   echo "cosyvoice"
   code=$(curl -s -o "$OUT/cosy.wav" -w '%{http_code}' --max-time 600 -X POST \
@@ -297,7 +329,9 @@ if case "$engines_json" in *'"id":"cosyvoice"'*) true ;; *) false ;; esac; then
 else
   echo "  skip cosyvoice (not installed)"
 fi
+fi
 
+if want dots; then
 if case "$engines_json" in *'"id":"dots"'*) true ;; *) false ;; esac; then
   echo "dots"
   code=$(curl -s -o "$OUT/dots.wav" -w '%{http_code}' --max-time 600 -X POST \
@@ -309,7 +343,9 @@ if case "$engines_json" in *'"id":"dots"'*) true ;; *) false ;; esac; then
 else
   echo "  skip dots (not installed)"
 fi
+fi
 
+if want longcat; then
 if case "$engines_json" in *'"id":"longcat"'*) true ;; *) false ;; esac; then
   echo "longcat"
   code=$(curl -s -o "$OUT/longcat.wav" -w '%{http_code}' --max-time 600 -X POST \
@@ -322,7 +358,9 @@ if case "$engines_json" in *'"id":"longcat"'*) true ;; *) false ;; esac; then
 else
   echo "  skip longcat (not installed)"
 fi
+fi
 
+if want kokoro; then
 if case "$engines_json" in *'"kind":"kokoro"'*) true ;; *) false ;; esac; then
   echo "kokoro"
   code=$(curl -s -o "$OUT/kokoro.wav" -w '%{http_code}' --max-time 120 -X POST \
@@ -334,7 +372,9 @@ if case "$engines_json" in *'"kind":"kokoro"'*) true ;; *) false ;; esac; then
 else
   echo "  skip kokoro (not installed)"
 fi
+fi
 
+if want remote; then
 echo "remote access"
 PORT=$(echo "$BASE" | sed -n 's|.*:\([0-9][0-9]*\).*|\1|p')
 PORT=${PORT:-8787}
@@ -365,6 +405,7 @@ if [ -n "$LAN_IP" ]; then
     -d '{"enabled":false}' >/dev/null
 else
   echo "  skip (no LAN address found)"
+fi
 fi
 
 echo

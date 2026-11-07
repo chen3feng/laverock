@@ -1,5 +1,5 @@
 const $ = (id) => document.getElementById(id);
-const PAGES = ['synthesize', 'music', 'captures', 'voices', 'history', 'models', 'settings'];
+const PAGES = [{{page_ids}}];
 const HF_PRESETS = [
   { value: '', labelKey: 'preset.official.hf' },
   { value: 'https://hf-mirror.com', labelKey: 'preset.cn' },

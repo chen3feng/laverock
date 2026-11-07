@@ -1,0 +1,40 @@
+    <!-- ================= 素材库 ================= -->
+    <section id="page-captures" class="page">
+      <div class="page-head" style="display:flex;align-items:flex-end;justify-content:space-between;gap:12px;flex-wrap:wrap">
+        <div><h1 data-i18n="captures.title">素材库</h1><p class="sub" data-i18n="captures.sub">每次录音都是一条素材：可以试听、重新转写，勾选多段就能拼成一个声音。</p></div>
+        <div style="display:flex;gap:8px">
+          <button id="dedupeCapturesBtn" class="ghost" type="button" data-i18n="captures.dedupe">去重</button>
+          <button id="newCaptureBtn" type="button" data-i18n="captures.new">＋ 添加素材</button>
+        </div>
+      </div>
+
+      <div class="card" id="newCaptureCard" hidden>
+        <label data-i18n="captures.audio">录音或上传 WAV</label>
+        <div id="libraryCapture"></div>
+        <div class="hint" data-i18n="captures.hint">录音会在浏览器内转成 24kHz 单声道 WAV；安装了 SenseVoice 会自动转写。</div>
+        <label for="captureEnhance" data-i18n="captures.enhance">人声增强</label>
+        <select id="captureEnhance">
+          <option value="off" data-i18n="captures.enhance.off">不处理（保留原声）</option>
+          <option value="denoise" data-i18n="captures.enhance.denoise">降噪（背景噪音）</option>
+          <option value="vocals" data-i18n="captures.enhance.vocals">去除背景音乐</option>
+          <option value="both" data-i18n="captures.enhance.both">降噪 + 去除背景音乐</option>
+        </select>
+        <div class="hint" id="captureEnhanceHint"></div>
+        <div class="actions" style="margin-top:16px">
+          <button id="newCaptureSave" type="button" data-i18n="captures.save">加入素材库</button>
+          <button class="ghost" id="newCaptureCancel" type="button" data-i18n="cancel">取消</button>
+          <span class="hint" id="newCaptureHint"></span>
+        </div>
+      </div>
+
+      <div class="capture-bar" id="captureBar" hidden>
+        <span id="captureSelected"></span>
+        <span class="hint" id="captureLimit"></span>
+        <button id="capturesToVoice" type="button" data-i18n="captures.toVoice">用选中的素材新建声音</button>
+      </div>
+
+      <div class="grid" id="captureGrid"></div>
+      <div class="empty" id="capturesEmpty" data-i18n="captures.empty" hidden>
+        还没有素材。点击「添加素材」录音或上传一段参考音频。
+      </div>
+    </section>
