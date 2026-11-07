@@ -2,6 +2,22 @@
 
 let historyItems = [];
 
+// Task chips on the history page. Entries written before `task` existed
+// fall back to the output kind.
+const HISTORY_TASKS = ['tts', 'music', 'asr', 'vc', 'design', 'process'];
+let historyTaskFilter = '';
+try {
+  historyTaskFilter = localStorage.getItem('laverock-history-task') || '';
+} catch (_) {}
+
+function taskOf(h) {
+  return h.task || (h.kind === 'music' ? 'music' : 'tts');
+}
+
+function taskLabel(task) {
+  return t('history.task.' + (task || 'tts'));
+}
+
 async function loadHistory() {
   try {
     const d = await api('/api/history');
@@ -13,10 +29,62 @@ async function loadHistory() {
   renderHistory();
 }
 
+function renderHistoryFilters() {
+  const box = $('historyFilters');
+  box.innerHTML = '';
+  box.hidden = historyItems.length === 0;
+  if (!historyItems.length) return;
+
+  const counts = new Map();
+  for (const h of historyItems) {
+    const task = taskOf(h);
+    counts.set(task, (counts.get(task) || 0) + 1);
+  }
+  // A filter whose entries were all deleted falls back to "all".
+  if (historyTaskFilter && !counts.has(historyTaskFilter)) {
+    historyTaskFilter = '';
+    try { localStorage.removeItem('laverock-history-task'); } catch (_) {}
+  }
+
+  const entries = [{ task: '', label: t('history.filter.all'), count: historyItems.length }];
+  for (const task of HISTORY_TASKS) {
+    if (!counts.has(task)) continue;
+    entries.push({ task, label: taskLabel(task), count: counts.get(task) });
+  }
+  for (const entry of entries) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'filter-chip' + (historyTaskFilter === entry.task ? ' active' : '');
+    btn.setAttribute('aria-pressed', String(historyTaskFilter === entry.task));
+    btn.textContent = entry.label;
+    const count = document.createElement('span');
+    count.className = 'count';
+    count.textContent = entry.count;
+    btn.appendChild(count);
+    btn.onclick = () => {
+      historyTaskFilter = entry.task;
+      try {
+        if (entry.task) localStorage.setItem('laverock-history-task', entry.task);
+        else localStorage.removeItem('laverock-history-task');
+      } catch (_) {}
+      renderHistory();
+    };
+    box.appendChild(btn);
+  }
+}
+
 function renderHistory() {
   const box = $('historyList');
   box.innerHTML = '';
-  $('historyEmpty').hidden = historyItems.length > 0;
+  renderHistoryFilters();
+  const items = historyTaskFilter
+    ? historyItems.filter((h) => taskOf(h) === historyTaskFilter)
+    : historyItems;
+  const empty = $('historyEmpty');
+  empty.textContent = historyTaskFilter && historyItems.length
+    ? t('history.empty.task')
+    : t('history.empty');
+  empty.hidden = items.length > 0;
   $('clearHistory').hidden = historyItems.length === 0;
   const engineName = Object.fromEntries(engines.map((e) => [e.id, e.name]));
 
@@ -25,7 +93,7 @@ function renderHistory() {
   // render as their own card.
   const groups = [];
   const byGen = new Map();
-  for (const h of historyItems) {
+  for (const h of items) {
     if (h.generation) {
       let g = byGen.get(h.generation);
       if (!g) { g = []; byGen.set(h.generation, g); groups.push(g); }
@@ -78,12 +146,10 @@ function buildHistoryTake(host, h, engineName, variantLabel) {
   chip.className = 'chip';
   chip.textContent = engineName[h.engine_id] || h.engine_name || h.engine_id;
   meta.appendChild(chip);
-  if (h.kind === 'music') {
-    const kind = document.createElement('span');
-    kind.className = 'chip';
-    kind.textContent = t('history.music');
-    meta.appendChild(kind);
-  }
+  const task = document.createElement('span');
+  task.className = 'chip';
+  task.textContent = taskLabel(taskOf(h));
+  meta.appendChild(task);
   if (variantLabel) {
     const take = document.createElement('span');
     take.className = 'chip';

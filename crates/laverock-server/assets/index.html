@@ -220,6 +220,14 @@
   .pbar-label b { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
 
   /* ---------- history ---------- */
+  .history-filters { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 16px; }
+  .filter-chip {
+    display: inline-flex; align-items: center; gap: 6px;
+    background: var(--panel2); border: 1px solid var(--line); color: var(--muted);
+    border-radius: 999px; padding: 5px 12px; font-size: 12px; font-weight: 500;
+  }
+  .filter-chip.active { color: #fff; background: var(--accent2); border-color: var(--accent2); }
+  .filter-chip .count { opacity: .75; font-variant-numeric: tabular-nums; }
   .ghost.danger { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 45%, var(--line)); }
   .hist-text { margin: 8px 0 10px; line-height: 1.5; }
   .hist-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
@@ -528,9 +536,10 @@
     <!-- ================= 历史 ================= -->
     <section id="page-history" class="page">
       <div class="page-head" style="display:flex;align-items:flex-end;justify-content:space-between;gap:12px;flex-wrap:wrap">
-        <div><h1 data-i18n="history.title">历史</h1><p class="sub" data-i18n="history.sub">本机生成的语音，最多保留 100 条或 1 GB。</p></div>
+        <div><h1 data-i18n="history.title">历史</h1><p class="sub" data-i18n="history.sub">本机生成的音频与文本记录，最多保留 100 条或 1 GB。</p></div>
         <button class="ghost danger" id="clearHistory" type="button" data-i18n="history.clear" hidden>清空全部</button>
       </div>
+      <div class="history-filters" id="historyFilters" role="group"></div>
       <div id="historyList"></div>
       <div class="empty" id="historyEmpty" data-i18n="history.empty" hidden>还没有生成记录。去「合成」生成第一条吧。</div>
     </section>
@@ -848,10 +857,14 @@ const I18N = {
     'models.show_details': '展开详情', 'models.hide_details': '收起详情',
 
     'history.title': '历史',
-    'history.sub': '本机生成的语音与音乐，最多保留 100 条或 1 GB。',
-    'history.music': '音乐',
+    'history.sub': '本机生成的音频与文本记录，最多保留 100 条或 1 GB。',
+    'history.filter.all': '全部',
+    'history.task.tts': '语音合成', 'history.task.music': '音乐',
+    'history.task.asr': '语音识别', 'history.task.vc': '声音转换',
+    'history.task.design': '声音设计', 'history.task.process': '音频处理',
     'history.clear': '清空全部',
     'history.empty': '还没有生成记录。去「合成」生成第一条吧。',
+    'history.empty.task': '该任务下还没有记录。',
     'history.variant': '候选项 {n}',
     'history.variant_group': '共 {n} 个候选项',
 
@@ -1153,10 +1166,14 @@ const I18N = {
     'models.show_details': 'Show details', 'models.hide_details': 'Hide details',
 
     'history.title': 'History',
-    'history.sub': 'Speech and music generated on this computer, capped at 100 entries or 1 GB.',
-    'history.music': 'Music',
+    'history.sub': 'Audio and text generated on this computer, capped at 100 entries or 1 GB.',
+    'history.filter.all': 'All',
+    'history.task.tts': 'Speech', 'history.task.music': 'Music',
+    'history.task.asr': 'Transcription', 'history.task.vc': 'Voice conversion',
+    'history.task.design': 'Voice design', 'history.task.process': 'Audio tools',
     'history.clear': 'Clear all',
     'history.empty': 'No generations yet. Head to Synthesize to make the first one.',
+    'history.empty.task': 'No entries for this task yet.',
     'history.variant': 'take #{n}',
     'history.variant_group': '{n} takes',
 
@@ -3731,6 +3748,22 @@ $('musicGo').onclick = async () => {
 
 let historyItems = [];
 
+// Task chips on the history page. Entries written before `task` existed
+// fall back to the output kind.
+const HISTORY_TASKS = ['tts', 'music', 'asr', 'vc', 'design', 'process'];
+let historyTaskFilter = '';
+try {
+  historyTaskFilter = localStorage.getItem('laverock-history-task') || '';
+} catch (_) {}
+
+function taskOf(h) {
+  return h.task || (h.kind === 'music' ? 'music' : 'tts');
+}
+
+function taskLabel(task) {
+  return t('history.task.' + (task || 'tts'));
+}
+
 async function loadHistory() {
   try {
     const d = await api('/api/history');
@@ -3742,10 +3775,62 @@ async function loadHistory() {
   renderHistory();
 }
 
+function renderHistoryFilters() {
+  const box = $('historyFilters');
+  box.innerHTML = '';
+  box.hidden = historyItems.length === 0;
+  if (!historyItems.length) return;
+
+  const counts = new Map();
+  for (const h of historyItems) {
+    const task = taskOf(h);
+    counts.set(task, (counts.get(task) || 0) + 1);
+  }
+  // A filter whose entries were all deleted falls back to "all".
+  if (historyTaskFilter && !counts.has(historyTaskFilter)) {
+    historyTaskFilter = '';
+    try { localStorage.removeItem('laverock-history-task'); } catch (_) {}
+  }
+
+  const entries = [{ task: '', label: t('history.filter.all'), count: historyItems.length }];
+  for (const task of HISTORY_TASKS) {
+    if (!counts.has(task)) continue;
+    entries.push({ task, label: taskLabel(task), count: counts.get(task) });
+  }
+  for (const entry of entries) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'filter-chip' + (historyTaskFilter === entry.task ? ' active' : '');
+    btn.setAttribute('aria-pressed', String(historyTaskFilter === entry.task));
+    btn.textContent = entry.label;
+    const count = document.createElement('span');
+    count.className = 'count';
+    count.textContent = entry.count;
+    btn.appendChild(count);
+    btn.onclick = () => {
+      historyTaskFilter = entry.task;
+      try {
+        if (entry.task) localStorage.setItem('laverock-history-task', entry.task);
+        else localStorage.removeItem('laverock-history-task');
+      } catch (_) {}
+      renderHistory();
+    };
+    box.appendChild(btn);
+  }
+}
+
 function renderHistory() {
   const box = $('historyList');
   box.innerHTML = '';
-  $('historyEmpty').hidden = historyItems.length > 0;
+  renderHistoryFilters();
+  const items = historyTaskFilter
+    ? historyItems.filter((h) => taskOf(h) === historyTaskFilter)
+    : historyItems;
+  const empty = $('historyEmpty');
+  empty.textContent = historyTaskFilter && historyItems.length
+    ? t('history.empty.task')
+    : t('history.empty');
+  empty.hidden = items.length > 0;
   $('clearHistory').hidden = historyItems.length === 0;
   const engineName = Object.fromEntries(engines.map((e) => [e.id, e.name]));
 
@@ -3754,7 +3839,7 @@ function renderHistory() {
   // render as their own card.
   const groups = [];
   const byGen = new Map();
-  for (const h of historyItems) {
+  for (const h of items) {
     if (h.generation) {
       let g = byGen.get(h.generation);
       if (!g) { g = []; byGen.set(h.generation, g); groups.push(g); }
@@ -3807,12 +3892,10 @@ function buildHistoryTake(host, h, engineName, variantLabel) {
   chip.className = 'chip';
   chip.textContent = engineName[h.engine_id] || h.engine_name || h.engine_id;
   meta.appendChild(chip);
-  if (h.kind === 'music') {
-    const kind = document.createElement('span');
-    kind.className = 'chip';
-    kind.textContent = t('history.music');
-    meta.appendChild(kind);
-  }
+  const task = document.createElement('span');
+  task.className = 'chip';
+  task.textContent = taskLabel(taskOf(h));
+  meta.appendChild(task);
   if (variantLabel) {
     const take = document.createElement('span');
     take.className = 'chip';
