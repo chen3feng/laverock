@@ -867,6 +867,17 @@ fn catalog() -> &'static [CatalogEntry] {
     })
 }
 
+/// Catalog blurb for an installed engine, keyed by its model directory
+/// (the engine id). `/api/engines` uses this because its manifests do not
+/// repeat the text and paired LAN clients cannot read the desktop-only
+/// catalog route.
+pub fn engine_description(engine_id: &str) -> Option<Localized> {
+    catalog()
+        .iter()
+        .find(|entry| entry.dir == engine_id || entry.id == engine_id)
+        .map(|entry| entry.description.clone())
+}
+
 /// Locate the repository's `scripts/` directory. Explicit environment
 /// first, then the working directory (development), then beside the
 /// binary and in the macOS/Windows app resource directories.
@@ -1037,6 +1048,24 @@ mod tests {
             assert!(!entry.dir.is_empty());
             assert!(entry.script.ends_with(".sh"));
         }
+    }
+
+    #[test]
+    fn every_catalog_entry_has_a_description() {
+        for entry in catalog() {
+            assert!(
+                !entry.description.is_empty(),
+                "{} has no description",
+                entry.id
+            );
+        }
+        // Engine ids are model directory names, which is what /api/engines
+        // passes in; short catalog ids work too.
+        let by_dir = engine_description("sherpa-onnx-zipvoice-distill-int8-zh-en-emilia");
+        let by_id = engine_description("zipvoice");
+        assert!(by_dir.is_some());
+        assert_eq!(by_dir, by_id);
+        assert_eq!(engine_description("no-such-engine"), None);
     }
 
     #[test]
