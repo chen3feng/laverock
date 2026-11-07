@@ -38,6 +38,10 @@ const I18N = {
     'music.generating': '正在生成音乐…',
     'music.no_engine': '还没有安装音乐模型。请先到「模型」页下载 ACE-Step。',
     'music.caption_required': '请先描述想要的音乐风格。',
+    'music.estimate_duration': '按歌词估算',
+    'music.estimate_duration.hint': '根据歌词字数、英文词数和器乐段落估算一个合适的时长',
+    'music.lyrics_empty': '请先填写歌词，或直接手动设置时长。',
+    'music.duration_estimated': '已按歌词估算为 {seconds} 秒',
 
     'voices.title': '声音库',
     'voices.sub': '保存的声音可以复用到任何克隆引擎，也可以由素材库里的多段录音组成。',
@@ -339,6 +343,10 @@ const I18N = {
     'music.generating': 'Generating music…',
     'music.no_engine': 'No music model installed yet. Download ACE-Step from the Models page first.',
     'music.caption_required': 'Describe the music you want first.',
+    'music.estimate_duration': 'Estimate from lyrics',
+    'music.estimate_duration.hint': 'Estimate a fitting duration from Chinese characters, English words and instrumental sections',
+    'music.lyrics_empty': 'Add lyrics first, or set the duration manually.',
+    'music.duration_estimated': 'Estimated {seconds} s from the lyrics',
 
     'voices.title': 'Voice library',
     'voices.sub': 'Saved voices work with any cloning engine, and can be built from several takes in the library.',

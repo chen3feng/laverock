@@ -86,6 +86,7 @@
   .row { display: flex; gap: 14px; flex-wrap: wrap; }
   .row > div { flex: 1; min-width: 160px; }
   .row > .param-wide { flex: 1 0 100%; }
+  .param-action { display: flex; justify-content: flex-end; margin-top: 8px; }
   button {
     background: var(--accent2); color: #fff; border: 0; border-radius: 10px;
     padding: 11px 20px; font: inherit; font-weight: 600; cursor: pointer;
@@ -747,6 +748,10 @@ const I18N = {
     'music.generating': '正在生成音乐…',
     'music.no_engine': '还没有安装音乐模型。请先到「模型」页下载 ACE-Step。',
     'music.caption_required': '请先描述想要的音乐风格。',
+    'music.estimate_duration': '按歌词估算',
+    'music.estimate_duration.hint': '根据歌词字数、英文词数和器乐段落估算一个合适的时长',
+    'music.lyrics_empty': '请先填写歌词，或直接手动设置时长。',
+    'music.duration_estimated': '已按歌词估算为 {seconds} 秒',
 
     'voices.title': '声音库',
     'voices.sub': '保存的声音可以复用到任何克隆引擎，也可以由素材库里的多段录音组成。',
@@ -1048,6 +1053,10 @@ const I18N = {
     'music.generating': 'Generating music…',
     'music.no_engine': 'No music model installed yet. Download ACE-Step from the Models page first.',
     'music.caption_required': 'Describe the music you want first.',
+    'music.estimate_duration': 'Estimate from lyrics',
+    'music.estimate_duration.hint': 'Estimate a fitting duration from Chinese characters, English words and instrumental sections',
+    'music.lyrics_empty': 'Add lyrics first, or set the duration manually.',
+    'music.duration_estimated': 'Estimated {seconds} s from the lyrics',
 
     'voices.title': 'Voice library',
     'voices.sub': 'Saved voices work with any cloning engine, and can be built from several takes in the library.',
@@ -2804,8 +2813,9 @@ function renderEngineParams(e) {
 }
 
 // Same grid on any page; the prefix keeps control ids unique when the
-// speech and music pages are both in the DOM.
-function renderParamGrid(host, specs, prefix) {
+// speech and music pages are both in the DOM. `actions` maps a parameter
+// name to an extra button rendered under its control.
+function renderParamGrid(host, specs, prefix, actions = {}) {
   host.innerHTML = '';
   host.hidden = specs.length === 0;
   if (!specs.length) return;
@@ -2828,6 +2838,19 @@ function renderParamGrid(host, specs, prefix) {
       h.className = 'hint';
       h.textContent = hintText;
       wrap.appendChild(h);
+    }
+    const action = actions[p.name];
+    if (action) {
+      const row = document.createElement('div');
+      row.className = 'param-action';
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'ghost small';
+      btn.textContent = action.label;
+      if (action.title) btn.title = action.title;
+      btn.onclick = action.onClick;
+      row.appendChild(btn);
+      wrap.appendChild(row);
     }
     grid.appendChild(wrap);
   }
@@ -2970,7 +2993,7 @@ function syncMusicEngine() {
   const caps = (e.capabilities || []).map(capabilityLabel).join(t("ui.text"));
   $('musicEngineHint').textContent =
     `${e.kind} · ${(e.languages || []).join(' / ')} · ${caps}`;
-  renderParamGrid($('musicParams'), e.parameters || [], 'music-param-');
+  renderParamGrid($('musicParams'), e.parameters || [], 'music-param-', musicParamActions());
 }
 $('musicEngine').onchange = syncMusicEngine;
 
@@ -3539,6 +3562,46 @@ function wireMusicSamplesStepper() {
   };
 }
 wireMusicSamplesStepper();
+
+// Extra buttons for the music page's parameter grid.
+function musicParamActions() {
+  return {
+    lyrics: {
+      label: t('music.estimate_duration'),
+      title: t('music.estimate_duration.hint'),
+      onClick: estimateLyricsDuration,
+    },
+  };
+}
+
+// Estimate a fitting duration from the lyrics: about 3.5 Chinese
+// characters or 2.7 English words per second, plus room for an
+// intro/outro and one break per instrumental tag. The slider stays a
+// target, so the planner can still stop earlier.
+function estimateLyricsDuration() {
+  const box = $('music-param-lyrics');
+  const slider = $('music-param-duration_sec');
+  if (!box || !slider) return;
+
+  const raw = box.value || '';
+  const instrumental =
+    (raw.match(/\[(instrumental|interlude|solo|break|outro)\]/gi) || []).length;
+  const text = raw.replace(/\[[^\]]*\]/g, ' ');
+  const zh = (text.match(/[㐀-鿿豈-﫿]/g) || []).length;
+  const words = (text
+    .replace(/[㐀-鿿豈-﫿]/g, ' ')
+    .match(/[A-Za-z0-9]+(?:['’-][A-Za-z0-9]+)*/g) || []).length;
+  if (zh + words === 0) {
+    toast(t('music.lyrics_empty'), true);
+    return;
+  }
+
+  const seconds = Math.max(10, Math.min(600,
+    Math.round((zh / 3.5 + words / 2.7 + 20 + instrumental * 10) / 5) * 5));
+  slider.value = String(seconds);
+  slider.dispatchEvent(new Event('input', { bubbles: true }));
+  toast(t('music.duration_estimated', { seconds }));
+}
 
 $('musicGo').onclick = async () => {
   const status = $('musicStatus');

@@ -17,6 +17,46 @@ function wireMusicSamplesStepper() {
 }
 wireMusicSamplesStepper();
 
+// Extra buttons for the music page's parameter grid.
+function musicParamActions() {
+  return {
+    lyrics: {
+      label: t('music.estimate_duration'),
+      title: t('music.estimate_duration.hint'),
+      onClick: estimateLyricsDuration,
+    },
+  };
+}
+
+// Estimate a fitting duration from the lyrics: about 3.5 Chinese
+// characters or 2.7 English words per second, plus room for an
+// intro/outro and one break per instrumental tag. The slider stays a
+// target, so the planner can still stop earlier.
+function estimateLyricsDuration() {
+  const box = $('music-param-lyrics');
+  const slider = $('music-param-duration_sec');
+  if (!box || !slider) return;
+
+  const raw = box.value || '';
+  const instrumental =
+    (raw.match(/\[(instrumental|interlude|solo|break|outro)\]/gi) || []).length;
+  const text = raw.replace(/\[[^\]]*\]/g, ' ');
+  const zh = (text.match(/[㐀-鿿豈-﫿]/g) || []).length;
+  const words = (text
+    .replace(/[㐀-鿿豈-﫿]/g, ' ')
+    .match(/[A-Za-z0-9]+(?:['’-][A-Za-z0-9]+)*/g) || []).length;
+  if (zh + words === 0) {
+    toast(t('music.lyrics_empty'), true);
+    return;
+  }
+
+  const seconds = Math.max(10, Math.min(600,
+    Math.round((zh / 3.5 + words / 2.7 + 20 + instrumental * 10) / 5) * 5));
+  slider.value = String(seconds);
+  slider.dispatchEvent(new Event('input', { bubbles: true }));
+  toast(t('music.duration_estimated', { seconds }));
+}
+
 $('musicGo').onclick = async () => {
   const status = $('musicStatus');
   const caption = $('musicCaption').value.trim();
