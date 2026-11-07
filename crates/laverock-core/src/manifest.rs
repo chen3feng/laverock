@@ -234,6 +234,13 @@ impl Manifest {
             Self::default_parameters(self.kind)
         } else {
             let mut params = self.parameters.clone();
+            // New built-in controls must reach installs written before they
+            // existed; the manifest's own entries win by name.
+            for spec in Self::default_parameters(self.kind) {
+                if !params.iter().any(|p| p.name == spec.name) {
+                    params.push(spec);
+                }
+            }
             crate::legacy_i18n::localize(self.kind, &mut params);
             params
         }
@@ -343,9 +350,91 @@ impl Manifest {
             EngineKind::Chatterbox => Vec::new(),
             // Autoregressive GPT + flow-matching vocoder; text is split
             // into segments internally, and emotion guidance needs an
-            // emotion reference clip we do not collect. The installer
-            // ships a text-language choice; nothing else is tunable.
-            EngineKind::IndexTts2 => Vec::new(),
+            // emotion reference clip we do not collect. The language,
+            // decoding and segment controls below are passed straight
+            // through to audio.cpp.
+            EngineKind::IndexTts2 => vec![
+                ParamSpec {
+                    name: "language".into(),
+                    label: ("Text language", "文本语言").into(),
+                    kind: ParamKind::Choice,
+                    min: None,
+                    max: None,
+                    step: None,
+                    options: vec![
+                        ParamOption {
+                            label: ("Detect from text", "按文本自动判断").into(),
+                            value: "auto".into(),
+                        },
+                        ParamOption {
+                            label: ("Chinese 中文", "中文 Chinese").into(),
+                            value: "zh".into(),
+                        },
+                        ParamOption {
+                            label: ("English 英语", "英语 English").into(),
+                            value: "en".into(),
+                        },
+                    ],
+                    default: serde_json::json!("auto"),
+                    hint: (
+                        "Guides the text front-end; automatic picks Chinese for Han text and English otherwise.",
+                        "引导文本前端；自动时含汉字按中文读，否则按英文读。",
+                    )
+                        .into(),
+                },
+                ParamSpec {
+                    name: "num_beams".into(),
+                    label: ("Decoding", "解码方式").into(),
+                    kind: ParamKind::Choice,
+                    min: None,
+                    max: None,
+                    step: None,
+                    options: vec![
+                        ParamOption {
+                            label: ("Beam search", "束搜索（质量优先）").into(),
+                            value: "3".into(),
+                        },
+                        ParamOption {
+                            label: ("Greedy, about 25% faster", "贪心（快约 25%）").into(),
+                            value: "1".into(),
+                        },
+                    ],
+                    default: serde_json::json!("3"),
+                    hint: (
+                        "Beam search reads slightly better; greedy skips the extra beams.",
+                        "束搜索韵律更稳；贪心省掉多余搜索，明显更快。",
+                    )
+                        .into(),
+                },
+                // The model's own pause at a full stop is shorter than at a
+                // comma inside one segment. audio.cpp inserts silence only
+                // between segments, so these two knobs are how a long take
+                // gets audible sentence breaks without re-running the model.
+                ParamSpec::int_slider(
+                    "text_chunk_size",
+                    ("Chunk size (characters)", "分段长度（字）"),
+                    600,
+                    40,
+                    600,
+                    10,
+                    (
+                        "Lower splits long text into more segments: 40 is roughly one sentence per segment, with clearer full stops but 10–20% slower synthesis.",
+                        "越小分段越多：约 40 字接近每句一段，句号更清楚，但合成慢 10–20%。",
+                    ),
+                ),
+                ParamSpec::int_slider(
+                    "interval_silence_ms",
+                    ("Pause between segments (ms)", "分段间停顿（毫秒）"),
+                    400,
+                    0,
+                    2000,
+                    50,
+                    (
+                        "Silence audio.cpp inserts between segments; the model's own pause inside a segment is not affected.",
+                        "audio.cpp 在分段之间插入的静音；段内句号停顿不受此影响。",
+                    ),
+                ),
+            ],
             // MOSS-TTS ships a language choice via the manifest.
             EngineKind::MossTts => Vec::new(),
             // Flow-matching ODE: NFE steps, guidance strength/method, seed.
@@ -1219,6 +1308,33 @@ mod tests {
     }
 
     #[test]
+    fn builtin_parameters_are_appended_to_old_manifests() {
+        let manifest: Manifest = serde_json::from_str(
+            r#"{"id":"indextts2","kind":"indextts2","name":"i",
+                "indextts2":{"binary":"/b","model":"/m"},
+                "parameters":[{
+                    "name":"num_beams","label":"Decoding","type":"choice",
+                    "options":[{"label":"Beam","value":"3"}],"default":"3"
+                }]}"#,
+        )
+        .expect("manifest with an older parameter list");
+        let params = manifest.parameters_or_defaults();
+        let names: Vec<&str> = params.iter().map(|p| p.name.as_str()).collect();
+        assert_eq!(
+            names,
+            [
+                "num_beams",
+                "language",
+                "text_chunk_size",
+                "interval_silence_ms"
+            ],
+            "manifest entries stay first, new built-ins are appended"
+        );
+        // The manifest's own spec wins; the built-in one only fills gaps.
+        assert_eq!(params[0].label.for_lang("en"), "Decoding");
+    }
+
+    #[test]
     fn longcat_manifest_parses_with_defaults() {
         let raw = r#"{
             "id": "longcat",
@@ -1345,8 +1461,19 @@ mod tests {
         assert_eq!(c.language, None);
         assert_eq!(manifest.reference_limit_secs(), 15.0);
         assert_eq!(manifest.problem(), None);
-        // The engine has no tunable request parameters.
-        assert!(manifest.parameters_or_defaults().is_empty());
+        // Segment controls are built in, so manifests from before they
+        // existed still get them.
+        let params = manifest.parameters_or_defaults();
+        let names: Vec<&str> = params.iter().map(|p| p.name.as_str()).collect();
+        assert_eq!(
+            names,
+            [
+                "language",
+                "num_beams",
+                "text_chunk_size",
+                "interval_silence_ms"
+            ]
+        );
 
         // A section without the audio.cpp paths is a broken install.
         let broken: Manifest = serde_json::from_str(

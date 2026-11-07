@@ -545,6 +545,17 @@ impl AudioCppEngine {
                 .clamp(1, 8);
                 cmd.arg("--request-option")
                     .arg(format!("num_beams={beams}"));
+                // Long text is cut into segments by audio.cpp; the model's
+                // own full-stop pause inside a segment is shorter than a
+                // comma's, so the only audible lever is where segments are
+                // cut and how much silence goes between them.
+                let chunk = self.param_i64(req, "text_chunk_size", 600).clamp(40, 600);
+                cmd.arg("--text-chunk-size").arg(chunk.to_string());
+                let pause = self
+                    .param_i64(req, "interval_silence_ms", 400)
+                    .clamp(0, 2000);
+                cmd.arg("--request-option")
+                    .arg(format!("interval_silence_ms={pause}"));
             }
             Family::CosyVoice => {
                 let template = self.param_str(req, "template", "zero_shot");
@@ -745,6 +756,12 @@ impl AudioCppEngine {
                 .unwrap_or(3)
                 .clamp(1, 8);
                 options.insert("num_beams".into(), json!(beams));
+                let chunk = self.param_i64(req, "text_chunk_size", 600).clamp(40, 600);
+                options.insert("text_chunk_size".into(), json!(chunk));
+                let pause = self
+                    .param_i64(req, "interval_silence_ms", 400)
+                    .clamp(0, 2000);
+                options.insert("interval_silence_ms".into(), json!(pause));
             }
         }
 
@@ -1095,6 +1112,27 @@ mod tests {
         assert!(args
             .windows(2)
             .any(|w| w == ["--request-option", "num_beams=3"]));
+        // Segment controls keep audio.cpp's chunking but give full stops an
+        // audible gap between segments.
+        assert!(args.windows(2).any(|w| w == ["--text-chunk-size", "600"]));
+        assert!(args
+            .windows(2)
+            .any(|w| w == ["--request-option", "interval_silence_ms=400"]));
+        let _ = std::fs::remove_dir_all(&dir);
+
+        let dir = args_dir("indextts2-pauses");
+        let args = run(
+            &dir,
+            "indextts2",
+            &[
+                ("text_chunk_size", serde_json::json!(40)),
+                ("interval_silence_ms", serde_json::json!(300)),
+            ],
+        );
+        assert!(args.windows(2).any(|w| w == ["--text-chunk-size", "40"]));
+        assert!(args
+            .windows(2)
+            .any(|w| w == ["--request-option", "interval_silence_ms=300"]));
         let _ = std::fs::remove_dir_all(&dir);
 
         let dir = args_dir("indextts2-fast");
