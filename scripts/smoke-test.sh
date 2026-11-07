@@ -225,6 +225,67 @@ case "$stream_out" in
 esac
 fi
 
+if want resources; then
+echo "resources"
+# Synthesis above leaves the engine loaded; unloading is what the Models
+# page and the Settings resource panel drive.
+synth resources "你好，我是 Laverock。" leijun-1.wav \
+  "那还是36年前, 1987年. 我呢考上了武汉大学的计算机系."
+engine_entry() { # engine_entry -> the JSON fields after $MODEL's id
+  local line
+  line=$(curl -sf "$BASE/api/engines")
+  case "$line" in
+    *"\"id\":\"$MODEL\""*) ;;
+    *) echo missing; return ;;
+  esac
+  printf '%s' "${line#*\"id\":\"$MODEL\"}"
+}
+loaded_state() { # loaded_state -> true / false / missing
+  local rest
+  rest=$(engine_entry)
+  case "$rest" in
+    missing) echo missing; return ;;
+  esac
+  rest=${rest#*\"loaded\":}
+  case "$rest" in
+    true*) echo true ;;
+    false*) echo false ;;
+    *) echo missing ;;
+  esac
+}
+engine_backend() { # engine_backend -> onnx / audiocpp / llama.cpp / python
+  local rest
+  rest=$(engine_entry)
+  rest=${rest#*\"backend\":\"}
+  printf '%s' "${rest%%\"*}"
+}
+state=$(loaded_state)
+[ "$state" = "true" ] && ok "engine loaded after synthesis" \
+  || bad "engine loaded state: $state"
+backend=$(engine_backend)
+case "$backend" in
+  onnx|audiocpp|llama.cpp|python) ok "engine backend ($backend)" ;;
+  *) bad "engine backend: $backend" ;;
+esac
+system_json=$(curl -sf "$BASE/api/system")
+case "$system_json" in
+  *'"rss":'*) ok "system memory snapshot" ;;
+  *) bad "system memory missing" ;;
+esac
+case "$system_json" in
+  *'"backends":['*']'*) ok "system backends listed" ;;
+  *) bad "system backends missing" ;;
+esac
+code=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/engines/$MODEL/unload")
+[ "$code" = "204" ] && ok "unload accepted" || bad "unload -> $code"
+state=$(loaded_state)
+[ "$state" = "false" ] && ok "engine unloaded" || bad "engine still loaded: $state"
+code=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/engines/nope/unload")
+[ "$code" = "404" ] && ok "unknown engine unload -> 404" || bad "unknown unload -> $code"
+code=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/engines/unload")
+[ "$code" = "204" ] && ok "unload all accepted" || bad "unload all -> $code"
+fi
+
 if want mp3; then
 echo "mp3 export (built-in encoder)"
 if curl -s "$BASE/api/health" | grep -q '"mp3":true'; then

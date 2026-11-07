@@ -13,7 +13,7 @@ use crate::{
     settings::{ProxyMode, SettingsStore, PROXY_VARS},
 };
 use laverock_core::i18n::{self, Key};
-use laverock_core::{CoreError, EngineManager, Localized, Result, TaskKind};
+use laverock_core::{CoreError, EngineInfo, EngineManager, Localized, Result, TaskKind};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
@@ -140,6 +140,14 @@ pub struct ModelView {
     /// UI shows it and disables the download.
     pub unsupported: Option<String>,
     pub installed: bool,
+    /// Whether the engine is loaded right now.
+    pub loaded: bool,
+    /// Whether it keeps a resident child process (audio.cpp server).
+    pub resident: bool,
+    /// Resident memory of the model, when it can be read. Resident
+    /// engines report their child process; in-process engines report the
+    /// server's RSS.
+    pub memory_bytes: Option<u64>,
     /// Set when the installed directory exists but cannot be used (old
     /// runner layout, unparsable manifest): the UI offers a reinstall.
     pub problem: Option<String>,
@@ -218,6 +226,23 @@ impl ModelService {
 
     pub fn list(&self, lang: &str) -> ModelList {
         let engines = self.manager.list();
+        let by_id: HashMap<String, EngineInfo> = engines
+            .iter()
+            .cloned()
+            .map(|engine| (engine.id.clone(), engine))
+            .collect();
+        // A loaded engine without a child process runs inside this server,
+        // so its memory is the server's RSS.
+        let server_rss = crate::system::server_rss();
+        let memory = |engine: &EngineInfo| -> Option<u64> {
+            if !engine.loaded {
+                return None;
+            }
+            match engine.pid {
+                Some(pid) => crate::system::rss_bytes(pid),
+                None => server_rss,
+            }
+        };
         let jobs = self.jobs.lock().expect("jobs lock poisoned");
         let mut models: Vec<ModelView> = Vec::new();
         let mut known = Vec::new();
@@ -245,6 +270,7 @@ impl ModelService {
             } else if installed {
                 known.push(entry.dir.clone());
             }
+            let info = engine_id.as_ref().and_then(|id| by_id.get(id));
             models.push(ModelView {
                 id: entry.id.clone(),
                 dir: entry.dir.clone(),
@@ -261,6 +287,9 @@ impl ModelService {
                     .filter(|n| !n.is_empty()),
                 unsupported: unsupported_here(entry, lang),
                 installed,
+                loaded: info.is_some_and(|engine| engine.loaded),
+                resident: info.is_some_and(|engine| engine.resident),
+                memory_bytes: info.and_then(memory),
                 problem,
                 engine_id,
                 job: jobs.get(&entry.id).map(|job| JobView::localized(job, lang)),
@@ -284,6 +313,7 @@ impl ModelService {
                 ),
                 zh: Some("手动安装的模型（manifest 来自模型目录）。".to_string()),
             };
+            let memory_bytes = memory(&engine);
             models.push(ModelView {
                 id: engine.id.clone(),
                 dir: engine.id.clone(),
@@ -296,6 +326,9 @@ impl ModelService {
                 note: None,
                 unsupported: None,
                 installed: true,
+                loaded: engine.loaded,
+                resident: engine.resident,
+                memory_bytes,
                 problem: None,
                 engine_id: Some(engine.id.clone()),
                 job: None,

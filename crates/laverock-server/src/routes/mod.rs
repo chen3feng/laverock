@@ -16,6 +16,7 @@ pub(crate) mod profiles;
 pub(crate) mod session;
 pub(crate) mod settings;
 pub(crate) mod synth;
+pub(crate) mod system;
 
 use axum::{
     body::Body,
@@ -243,6 +244,7 @@ pub(crate) fn router(state: AppState) -> Router {
         .merge(models::router())
         .merge(openai::router())
         .merge(jobs::router())
+        .merge(system::router())
         .layer(middleware::from_fn_with_state(
             state.clone(),
             auth_middleware,

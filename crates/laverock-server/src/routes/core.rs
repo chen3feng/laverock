@@ -1,8 +1,14 @@
 //! Service metadata and the embedded single-page UI.
 
-use axum::{extract::State, response::Html, routing::get, Json, Router};
+use axum::{
+    extract::{Path, State},
+    http::StatusCode,
+    response::Html,
+    routing::{get, post},
+    Json, Router,
+};
 
-use super::AppState;
+use super::{ApiError, AppState};
 use crate::{export, models};
 
 pub(crate) fn router() -> Router<AppState> {
@@ -10,6 +16,8 @@ pub(crate) fn router() -> Router<AppState> {
         .route("/", get(index))
         .route("/api/health", get(health))
         .route("/api/engines", get(engines))
+        .route("/api/engines/unload", post(unload_all))
+        .route("/api/engines/{id}/unload", post(unload))
 }
 
 async fn index() -> Html<&'static str> {
@@ -43,4 +51,21 @@ async fn engines(State(state): State<AppState>) -> impl axum::response::IntoResp
         }
     }
     Json(list)
+}
+
+/// Release one engine's model, or every loaded model.
+async fn unload(
+    Path(id): Path<String>,
+    State(state): State<AppState>,
+) -> Result<StatusCode, ApiError> {
+    if !state.manager.list().iter().any(|engine| engine.id == id) {
+        return Err(ApiError::not_found(format!("engine not found: {id}")));
+    }
+    state.manager.unload(&id);
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn unload_all(State(state): State<AppState>) -> StatusCode {
+    state.manager.unload_all();
+    StatusCode::NO_CONTENT
 }

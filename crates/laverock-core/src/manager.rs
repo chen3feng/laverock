@@ -141,7 +141,7 @@ impl std::fmt::Debug for SynthRequest {
     }
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct EngineInfo {
     pub id: String,
     pub kind: String,
@@ -156,6 +156,14 @@ pub struct EngineInfo {
     pub languages: Vec<String>,
     pub capabilities: Vec<String>,
     pub loaded: bool,
+    /// Whether the engine keeps a long-lived child process between
+    /// requests (the audio.cpp resident server).
+    pub resident: bool,
+    /// PID of that child, when `resident`.
+    pub pid: Option<u32>,
+    /// Runtime that executes the engine (`onnx`, `audiocpp`, `llama.cpp`,
+    /// `python`), shown in the resource panel.
+    pub backend: String,
     pub defaults: serde_json::Value,
     pub parameters: Vec<ParamSpec>,
     /// How much of a voice's reference audio this engine uses.
@@ -235,11 +243,25 @@ impl EngineManager {
 
     pub fn list(&self) -> Vec<EngineInfo> {
         let entries = self.entries.read().expect("manifest lock poisoned");
-        let loaded = self.loaded.lock().expect("engine lock poisoned");
+        // Clone the handles out: querying a resident engine locks its own
+        // state, which should not happen under the registry lock.
+        let loaded: HashMap<String, Arc<dyn SpeechEngine>> = self
+            .loaded
+            .lock()
+            .expect("engine lock poisoned")
+            .iter()
+            .map(|(id, engine)| (id.clone(), engine.clone()))
+            .collect();
         entries
             .iter()
             .map(|entry| {
                 let m = &entry.manifest;
+                let handle = if entry.shadowed {
+                    None
+                } else {
+                    loaded.get(&m.id)
+                };
+                let pid = handle.and_then(|engine| engine.resident_pid());
                 EngineInfo {
                     id: m.id.clone(),
                     kind: m.kind.as_str().to_string(),
@@ -248,7 +270,10 @@ impl EngineManager {
                     description: m.description.clone(),
                     languages: m.languages.clone(),
                     capabilities: m.capabilities.clone(),
-                    loaded: !entry.shadowed && loaded.contains_key(&m.id),
+                    loaded: handle.is_some(),
+                    resident: pid.is_some(),
+                    pid,
+                    backend: m.kind.backend().to_string(),
                     defaults: serde_json::to_value(&m.defaults).unwrap_or(serde_json::json!({})),
                     parameters: m.parameters_or_defaults(),
                     reference_limit_secs: m.reference_limit_secs(),
@@ -391,6 +416,23 @@ impl EngineManager {
     pub fn unload(&self, id: &str) {
         let engine = self.loaded.lock().expect("engine lock poisoned").remove(id);
         if let Some(engine) = engine {
+            engine.unload();
+        }
+    }
+
+    /// Release every loaded engine. Used by the resource panel's
+    /// "unload all" action.
+    pub fn unload_all(&self) {
+        // Drain under the lock, then unload outside it: stopping a child
+        // process can wait, and must not block other registry users.
+        let engines: Vec<Arc<dyn SpeechEngine>> = self
+            .loaded
+            .lock()
+            .expect("engine lock poisoned")
+            .drain()
+            .map(|(_, engine)| engine)
+            .collect();
+        for engine in engines {
             engine.unload();
         }
     }
@@ -609,6 +651,51 @@ mod unload_tests {
             progress: None,
             audio: None,
         }
+    }
+
+    /// `unload` releases the handle and `list` reports the new state.
+    #[test]
+    fn unload_reports_and_drops_the_engine() {
+        let root =
+            std::env::temp_dir().join(format!("laverock-unload-list-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(root.join("zipvoice")).expect("model dir");
+        fs::write(
+            root.join("zipvoice/engine.json"),
+            r#"{"id":"zipvoice","kind":"zipvoice","name":"ZipVoice"}"#,
+        )
+        .expect("manifest");
+
+        let manager = EngineManager::open(&root).expect("manager");
+        let unloads = Arc::new(AtomicUsize::new(0));
+        manager.loaded.lock().expect("engine lock").insert(
+            "zipvoice".into(),
+            Arc::new(MockEngine {
+                id: "zipvoice".into(),
+                unloads: unloads.clone(),
+            }),
+        );
+
+        let info = manager
+            .list()
+            .into_iter()
+            .find(|engine| engine.id == "zipvoice")
+            .expect("listed");
+        assert!(info.loaded);
+        assert!(!info.resident);
+        assert_eq!(info.pid, None);
+        assert_eq!(info.backend, "onnx");
+
+        manager.unload("zipvoice");
+        let info = manager
+            .list()
+            .into_iter()
+            .find(|engine| engine.id == "zipvoice")
+            .expect("listed");
+        assert!(!info.loaded);
+        assert_eq!(unloads.load(Ordering::SeqCst), 1);
+
+        fs::remove_dir_all(&root).ok();
     }
 
     /// Only one model's weights are kept resident: a request for one engine

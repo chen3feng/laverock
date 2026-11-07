@@ -632,6 +632,17 @@
         </div>
       </div>
 
+      <div class="card" id="systemCard" hidden>
+        <label data-i18n="system.memory">资源占用</label>
+        <div class="hint"><span data-i18n="system.server_rss">服务进程</span>：<b id="systemRss">…</b></div>
+        <div class="hint"><span data-i18n="system.backends">推理后端</span>：<span id="systemBackends">…</span></div>
+        <div class="hint"><span data-i18n="system.children">常驻进程</span>：<span id="systemChildren">…</span></div>
+        <div class="actions" style="margin-top:14px">
+          <button class="ghost" id="unloadAll" type="button" data-i18n="models.unload_all">全部卸载</button>
+          <span class="hint" id="systemHint"></span>
+        </div>
+      </div>
+
       <div class="card">
         <label data-i18n="about">关于</label>
         <div class="hint">Laverock <span id="aboutVersion">…</span> · MIT · <span data-i18n="about.suffix">所有推理都在本机完成。</span></div>
@@ -1027,6 +1038,9 @@ addI18n({
     'models.task.asr': '语音识别', 'models.task.process': '音频处理',
     'models.task.design': '声音设计', 'models.task.vc': '声音转换',
     'models.task.other': '其他', 'models.use': '使用',
+    'models.loaded': '已加载', 'models.loaded_state': '已加载 · {size}',
+    'models.unloaded': '未加载', 'models.unload': '卸载', 'models.unload_all': '全部卸载',
+    'models.unload_done': '模型已卸载',
     'models.show_details': '展开详情', 'models.hide_details': '收起详情',
   },
   en: {
@@ -1042,6 +1056,9 @@ addI18n({
     'models.task.asr': 'Speech recognition', 'models.task.process': 'Audio tools',
     'models.task.design': 'Voice design', 'models.task.vc': 'Voice conversion',
     'models.task.other': 'Other', 'models.use': 'Use',
+    'models.loaded': 'Loaded', 'models.loaded_state': 'Loaded · {size}',
+    'models.unloaded': 'Not loaded', 'models.unload': 'Unload', 'models.unload_all': 'Unload all',
+    'models.unload_done': 'Model unloaded',
     'models.show_details': 'Show details', 'models.hide_details': 'Hide details',
   },
 });
@@ -1095,6 +1112,10 @@ addI18n({
     'pair.devices': '已配对设备', 'devices.none': '暂无',
     'phone.thisdevice': '本机连接', 'phone.connected': '已连接到电脑。',
     'phone.hint': '网络、模型与下载设置只能在电脑上修改。', 'phone.unpair': '取消配对',
+    'system.memory': '资源占用', 'system.server_rss': '服务进程',
+    'system.backends': '推理后端', 'system.children': '常驻进程',
+    'system.none': '无', 'system.no_children': '没有常驻子进程',
+    'system.unloaded_all': '已卸载所有模型',
     'about': '关于', 'about.suffix': '所有推理都在本机完成。',
     'language': '界面语言', 'lang.system': '跟随系统', 'lang.zh': '中文', 'lang.en': 'English',
     'language.hint': '跟随系统时按浏览器语言自动选择；选择会保存在本设备。',
@@ -1119,6 +1140,10 @@ addI18n({
     'phone.thisdevice': 'This device', 'phone.connected': 'Connected to the computer.',
     'phone.hint': 'Network, model and download settings can only be changed on the computer.',
     'phone.unpair': 'Unpair',
+    'system.memory': 'Resources', 'system.server_rss': 'Server process',
+    'system.backends': 'Runtimes', 'system.children': 'Resident processes',
+    'system.none': 'none', 'system.no_children': 'No resident child processes',
+    'system.unloaded_all': 'All models unloaded',
     'about': 'About', 'about.suffix': 'all inference runs on this machine.',
     'language': 'Interface language', 'lang.system': 'Follow system', 'lang.zh': '中文', 'lang.en': 'English',
     'language.hint': 'Follow system uses the browser language; the choice is saved on this device.',
@@ -1662,7 +1687,20 @@ function audioFileName(ext, engineId) {
 const esc = (value) => String(value ?? '').replace(/[&<>"']/g, (c) => (
   { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
 ));
-const fmtBytes = (b) => (!b ? '—' : b >= 1048576 ? (b / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(b / 1024)) + ' KB');
+// Human-readable size. Memory figures for loaded models routinely cross
+// a gigabyte, so the unit scales up through MB/GB/TB.
+function fmtBytes(b) {
+  if (!b) return '—';
+  if (b < 1048576) return Math.max(1, Math.round(b / 1024)) + ' KB';
+  const units = ['MB', 'GB', 'TB'];
+  let n = b / 1048576;
+  let i = 0;
+  while (n >= 1024 && i < units.length - 1) {
+    n /= 1024;
+    i += 1;
+  }
+  return n.toFixed(1) + ' ' + units[i];
+}
 const fmtDur = (s) => (s ? s.toFixed(1) + 's' : '—');
 const fmtDate = (t) => (t ? new Date(t * 1000).toLocaleDateString(dateLocale()) : '—');
 
@@ -3609,6 +3647,9 @@ function engineAsModel(engine) {
     note: null,
     unsupported: null,
     installed: true,
+    loaded: !!engine.loaded,
+    resident: !!engine.resident,
+    memory_bytes: engine.memory_bytes ?? null,
     problem: null,
     engine_id: engine.id,
     job: null,
@@ -3645,6 +3686,19 @@ async function loadModels() {
 
 function engineFor(model) {
   return engines.find((e) => e.id === (model.engine_id || model.dir));
+}
+
+// The models list carries the live state; the installed-only view used for
+// remote clients falls back to the engine registry it already has.
+function modelLoaded(model, engine) {
+  return model.loaded !== undefined ? !!model.loaded : !!(engine && engine.loaded);
+}
+
+function loadedLabel(model, engine) {
+  if (!modelLoaded(model, engine)) return t('models.unloaded');
+  return model.memory_bytes
+    ? t('models.loaded_state', { size: fmtBytes(model.memory_bytes) })
+    : t('models.loaded');
 }
 
 function renderModels() {
@@ -3747,9 +3801,7 @@ function modelCard(model, installed, readonly) {
       ${model.unsupported ? `<div class="hint err">${esc(model.unsupported)}</div>` : ''}
       ${stale ? `<div class="hint err">${esc(model.problem)}</div>` : ''}
       ${model.manual ? `<div class="hint">${t("ui.manually_installed_manifest")}</div>` : ''}
-      ${installed && !stale && engine ? `<div class="hint">${esc(engine.kind)} · ${engine.loaded
-        ? (t("ui.loaded_in_memory"))
-        : (t("ui.loaded_on_first_use"))}</div>` : ''}
+      ${installed && !stale ? `<div class="hint">${engine ? esc(engine.kind) + ' · ' : ''}${esc(loadedLabel(model, engine))}</div>` : ''}
       ${installed ? `<div class="hint">${t("ui.directory")}: models/${esc(model.dir)}</div>` : ''}
       ${job && (running || failed) ? `<pre class="log">${esc(job.log || '')}</pre>` : ''}
     </div>
@@ -3775,6 +3827,7 @@ function modelCard(model, installed, readonly) {
   const actions = el.querySelector('.model-actions');
   if (installed && !stale) {
     if (MODEL_TASK_PAGE[modelTask(model)]) actions.appendChild(useButton(model));
+    if (modelLoaded(model, engine)) actions.appendChild(unloadButton(model));
     actions.appendChild(deleteButton(model));
     return el;
   }
@@ -3822,6 +3875,29 @@ function useButton(model) {
       }
     }
     location.hash = '#/' + page;
+  };
+  return btn;
+}
+
+// Free the model's memory while keeping it installed on disk. The card
+// refreshes through the model list, which carries the live loaded state.
+function unloadButton(model) {
+  const id = model.engine_id || model.dir;
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'ghost small';
+  btn.textContent = t('models.unload');
+  btn.onclick = async () => {
+    btn.disabled = true;
+    try {
+      await api(`/api/engines/${encodeURIComponent(id)}/unload`, { method: 'POST' });
+      await Promise.all([loadEngines(), loadModels()]);
+      loadSystem();
+      toast(t('models.unload_done'));
+    } catch (e) {
+      btn.disabled = false;
+      toast(e.message, true);
+    }
   };
   return btn;
 }
@@ -4401,6 +4477,48 @@ wirePreset('hf');
 wirePreset('pip');
 
 let detectedProxy = null;
+let systemData = null;
+
+// Live memory figures for the loaded engines and the server itself.
+async function loadSystem() {
+  const card = $('systemCard');
+  if (!session.loopback) {
+    card.hidden = true;
+    return;
+  }
+  card.hidden = false;
+  try {
+    systemData = await api('/api/system');
+    $('systemRss').textContent = fmtBytes(systemData.rss);
+    $('systemBackends').textContent = (systemData.backends || []).join(' · ') || t('system.none');
+    const children = systemData.children || [];
+    $('systemChildren').textContent = children.length
+      ? children.map((c) => `${c.engine} · ${fmtBytes(c.rss)}`).join(' · ')
+      : t('system.no_children');
+  } catch (e) {
+    $('systemHint').className = 'hint err';
+    $('systemHint').textContent = e.message;
+  }
+}
+
+$('unloadAll').onclick = async () => {
+  const btn = $('unloadAll');
+  const hint = $('systemHint');
+  btn.disabled = true;
+  try {
+    await api('/api/engines/unload', { method: 'POST' });
+    await loadEngines();
+    await loadSystem();
+    hint.className = 'hint ok';
+    hint.textContent = t('system.unloaded_all');
+    toast(t('system.unloaded_all'));
+  } catch (e) {
+    hint.className = 'hint err';
+    hint.textContent = e.message;
+  } finally {
+    btn.disabled = false;
+  }
+};
 
 function syncProxyMode() {
   const mode = $('proxyMode').value;
@@ -4427,6 +4545,7 @@ async function loadSettingsPage() {
   }
   $('downloadSettings').hidden = false;
   $('phoneSettings').hidden = true;
+  loadSystem();
   try {
     const s = await api('/api/settings');
     detectedProxy = s.system_proxy || null;

@@ -91,6 +91,20 @@ impl EngineKind {
             EngineKind::Stt => "stt",
         }
     }
+
+    /// Runtime that executes this engine, shown in the resource panel.
+    pub fn backend(self) -> &'static str {
+        match self {
+            EngineKind::VoxCpm2
+            | EngineKind::Dots
+            | EngineKind::CosyVoice
+            | EngineKind::IndexTts2
+            | EngineKind::Music => "audiocpp",
+            EngineKind::MossTts => "llama.cpp",
+            EngineKind::Ming3Tts | EngineKind::Chatterbox => "python",
+            _ => "onnx",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

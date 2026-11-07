@@ -47,7 +47,20 @@ function audioFileName(ext, engineId) {
 const esc = (value) => String(value ?? '').replace(/[&<>"']/g, (c) => (
   { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
 ));
-const fmtBytes = (b) => (!b ? '—' : b >= 1048576 ? (b / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(b / 1024)) + ' KB');
+// Human-readable size. Memory figures for loaded models routinely cross
+// a gigabyte, so the unit scales up through MB/GB/TB.
+function fmtBytes(b) {
+  if (!b) return '—';
+  if (b < 1048576) return Math.max(1, Math.round(b / 1024)) + ' KB';
+  const units = ['MB', 'GB', 'TB'];
+  let n = b / 1048576;
+  let i = 0;
+  while (n >= 1024 && i < units.length - 1) {
+    n /= 1024;
+    i += 1;
+  }
+  return n.toFixed(1) + ' ' + units[i];
+}
 const fmtDur = (s) => (s ? s.toFixed(1) + 's' : '—');
 const fmtDate = (t) => (t ? new Date(t * 1000).toLocaleDateString(dateLocale()) : '—');
 
