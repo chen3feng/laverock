@@ -108,9 +108,15 @@ with a tuned size (the Python runners, audio.cpp, sherpa-onnx) return `None`
 and keep their own chunker, so laverock does not split the text twice.
 
 The server owns profiles, history, settings, pairing and the model catalog.
+Route handlers live in `crates/laverock-server/src/routes/`, one module per
+feature, each exposing `router()`; `main.rs` only opens the stores and merges
+them. Adding an endpoint means a handler in the matching module (or a new
+module plus one `merge` line).
+
 The SPA is plain HTML/CSS/JS compiled into the server with `include_str!`.
-Its sources live in `crates/laverock-server/web/` — a shell `index.html`, a
-stylesheet, the markup, and one JavaScript file per section — and
+Its sources live in `crates/laverock-server/web/`: a shell `index.html`, a
+stylesheet, one `<section>` per page under `pages/` (listed in `pages.json`,
+which also drives the sidebar), and translation fragments under `i18n/`.
 `python3 scripts/build-web.py` stitches them into the single
 `assets/index.html` that ships (no runtime dependencies, no bundler). Edit the
 files under `web/`, run the script, then rebuild the server; CI runs

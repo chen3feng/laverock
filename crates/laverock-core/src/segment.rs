@@ -394,7 +394,10 @@ mod tests {
             speed: 1.0,
             num_steps: 1,
             params: Default::default(),
+            input_samples: Vec::new(),
+            input_sr: 0,
             progress: None,
+            audio: None,
         }
     }
 

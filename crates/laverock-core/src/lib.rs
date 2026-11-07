@@ -30,7 +30,8 @@ pub use audio::{
 };
 pub use enhance::{EnhanceMode, Enhancer, DENOISE_MODELS, ENHANCE_DIR, SEPARATION_MODEL};
 pub use manager::{
-    EngineInfo, EngineManager, ProgressEvent, ProgressSink, SpeechEngine, SynthRequest,
+    AudioSink, ConvertRequest, EngineInfo, EngineManager, ProgressEvent, ProgressSink,
+    SpeechEngine, SynthRequest,
 };
 pub use manifest::{
     AudioCppManifest, ChatterboxManifest, EngineKind, KokoroManifest, Localized, LongCatManifest,

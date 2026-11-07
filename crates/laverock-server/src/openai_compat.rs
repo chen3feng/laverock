@@ -314,7 +314,10 @@ pub async fn create_speech(
         speed,
         num_steps,
         params: std::collections::BTreeMap::new(),
+        input_samples: Vec::new(),
+        input_sr: 0,
         progress: None,
+        audio: None,
     };
     match &target {
         VoiceTarget::Preset { name, value } => {

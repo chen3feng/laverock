@@ -1,0 +1,35 @@
+    <!-- ================= 语音素材 ================= -->
+    <section id="page-voices" class="page">
+      <div class="page-head" style="display:flex;align-items:flex-end;justify-content:space-between;gap:12px;flex-wrap:wrap">
+        <div><h1 data-i18n="voices.title">声音库</h1><p class="sub" data-i18n="voices.sub">保存的声音可以复用到任何克隆引擎，也可以由素材库里的多段录音组成。</p></div>
+        <div style="display:flex;gap:8px">
+          <button id="exportVoicesBtn" class="ghost" type="button" data-i18n="voice.exportBatch">⬇ 批量导出</button>
+          <button id="importVoiceBtn" class="ghost" type="button" data-i18n="voice.import">⬆ 导入声音</button>
+          <button id="newVoiceBtn" type="button" data-i18n="voice.new">＋ 新建声音</button>
+          <input id="importVoiceFile" type="file" accept=".zip" hidden />
+        </div>
+      </div>
+
+      <div class="card" id="newVoiceCard" hidden>
+        <label for="newName" data-i18n="voice.name">声音名称</label>
+        <input type="text" id="newName" data-i18n-ph="voice.name.ph" placeholder="例如：新闻女声" />
+        <label style="margin-top:14px" data-i18n="voice.ref">参考声音（3–10 秒干净人声）</label>
+        <div id="voiceCapture"></div>
+        <div class="hint" data-i18n="voice.rec.hint">录音会在浏览器内转成 24kHz 单声道 WAV。</div>
+        <div class="hint"><a href="#/captures" data-i18n="voice.from_library">要用多段录音拼成一个声音？去素材库勾选后新建。</a></div>
+        <div style="margin-top:14px">
+          <label for="newPromptText" data-i18n="voice.prompt">参考音频对应文字（ZipVoice 必填）</label>
+          <input type="text" id="newPromptText" data-i18n-ph="voice.prompt.ph" placeholder="录音里说了什么就填什么" />
+        </div>
+        <div class="actions" style="margin-top:16px">
+          <button id="newSave" type="button" data-i18n="voice.save">保存到声音库</button>
+          <button class="ghost" id="newCancel" type="button" data-i18n="cancel">取消</button>
+          <span class="hint" id="newSaveHint"></span>
+        </div>
+      </div>
+
+      <div class="grid" id="voicesGrid"></div>
+      <div class="empty" id="voicesEmpty" data-i18n="voices.empty" hidden>
+        还没有保存的声音。点击「新建声音」录音或上传一段 3–10 秒的参考音频。
+      </div>
+    </section>

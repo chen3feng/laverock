@@ -38,11 +38,48 @@ pub enum ProgressEvent {
 /// simply never call it.
 pub type ProgressSink = Arc<dyn Fn(ProgressEvent) + Send + Sync>;
 
+/// A chunk of audio produced while a streaming request is still running.
+///
+/// Unlike [`ProgressSink`], this channel is lossless: returning `false`
+/// tells the engine the consumer has gone away, so it can stop early.
+pub type AudioSink = Arc<dyn Fn(Audio) -> bool + Send + Sync>;
+
+/// A voice-conversion request: transform `input_samples` into the voice
+/// described by the reference clip.
+///
+/// Kept separate from [`SynthRequest`] because the input is audio rather
+/// than text; TTS engines reject it with the default `convert`.
+pub struct ConvertRequest {
+    pub input_samples: Vec<f32>,
+    pub input_sr: i32,
+    pub prompt_samples: Vec<f32>,
+    pub prompt_sr: i32,
+    pub params: std::collections::BTreeMap<String, serde_json::Value>,
+    pub progress: Option<ProgressSink>,
+}
+
 /// A loaded, ready-to-run engine.
 pub trait SpeechEngine: Send + Sync {
     fn id(&self) -> &str;
     fn name(&self) -> &str;
     fn synthesize(&self, req: &SynthRequest) -> Result<Audio>;
+
+    /// Convert an existing clip into this engine's target voice.
+    ///
+    /// Only voice-conversion engines implement this; the default rejects
+    /// the request so callers get a clear error instead of silence.
+    fn convert(&self, _req: &ConvertRequest) -> Result<Audio> {
+        Err(CoreError::BadRequest(format!(
+            "{} does not support voice conversion",
+            self.name()
+        )))
+    }
+
+    /// PID of a resident child process, when the engine keeps one between
+    /// requests. In-process engines and one-shot subprocesses return `None`.
+    fn resident_pid(&self) -> Option<u32> {
+        None
+    }
 
     /// Give back memory held between requests, if the engine keeps any.
     ///
@@ -75,8 +112,15 @@ pub struct SynthRequest {
     /// (e.g. voxcpm2 cfg/temperature/seed). Values are validated server
     /// side against the ParamSpec range.
     pub params: std::collections::BTreeMap<String, serde_json::Value>,
+    /// Source audio for editing or voice-conversion tasks. Empty for plain
+    /// text-to-speech.
+    pub input_samples: Vec<f32>,
+    pub input_sr: i32,
     /// Optional progress callback; absent for engines/clients without UI.
     pub progress: Option<ProgressSink>,
+    /// Optional lossless audio sink for streaming synthesis. Engines that
+    /// cannot stream leave it unused and return the whole clip as usual.
+    pub audio: Option<AudioSink>,
 }
 
 impl std::fmt::Debug for SynthRequest {
@@ -89,7 +133,10 @@ impl std::fmt::Debug for SynthRequest {
             .field("speed", &self.speed)
             .field("num_steps", &self.num_steps)
             .field("params", &self.params)
+            .field("input_samples", &self.input_samples.len())
+            .field("input_sr", &self.input_sr)
             .field("progress", &self.progress.is_some())
+            .field("audio", &self.audio.is_some())
             .finish()
     }
 }
@@ -286,6 +333,27 @@ impl EngineManager {
             Some(policy) => crate::segment::synthesize_long(engine.as_ref(), req, policy),
             None => engine.synthesize(req),
         }
+    }
+
+    /// Convenience: load if needed and run one voice-conversion request.
+    pub fn convert(&self, id: &str, req: &ConvertRequest) -> Result<Audio> {
+        let engine = self.engine(id)?;
+        self.release_others(id);
+        engine.convert(req)
+    }
+
+    /// PID of the resident child process an engine keeps between requests,
+    /// if any. `None` for engines that run in-process or spawn per request.
+    pub fn resident_pid(&self, id: &str) -> Option<u32> {
+        // Clone the handle out first: querying an engine can lock its own
+        // state, which should not happen under the registry lock.
+        let engine = self
+            .loaded
+            .lock()
+            .expect("engine lock poisoned")
+            .get(id)
+            .cloned();
+        engine.and_then(|engine| engine.resident_pid())
     }
 
     /// Release whatever the other engines keep loaded.
@@ -528,7 +596,10 @@ mod unload_tests {
             speed: 1.0,
             num_steps: 1,
             params: Default::default(),
+            input_samples: Vec::new(),
+            input_sr: 0,
             progress: None,
+            audio: None,
         }
     }
 

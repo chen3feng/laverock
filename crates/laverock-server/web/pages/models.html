@@ -1,0 +1,20 @@
+    <!-- ================= 模型 ================= -->
+    <section id="page-models" class="page">
+      <div class="page-head"><h1 data-i18n="models.title">模型</h1><p class="sub" data-i18n="models.sub">每个模型都是 <code>models/&lt;id&gt;/engine.json</code> 描述的一个插件。</p></div>
+
+      <div class="card" id="modelPaths" hidden>
+        <label data-i18n="models.dir">模型目录</label>
+        <div class="pathline"><code id="modelsDirPath">…</code></div>
+        <label style="margin-top:12px" data-i18n="models.scripts">下载脚本</label>
+        <div class="pathline"><code id="scriptsDirPath">…</code></div>
+        <div class="hint" data-i18n="models.paths.hint">下载使用「设置 → 下载网络」中的代理与镜像；安装完成后引擎会自动刷新。</div>
+      </div>
+
+      <div class="card" id="modelsNotice" hidden>
+        <label data-i18n="models.desktop.only">模型管理仅在电脑端可用</label>
+        <div class="hint" data-i18n="models.desktop.hint">手机上可以查看已安装的引擎并直接合成。安装新模型请在电脑上打开同一界面。</div>
+      </div>
+
+      <div id="modelGroups"></div>
+      <div class="empty" id="installedEmpty" data-i18n="models.empty" hidden>没有可显示的模型。</div>
+    </section>

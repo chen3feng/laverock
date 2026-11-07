@@ -7,7 +7,11 @@ file is miserable, so the sources live in `crates/laverock-server/web/`:
 
   index.html    shell; `{{styles.css}}`, `{{body.html}}`, `{{js}}`, `{{favicon}}`
   styles.css    the stylesheet
-  body.html     the markup, including <template> blocks
+  body.html     the markup outside the pages (sidebar, overlays, templates);
+                `{{nav}}` and `{{pages}}` are filled from pages.json
+  pages.json    page index: id, i18n key, fallback label and nav icon
+  pages/*.html  one `<section class="page">` per page, in pages.json order
+  i18n/*.js     translation fragments, concatenated before the runtime
   js/NN-*.js    one file per section, concatenated in filename order
   favicon.png   32px tab icon, inlined as a data URI so the tab needs no request
 
@@ -24,6 +28,7 @@ from __future__ import annotations
 import argparse
 import base64
 import difflib
+import json
 import sys
 from pathlib import Path
 
@@ -32,14 +37,52 @@ WEB = ROOT / "crates/laverock-server/web"
 OUT = ROOT / "crates/laverock-server/assets/index.html"
 
 
+def pages_index() -> list[dict]:
+    """The page list from pages.json, validated so a typo fails the build."""
+    raw = json.loads((WEB / "pages.json").read_text(encoding="utf-8"))
+    if not raw:
+        raise SystemExit(f"{WEB / 'pages.json'} is empty")
+    for entry in raw:
+        for key in ("id", "i18n", "label", "icon"):
+            if not entry.get(key):
+                raise SystemExit(f"pages.json entry {entry!r} is missing {key!r}")
+        if not (WEB / "pages" / f"{entry['id']}.html").is_file():
+            raise SystemExit(f"missing page source: web/pages/{entry['id']}.html")
+    return raw
+
+
 def build() -> str:
     shell = (WEB / "index.html").read_text(encoding="utf-8")
     styles = (WEB / "styles.css").read_text(encoding="utf-8").strip("\n")
-    body = (WEB / "body.html").read_text(encoding="utf-8")
-    scripts = sorted((WEB / "js").glob("*.js"))
+    pages = pages_index()
+    nav = "\n".join(
+        "    <a href=\"#/{id}\" data-page=\"{id}\">\n"
+        "      <svg viewBox=\"0 0 24 24\">{icon}</svg>\n"
+        "      <span data-i18n=\"{i18n}\">{label}</span>\n"
+        "    </a>".format(**entry)
+        for entry in pages
+    )
+    page_html = "\n\n".join(
+        (WEB / "pages" / f"{entry['id']}.html")
+        .read_text(encoding="utf-8")
+        .rstrip("\n")
+        for entry in pages
+    )
+    body_src = (WEB / "body.html").read_text(encoding="utf-8")
+    for token in ("{{nav}}", "{{pages}}"):
+        if token not in body_src:
+            raise SystemExit(f"body.html is missing {token}")
+    body = body_src.replace("{{nav}}", nav).replace("{{pages}}", page_html)
+    scripts = sorted((WEB / "i18n").glob("*.js")) + sorted((WEB / "js").glob("*.js"))
     if not scripts:
         raise SystemExit(f"no JavaScript sources under {WEB / 'js'}")
-    js = "\n\n".join(p.read_text(encoding="utf-8").rstrip("\n") for p in scripts)
+    page_ids = ", ".join(json.dumps(entry["id"]) for entry in pages)
+    js = "\n\n".join(
+        p.read_text(encoding="utf-8")
+        .rstrip("\n")
+        .replace("{{page_ids}}", page_ids)
+        for p in scripts
+    )
     favicon = "data:image/png;base64," + base64.b64encode(
         (WEB / "favicon.png").read_bytes()).decode("ascii")
 

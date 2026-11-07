@@ -1,0 +1,28 @@
+addI18n({
+  zh: {
+    'history.title': '历史',
+    'history.sub': '本机生成的音频与文本记录，最多保留 100 条或 1 GB。',
+    'history.filter.all': '全部',
+    'history.task.tts': '语音合成', 'history.task.music': '音乐',
+    'history.task.asr': '语音识别', 'history.task.vc': '声音转换',
+    'history.task.design': '声音设计', 'history.task.process': '音频处理',
+    'history.clear': '清空全部',
+    'history.empty': '还没有生成记录。去「合成」生成第一条吧。',
+    'history.empty.task': '该任务下还没有记录。',
+    'history.variant': '候选项 {n}',
+    'history.variant_group': '共 {n} 个候选项',
+  },
+  en: {
+    'history.title': 'History',
+    'history.sub': 'Audio and text generated on this computer, capped at 100 entries or 1 GB.',
+    'history.filter.all': 'All',
+    'history.task.tts': 'Speech', 'history.task.music': 'Music',
+    'history.task.asr': 'Transcription', 'history.task.vc': 'Voice conversion',
+    'history.task.design': 'Voice design', 'history.task.process': 'Audio tools',
+    'history.clear': 'Clear all',
+    'history.empty': 'No generations yet. Head to Synthesize to make the first one.',
+    'history.empty.task': 'No entries for this task yet.',
+    'history.variant': 'take #{n}',
+    'history.variant_group': '{n} takes',
+  },
+});
