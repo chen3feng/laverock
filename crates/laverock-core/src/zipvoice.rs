@@ -157,10 +157,7 @@ impl SpeechEngine for ZipVoiceEngine {
             .generate_with_config(&req.text, &gen_config, None::<fn(&[f32], f32) -> bool>)
             .ok_or_else(|| CoreError::Synth("sherpa-onnx returned no audio".into()))?;
 
-        Ok(Audio {
-            samples: audio.samples().to_vec(),
-            sample_rate: audio.sample_rate(),
-        })
+        Ok(Audio::mono(audio.samples().to_vec(), audio.sample_rate()))
     }
 }
 

@@ -78,6 +78,12 @@ function buildHistoryTake(host, h, engineName, variantLabel) {
   chip.className = 'chip';
   chip.textContent = engineName[h.engine_id] || h.engine_name || h.engine_id;
   meta.appendChild(chip);
+  if (h.kind === 'music') {
+    const kind = document.createElement('span');
+    kind.className = 'chip';
+    kind.textContent = t('history.music');
+    meta.appendChild(kind);
+  }
   if (variantLabel) {
     const take = document.createElement('span');
     take.className = 'chip';

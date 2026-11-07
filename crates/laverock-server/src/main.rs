@@ -42,7 +42,7 @@ use axum::{
     Json, Router,
 };
 use laverock_core::{
-    decode_wav, encode_wav, trim_silence, Audio, CoreError, EngineManager, SynthRequest,
+    decode_wav, encode_wav_channels, trim_silence, Audio, CoreError, EngineManager, SynthRequest,
 };
 use models::ModelService;
 use profiles::ProfileStore;
@@ -1453,13 +1453,17 @@ async fn synthesize(
 
     let manager = state.manager.clone();
     let history = state.history.clone();
-    let engine_name = state
-        .manager
-        .list()
-        .into_iter()
-        .find(|e| e.id == engine_id)
-        .map(|e| e.name)
+    let info = state.manager.list().into_iter().find(|e| e.id == engine_id);
+    let engine_name = info
+        .as_ref()
+        .map(|e| e.name.clone())
         .unwrap_or_else(|| engine_id.clone());
+    // Music entries are flagged in history so the UI can label them and
+    // offer the right actions; everything else is speech.
+    let engine_kind = info
+        .as_ref()
+        .map(|e| e.kind.clone())
+        .unwrap_or_else(|| "speech".to_string());
 
     // The desktop UI asks for a Server-Sent-Events stream so long Qwen
     // generations can report progress; other clients keep getting the WAV.
@@ -1488,6 +1492,7 @@ async fn synthesize(
         let Audio {
             samples,
             sample_rate,
+            channels,
         } = tokio::task::spawn_blocking(move || manager.synthesize(&history_engine, &request))
             .await
             .map_err(|e| ApiError {
@@ -1495,8 +1500,17 @@ async fn synthesize(
                 message: format!("engine task panicked: {e}"),
             })??;
 
-        let wav = encode_wav(&samples, sample_rate)?;
-        if let Err(e) = history.add(&engine_id, &engine_name, &text, &wav, sample_rate) {
+        let wav = encode_wav_channels(&samples, sample_rate, channels)?;
+        if let Err(e) = history.add_typed(
+            &engine_id,
+            &engine_name,
+            &engine_kind,
+            &text,
+            &wav,
+            sample_rate,
+            channels,
+            None,
+        ) {
             tracing::warn!("history add failed: {e}");
         }
         return Ok((
@@ -1540,6 +1554,9 @@ async fn synthesize(
         // One shared group id ties all takes of this request together in
         // history, so the UI can show them as variants of a single try.
         let generation = history.new_generation_id();
+        let mut produced = 0u32;
+        let mut last_channels: Option<u16> = None;
+        let mut failed = false;
         for index in 0..samples {
             // Deterministic engines expose a `seed` parameter; bump it so
             // each additional take actually differs. Engines that sample
@@ -1563,20 +1580,25 @@ async fn synthesize(
                 Ok(Audio {
                     samples: audio,
                     sample_rate,
-                }) => match encode_wav(&audio, sample_rate) {
+                    channels,
+                }) => match encode_wav_channels(&audio, sample_rate, channels) {
                     Ok(wav) => {
                         // Best-effort: a prune failure must not drop the
                         // audio the client just generated.
-                        if let Err(e) = history.add_variant(
+                        if let Err(e) = history.add_typed(
                             &engine_id,
                             &engine_name,
+                            &engine_kind,
                             &history_text,
                             &wav,
                             sample_rate,
+                            channels,
                             Some((generation.clone(), index)),
                         ) {
                             tracing::warn!("history add failed: {e}");
                         }
+                        produced += 1;
+                        last_channels = Some(channels);
                         let b64 = base64::engine::general_purpose::STANDARD.encode(&wav);
                         // Envelope carries index/total so the UI lays out a
                         // variant gallery without an extra batch-end marker.
@@ -1584,15 +1606,24 @@ async fn synthesize(
                         let _ = tx.blocking_send(Ok(sse("wav", &payload.to_string())));
                     }
                     Err(e) => {
+                        failed = true;
                         let _ = tx.blocking_send(Ok(error_frame(&sse, &e.to_string())));
                         break;
                     }
                 },
                 Err(e) => {
+                    failed = true;
                     let _ = tx.blocking_send(Ok(error_frame(&sse, &e.to_string())));
                     break;
                 }
             }
+        }
+        if !failed {
+            let payload = serde_json::json!({
+                "count": produced,
+                "channels": last_channels.unwrap_or(1),
+            });
+            let _ = tx.blocking_send(Ok(sse("done", &payload.to_string())));
         }
     });
 
@@ -1693,8 +1724,9 @@ fn parse_param(spec: &laverock_core::ParamSpec, raw: &str) -> Result<serde_json:
         ParamKind::Choice => serde_json::Value::String(raw.to_string()),
         ParamKind::Text | ParamKind::TextArea => {
             // Free-form text: bounded so a stray paste cannot bloat the
-            // request or the engine command line.
-            const MAX_TEXT_PARAM: usize = 2000;
+            // request or the engine command line. Lyrics for a full song
+            // comfortably fit in 4000 characters.
+            const MAX_TEXT_PARAM: usize = 4000;
             let text = raw.trim();
             if text.chars().count() > MAX_TEXT_PARAM {
                 return Err(ApiError::bad_request(format!(

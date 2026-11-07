@@ -28,6 +28,7 @@
       "../../scripts/download-longcat.sh": "scripts/download-longcat.sh",
       "../../scripts/download-dots.sh": "scripts/download-dots.sh",
       "../../scripts/download-cosyvoice.sh": "scripts/download-cosyvoice.sh",
+      "../../scripts/download-ace-step.sh": "scripts/download-ace-step.sh",
       "../../scripts/longcat_runner.py": "scripts/longcat_runner.py",
       "../../scripts/download-ming3tts.sh": "scripts/download-ming3tts.sh",
       "../../scripts/ming3tts_runner.py": "scripts/ming3tts_runner.py",

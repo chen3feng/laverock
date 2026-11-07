@@ -25,7 +25,7 @@ lv_hf_download_file audio-cpp/audio.cpp-gguf \
 
 # 3. The separator runs through audio.cpp's CLI, shared with the TTS
 #    engines. Install the runtime only if it is not there yet.
-AC_VERSION="${AC_VERSION:-v0.9.2-drama3-base-small}"
+AC_VERSION="${AC_VERSION:-v0.9.4}"
 lv_audiocpp_bin "$TOOLS" "$AC_VERSION" "$MODELS_DIR" > /dev/null
 
 echo

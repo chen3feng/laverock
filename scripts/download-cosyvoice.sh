@@ -16,7 +16,7 @@ set -euo pipefail
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/laverock-lib.sh"
 lv_init cosyvoice
 
-AC_VERSION="${DOTS_VERSION:-v0.9.2-drama3-base-small}"
+AC_VERSION="${DOTS_VERSION:-v0.9.4}"
 PRECISION="${COSYVOICE_PRECISION:-q8_0}"
 
 case "$PRECISION" in

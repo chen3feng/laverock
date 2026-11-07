@@ -207,10 +207,7 @@ impl SpeechEngine for ChatterboxEngine {
 
         let _ = std::fs::remove_dir_all(&tmp);
 
-        Ok(Audio {
-            samples,
-            sample_rate,
-        })
+        Ok(Audio::mono(samples, sample_rate))
     }
 }
 

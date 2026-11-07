@@ -29,6 +29,7 @@ installs and CI use them directly:
 ./scripts/download-chatterbox.sh   # Chatterbox multilingual, venv + ~5 GB
 ./scripts/download-indextts2.sh    # IndexTTS-2, 3.6 GB Q8_0 GGUF (shares the runtime)
 ./scripts/download-mosstts.sh      # MOSS-TTS-Delay, macOS/Linux only, ~10 GB weights
+./scripts/download-ace-step.sh     # ACE-Step 1.5 Turbo music, ~10 GB BF16 (shares the runtime)
 
 # Variants
 QWEN3TTS_VARIANT=custom ./scripts/download-qwen3tts.sh    # 9 preset speakers
@@ -38,6 +39,7 @@ MING3TTS_VARIANT=multilingual ./scripts/download-ming3tts.sh
 MING3TTS_VARIANT=ip ./scripts/download-ming3tts.sh        # built-in Ming voices
 LONGCAT_MODEL=meituan-longcat/LongCat-AudioDiT-3.5B ./scripts/download-longcat.sh
 DOTS_MODEL=dots.tts-mf ./scripts/download-dots.sh         # 4-step MeanFlow export
+ACE_STEP_QUANT=q8_0 ./scripts/download-ace-step.sh        # ~6.2 GB music export
 ```
 
 Scripts honour the proxy and mirror settings from **Settings → Download
@@ -74,6 +76,7 @@ endpoint call the model.
 | `chatterbox` | Chatterbox Multilingual | clone | 23 languages | ~5 GB incl. venv |
 | `indextts2` | IndexTTS-2 Q8_0 | clone | zh, en | ~3.6 GB |
 | `mosstts` | MOSS-TTS-Delay | clone, multilingual | 20 languages | ~10 GB (peak ~16 GB) |
+| `ace-step` | ACE-Step 1.5 Turbo | text-to-music, lyrics | 50+ languages | ~10 GB (BF16) / ~6.2 GB (Q8_0) |
 | `enhance` | Voice cleanup (GTCRN + BS-RoFormer) | recording cleanup | — | ~165 MB |
 
 The four Ming entries share one checkpoint, one venv and one runtime, so
@@ -100,6 +103,7 @@ its card.
 | `instruct` | accepts a delivery instruction, e.g. "speak slowly and warmly" |
 | `multilingual` | can speak a language other than the reference clip's |
 | `stt` | speech recognition, used to transcribe reference clips; not a TTS engine |
+| `music` | text-to-music / lyrics-to-song; shown on the Music page, not the speech page |
 
 ## Engine notes
 
@@ -208,6 +212,18 @@ runs, so the catalog no longer offers it on Windows. The runtime's `-ngl`
 option can offload layers to a CUDA build, but at the pinned revision every
 run that touched the GPU crashed (see **Speed**), so there is no GPU escape
 hatch either.
+
+**ACE-Step 1.5 Turbo** — music generation on the shared audio.cpp runtime.
+The Music page takes a style caption as `text` and optional `lyrics`; leave
+the lyrics empty for an instrumental. `duration_sec` requests a length (the
+planner may stop earlier), and `num_steps` is capped at 8 for Turbo.
+`guidance_scale` is ignored by Turbo checkpoints. Output is 48 kHz stereo.
+Editing routes (cover, repaint, extend) are not exposed yet.
+
+12 GB+ of VRAM is comfortable. On an 8 GB card the model runs with CPU or
+offload; installing with `ACE_STEP_QUANT=q8_0` halves the download, though
+the quantized planner occasionally fails to sample. The BF16 build is the
+reliable default.
 
 **SenseVoice** — optional on-device speech recognition covering zh/en/ja/
 ko/yue. Once installed, a recorded or uploaded reference clip is transcribed
@@ -348,7 +364,8 @@ with a negative slope.
 | Feature | Requirement |
 | --- | --- |
 | ONNX engines (ZipVoice, Kokoro, SenseVoice) | none beyond the app |
-| audio.cpp engines (dots, CosyVoice, VoxCPM2, IndexTTS-2) | prebuilt CLI and resident server are downloaded |
+| audio.cpp engines (dots, CosyVoice, VoxCPM2, IndexTTS-2, ACE-Step) | prebuilt CLI and resident server are downloaded |
+| ACE-Step music | 12 GB+ VRAM recommended; 8 GB cards use CPU/offload |
 | Python engines (Qwen3-TTS, LongCat, Ming, Chatterbox) | Python 3.10–3.12; the scripts create an isolated venv |
 | MOSS-TTS | macOS/Linux only (not offered on Windows); prebuilt runtime is downloaded; Python 3 for the one-time tokenizer conversion |
 | In-app installs on Windows | `bash` from Git for Windows |
