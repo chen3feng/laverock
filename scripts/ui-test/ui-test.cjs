@@ -233,6 +233,17 @@ async function main() {
     );
 
     const zipCard = page.locator('.model-card', { hasText: 'ZipVoice' }).first();
+    const unloadBtn = zipCard.locator('.model-actions button.ghost.small:not(.danger)').first();
+    assert.equal(await unloadBtn.count(), 1, 'a loaded model offers Unload');
+    await unloadBtn.click();
+    await unloadBtn.waitFor({ state: 'detached', timeout: 30_000 });
+    const zipLoaded = await page.evaluate(async (id) => {
+      const list = await (await fetch('/api/engines')).json();
+      return list.find((e) => e.id === id)?.loaded;
+    }, engineId);
+    assert.equal(zipLoaded, false, 'engine is unloaded after the button click');
+    pass('loaded model unloaded from the models page');
+
     await zipCard.locator('.model-actions button').first().click();
     await page.waitForFunction(() => location.hash === '#/synthesize');
     assert.equal(await page.$eval('#engine', (select) => select.value), engineId);

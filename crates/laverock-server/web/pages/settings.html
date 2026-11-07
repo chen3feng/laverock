@@ -77,6 +77,17 @@
         </div>
       </div>
 
+      <div class="card" id="systemCard" hidden>
+        <label data-i18n="system.memory">资源占用</label>
+        <div class="hint"><span data-i18n="system.server_rss">服务进程</span>：<b id="systemRss">…</b></div>
+        <div class="hint"><span data-i18n="system.backends">推理后端</span>：<span id="systemBackends">…</span></div>
+        <div class="hint"><span data-i18n="system.children">常驻进程</span>：<span id="systemChildren">…</span></div>
+        <div class="actions" style="margin-top:14px">
+          <button class="ghost" id="unloadAll" type="button" data-i18n="models.unload_all">全部卸载</button>
+          <span class="hint" id="systemHint"></span>
+        </div>
+      </div>
+
       <div class="card">
         <label data-i18n="about">关于</label>
         <div class="hint">Laverock <span id="aboutVersion">…</span> · MIT · <span data-i18n="about.suffix">所有推理都在本机完成。</span></div>

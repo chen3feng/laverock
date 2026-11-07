@@ -12,6 +12,9 @@ addI18n({
     'models.task.asr': '语音识别', 'models.task.process': '音频处理',
     'models.task.design': '声音设计', 'models.task.vc': '声音转换',
     'models.task.other': '其他', 'models.use': '使用',
+    'models.loaded': '已加载', 'models.loaded_state': '已加载 · {size}',
+    'models.unloaded': '未加载', 'models.unload': '卸载', 'models.unload_all': '全部卸载',
+    'models.unload_done': '模型已卸载',
     'models.show_details': '展开详情', 'models.hide_details': '收起详情',
   },
   en: {
@@ -27,6 +30,9 @@ addI18n({
     'models.task.asr': 'Speech recognition', 'models.task.process': 'Audio tools',
     'models.task.design': 'Voice design', 'models.task.vc': 'Voice conversion',
     'models.task.other': 'Other', 'models.use': 'Use',
+    'models.loaded': 'Loaded', 'models.loaded_state': 'Loaded · {size}',
+    'models.unloaded': 'Not loaded', 'models.unload': 'Unload', 'models.unload_all': 'Unload all',
+    'models.unload_done': 'Model unloaded',
     'models.show_details': 'Show details', 'models.hide_details': 'Hide details',
   },
 });

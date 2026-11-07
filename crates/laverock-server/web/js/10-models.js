@@ -37,6 +37,9 @@ function engineAsModel(engine) {
     note: null,
     unsupported: null,
     installed: true,
+    loaded: !!engine.loaded,
+    resident: !!engine.resident,
+    memory_bytes: engine.memory_bytes ?? null,
     problem: null,
     engine_id: engine.id,
     job: null,
@@ -73,6 +76,19 @@ async function loadModels() {
 
 function engineFor(model) {
   return engines.find((e) => e.id === (model.engine_id || model.dir));
+}
+
+// The models list carries the live state; the installed-only view used for
+// remote clients falls back to the engine registry it already has.
+function modelLoaded(model, engine) {
+  return model.loaded !== undefined ? !!model.loaded : !!(engine && engine.loaded);
+}
+
+function loadedLabel(model, engine) {
+  if (!modelLoaded(model, engine)) return t('models.unloaded');
+  return model.memory_bytes
+    ? t('models.loaded_state', { size: fmtBytes(model.memory_bytes) })
+    : t('models.loaded');
 }
 
 function renderModels() {
@@ -175,9 +191,7 @@ function modelCard(model, installed, readonly) {
       ${model.unsupported ? `<div class="hint err">${esc(model.unsupported)}</div>` : ''}
       ${stale ? `<div class="hint err">${esc(model.problem)}</div>` : ''}
       ${model.manual ? `<div class="hint">${t("ui.manually_installed_manifest")}</div>` : ''}
-      ${installed && !stale && engine ? `<div class="hint">${esc(engine.kind)} · ${engine.loaded
-        ? (t("ui.loaded_in_memory"))
-        : (t("ui.loaded_on_first_use"))}</div>` : ''}
+      ${installed && !stale ? `<div class="hint">${engine ? esc(engine.kind) + ' · ' : ''}${esc(loadedLabel(model, engine))}</div>` : ''}
       ${installed ? `<div class="hint">${t("ui.directory")}: models/${esc(model.dir)}</div>` : ''}
       ${job && (running || failed) ? `<pre class="log">${esc(job.log || '')}</pre>` : ''}
     </div>
@@ -203,6 +217,7 @@ function modelCard(model, installed, readonly) {
   const actions = el.querySelector('.model-actions');
   if (installed && !stale) {
     if (MODEL_TASK_PAGE[modelTask(model)]) actions.appendChild(useButton(model));
+    if (modelLoaded(model, engine)) actions.appendChild(unloadButton(model));
     actions.appendChild(deleteButton(model));
     return el;
   }
@@ -250,6 +265,29 @@ function useButton(model) {
       }
     }
     location.hash = '#/' + page;
+  };
+  return btn;
+}
+
+// Free the model's memory while keeping it installed on disk. The card
+// refreshes through the model list, which carries the live loaded state.
+function unloadButton(model) {
+  const id = model.engine_id || model.dir;
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'ghost small';
+  btn.textContent = t('models.unload');
+  btn.onclick = async () => {
+    btn.disabled = true;
+    try {
+      await api(`/api/engines/${encodeURIComponent(id)}/unload`, { method: 'POST' });
+      await Promise.all([loadEngines(), loadModels()]);
+      loadSystem();
+      toast(t('models.unload_done'));
+    } catch (e) {
+      btn.disabled = false;
+      toast(e.message, true);
+    }
   };
   return btn;
 }

@@ -17,6 +17,9 @@ Cookie）；以下均指回环监听。
 | GET | `/api/health` | 服务状态 |
 | GET | `/api/engines` | 已注册引擎及其默认参数 |
 | POST | `/api/engines/:id/synthesize` | multipart：`text` 加 `profile_id` 或（`prompt` WAV + `prompt_text`），可附引擎参数 → WAV；加 `x-laverock-job: 1` 则作为后台任务运行，或加 `x-laverock-stream: 1` + `stream_audio=1` 逐句流式下发 |
+| POST | `/api/engines/:id/unload` | 释放该模型占用的内存（仍保持安装）→ `204` |
+| POST | `/api/engines/unload` | 释放所有已加载模型 → `204` |
+| GET | `/api/system` | 服务进程内存、常驻子进程与已加载引擎的推理后端 |
 | GET | `/api/jobs/:id` | 任务状态、进度与产物 |
 | GET | `/api/jobs/:id/events` | 任务的 Server-Sent Events（先发快照，再回放并跟进实时事件） |
 | POST | `/api/jobs/:id/cancel` | 请求停止任务 → `202` |
@@ -62,6 +65,12 @@ Cookie）；以下均指回环监听。
 同一份列表校验，界面也用同一份列表生成控件；`GET /api/engines` 可查看。每个引擎
 还带一段本地化 `description`（`{"en": …, "zh": …}`，第三方清单可能直接是字符串），
 供模型选择器展示。引擎 id 就是[模型目录](models.zh-CN.md#目录)中的目录 id。
+
+`GET /api/engines` 还会报告每个引擎的实时状态：`loaded`、`resident`（是否常驻
+子进程）、该进程的 `pid`，以及 `backend`（推理后端：`onnx`、`audiocpp`、
+`llama.cpp` 或 `python`）。`GET /api/system` 在此基础上汇总内存占用（RSS），
+模型卡片与设置页的资源面板用的就是它。`POST /api/engines/:id/unload` 只释放
+内存，不删除磁盘文件；下次合成时会自动重新加载。
 
 ## 示例
 

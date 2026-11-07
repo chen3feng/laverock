@@ -48,6 +48,48 @@ wirePreset('hf');
 wirePreset('pip');
 
 let detectedProxy = null;
+let systemData = null;
+
+// Live memory figures for the loaded engines and the server itself.
+async function loadSystem() {
+  const card = $('systemCard');
+  if (!session.loopback) {
+    card.hidden = true;
+    return;
+  }
+  card.hidden = false;
+  try {
+    systemData = await api('/api/system');
+    $('systemRss').textContent = fmtBytes(systemData.rss);
+    $('systemBackends').textContent = (systemData.backends || []).join(' · ') || t('system.none');
+    const children = systemData.children || [];
+    $('systemChildren').textContent = children.length
+      ? children.map((c) => `${c.engine} · ${fmtBytes(c.rss)}`).join(' · ')
+      : t('system.no_children');
+  } catch (e) {
+    $('systemHint').className = 'hint err';
+    $('systemHint').textContent = e.message;
+  }
+}
+
+$('unloadAll').onclick = async () => {
+  const btn = $('unloadAll');
+  const hint = $('systemHint');
+  btn.disabled = true;
+  try {
+    await api('/api/engines/unload', { method: 'POST' });
+    await loadEngines();
+    await loadSystem();
+    hint.className = 'hint ok';
+    hint.textContent = t('system.unloaded_all');
+    toast(t('system.unloaded_all'));
+  } catch (e) {
+    hint.className = 'hint err';
+    hint.textContent = e.message;
+  } finally {
+    btn.disabled = false;
+  }
+};
 
 function syncProxyMode() {
   const mode = $('proxyMode').value;
@@ -74,6 +116,7 @@ async function loadSettingsPage() {
   }
   $('downloadSettings').hidden = false;
   $('phoneSettings').hidden = true;
+  loadSystem();
   try {
     const s = await api('/api/settings');
     detectedProxy = s.system_proxy || null;

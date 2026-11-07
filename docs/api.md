@@ -19,6 +19,9 @@ describes the loopback listener.
 | GET | `/api/health` | service status |
 | GET | `/api/engines` | registered engines and their defaults |
 | POST | `/api/engines/:id/synthesize` | multipart `text` plus either `profile_id` or (`prompt` WAV + `prompt_text`); optional engine parameters → WAV. Add `x-laverock-job: 1` to run it as a background job, or `x-laverock-stream: 1` + `stream_audio=1` to stream sentences |
+| POST | `/api/engines/:id/unload` | release the model's memory (it stays installed) → `204` |
+| POST | `/api/engines/unload` | release every loaded model → `204` |
+| GET | `/api/system` | server RSS, resident child processes and runtimes of loaded engines |
 | GET | `/api/jobs/:id` | job status, progress and artifacts |
 | GET | `/api/jobs/:id/events` | job events as Server-Sent Events (snapshot, then replay and live) |
 | POST | `/api/jobs/:id/cancel` | ask the worker to stop → `202` |
@@ -67,6 +70,14 @@ UI renders; `GET /api/engines` returns them. Each engine also carries a
 localized `description` (`{"en": …, "zh": …}`, or a plain string) for model
 pickers. The engine id is the model
 directory id from the [catalog](models.md#catalog).
+
+`GET /api/engines` also reports live state per engine: `loaded`, `resident`
+(whether it keeps a child process), `pid` for that process, and `backend`
+(the runtime: `onnx`, `audiocpp`, `llama.cpp` or `python`). `GET /api/system`
+summarises the same data with memory figures (RSS), which the Models cards and
+the Settings resource panel display. `POST /api/engines/:id/unload` frees the
+memory without removing anything from disk; the next synthesis loads the model
+again.
 
 ## Example
 
