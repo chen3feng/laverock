@@ -85,6 +85,7 @@
   select:focus, textarea:focus, input[type="text"]:focus { border-color: var(--accent2); }
   .row { display: flex; gap: 14px; flex-wrap: wrap; }
   .row > div { flex: 1; min-width: 160px; }
+  .row > .param-wide { flex: 1 0 100%; }
   button {
     background: var(--accent2); color: #fff; border: 0; border-radius: 10px;
     padding: 11px 20px; font: inherit; font-weight: 600; cursor: pointer;
@@ -2817,6 +2818,9 @@ function renderParamGrid(host, specs, prefix) {
   grid.style.marginTop = '10px';
   for (const p of specs) {
     const wrap = document.createElement('div');
+    // A text area (the music page's lyrics) needs the whole row; sharing
+    // one with sliders squeezes it into a narrow column.
+    if (p.type === 'text_area') wrap.className = 'param-wide';
     wrap.appendChild(paramControl(p, prefix));
     const hintText = paramHint(p);
     if (hintText) {
