@@ -18,6 +18,7 @@ mod ming3tts;
 mod mosstts;
 mod onnx;
 mod qwen3tts;
+pub mod segment;
 mod transcribe;
 mod zipvoice;
 

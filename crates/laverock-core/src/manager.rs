@@ -52,6 +52,14 @@ pub trait SpeechEngine: Send + Sync {
     /// is resident and must not interrupt a request in flight; the default
     /// is a no-op for engines whose weights live in this process.
     fn unload(&self) {}
+
+    /// How this engine wants long text split before one call. `None` means
+    /// it already chunks internally (or accepts any length), so the manager
+    /// hands it the text unchanged. Engines that return a policy get
+    /// sentence-aware pieces synthesized one by one and joined with a pause.
+    fn long_text_policy(&self) -> Option<crate::segment::LongTextPolicy> {
+        None
+    }
 }
 
 /// A synthesis request. Reference audio is required for cloning engines.
@@ -269,7 +277,10 @@ impl EngineManager {
     pub fn synthesize(&self, id: &str, req: &SynthRequest) -> Result<Audio> {
         let engine = self.engine(id)?;
         self.release_others(id);
-        engine.synthesize(req)
+        match engine.long_text_policy() {
+            Some(policy) => crate::segment::synthesize_long(engine.as_ref(), req, policy),
+            None => engine.synthesize(req),
+        }
     }
 
     /// Release whatever the other engines keep loaded.
