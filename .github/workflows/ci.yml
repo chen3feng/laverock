@@ -142,6 +142,21 @@ jobs:
       - name: End-to-end test
         run: ./scripts/e2e-test.sh
 
+      # Browser-level walk through the same chain in the real SPA. Node is
+      # only needed here; the Rust jobs stay toolchain-free of it.
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: scripts/ui-test/package-lock.json
+
+      - name: Browser UI test
+        run: |
+          cd scripts/ui-test
+          npm ci
+          npx playwright install --with-deps chromium
+          node ui-test.cjs
+
       - name: Server log
         if: always()
         run: cat server.log

@@ -183,12 +183,15 @@ cargo test --workspace
 ./scripts/smoke-test.sh           # feature sweep
 ./scripts/e2e-test.sh             # record -> transcribe -> synthesize -> export
 
+# browser-level walk through the same UI (Playwright; CI installs it locally)
+node scripts/ui-test/ui-test.cjs  # engine -> transcribe -> synth -> history -> voices
+
 # with Playwright installed (`npm install -g playwright`) and the server running
 node scripts/check-web-audio.mjs  # one clip plays at a time in the UI
 ```
 
 CI runs those on macOS, Linux and Windows, then starts the server on Ubuntu
 with the small ZipVoice model plus SenseVoice and exercises it with
-`scripts/smoke-test.sh` and `scripts/e2e-test.sh`. Pushing a `v*` tag (or
-dispatching the Release workflow) builds the macOS and Windows installers and
-attaches them to the release.
+`scripts/smoke-test.sh`, `scripts/e2e-test.sh` and the Playwright UI test.
+Pushing a `v*` tag (or dispatching the Release workflow) builds the macOS
+and Windows installers and attaches them to the release.
