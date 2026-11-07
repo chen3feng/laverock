@@ -480,7 +480,7 @@ if curl -s "$BASE/api/health" | grep -q '"transcribe":true'; then
     -F "audio=@$DIR/test_wavs/leijun-1.wav" | take_id)
   heard=$(curl -s -X POST "$BASE/api/captures/$sub/transcribe")
   case "$heard" in
-    *'"transcript_segments":[{') ok "take stores timed cues" ;;
+    *'"transcript_segments":[{'*) ok "take stores timed cues" ;;
     *) bad "take cues missing: $(printf '%s' "$heard" | head -c 160)" ;;
   esac
   take_srt=$(curl -s "$BASE/api/captures/$sub/subtitles?format=srt")
