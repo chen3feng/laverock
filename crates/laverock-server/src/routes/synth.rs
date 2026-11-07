@@ -187,6 +187,29 @@ async fn synthesize(
         .unwrap_or_else(|| "speech".to_string());
     let task = TaskKind::from_output_kind(&engine_kind);
 
+    // Opt-in background job: the client gets an id immediately and follows
+    // the replayable event stream, so a refresh or reconnect no longer
+    // loses a long generation. Without the header the response shape is
+    // unchanged for existing clients.
+    let wants_job = headers.get("x-laverock-job").and_then(|v| v.to_str().ok()) == Some("1");
+    if wants_job {
+        return start_job(
+            &state,
+            engine_id,
+            engine_name,
+            engine_kind,
+            task,
+            text,
+            prompt_text,
+            prompt_samples,
+            prompt_sr,
+            speed,
+            num_steps,
+            params,
+            samples,
+        );
+    }
+
     // The desktop UI asks for a Server-Sent-Events stream so long Qwen
     // generations can report progress; other clients keep getting the WAV.
     let wants_stream = headers
@@ -366,6 +389,162 @@ async fn synthesize(
             status: StatusCode::INTERNAL_SERVER_ERROR,
             message: e.to_string(),
         })
+}
+
+/// Start a synthesis run as a background job and return its id.
+///
+/// Mirrors the SSE loop: each take is recorded in history, written as a
+/// downloadable artifact (so a reconnecting client can recover finished
+/// takes) and pushed as an `audio` event for live listeners.
+#[allow(clippy::too_many_arguments)]
+fn start_job(
+    state: &AppState,
+    engine_id: String,
+    engine_name: String,
+    engine_kind: String,
+    task: TaskKind,
+    text: String,
+    prompt_text: Option<String>,
+    prompt_samples: Vec<f32>,
+    prompt_sr: i32,
+    speed: f32,
+    num_steps: i32,
+    params: std::collections::BTreeMap<String, serde_json::Value>,
+    samples: u32,
+) -> Result<Response, ApiError> {
+    use base64::Engine;
+    use laverock_core::ProgressEvent;
+
+    let job = state.jobs.create("synthesize")?;
+    let manager = state.manager.clone();
+    let history = state.history.clone();
+    let worker = job.clone();
+    let supervisor = job.clone();
+
+    let handle = tokio::task::spawn_blocking(move || {
+        worker.start();
+        let generation = history.new_generation_id();
+        let mut params = params;
+        let mut produced = 0u32;
+        let mut cancelled = false;
+
+        for index in 0..samples {
+            // Cancellation is polled between takes: the engine call itself
+            // is blocking, so a running take finishes before the job stops.
+            if worker.is_cancelled() {
+                cancelled = true;
+                break;
+            }
+            if index > 0 {
+                if let Some(seed) = params.get("seed").and_then(|v| v.as_i64()) {
+                    params.insert("seed".to_string(), serde_json::json!(seed + index as i64));
+                }
+            }
+            if samples > 1 {
+                worker.set_progress(
+                    index as f32 / samples as f32,
+                    Some(&format!("take {}/{}", index + 1, samples)),
+                );
+            }
+
+            let sink_job = worker.clone();
+            let sink: laverock_core::ProgressSink = Arc::new(move |event| match event {
+                ProgressEvent::Stage(label) => {
+                    sink_job.emit("stage", serde_json::json!({ "message": label }));
+                }
+                // Codec step counts have no known total here; #119 turns
+                // them into real progress once engines report it.
+                ProgressEvent::Steps(_) => {}
+            });
+            let request = SynthRequest {
+                text: text.clone(),
+                prompt_text: prompt_text.clone(),
+                prompt_samples: prompt_samples.clone(),
+                prompt_sr,
+                speed,
+                num_steps,
+                params: params.clone(),
+                input_samples: Vec::new(),
+                input_sr: 0,
+                progress: Some(sink),
+                audio: None,
+            };
+
+            let audio = match manager.synthesize(&engine_id, &request) {
+                Ok(audio) => audio,
+                Err(e) => {
+                    worker.fail(&e.to_string());
+                    return;
+                }
+            };
+            let Audio {
+                samples: pcm,
+                sample_rate,
+                channels,
+            } = audio;
+            let wav = match encode_wav_channels(&pcm, sample_rate, channels) {
+                Ok(wav) => wav,
+                Err(e) => {
+                    worker.fail(&e.to_string());
+                    return;
+                }
+            };
+            if let Err(e) = history.add_typed(
+                &engine_id,
+                &engine_name,
+                task,
+                &engine_kind,
+                &text,
+                &wav,
+                sample_rate,
+                channels,
+                Some((generation.clone(), index)),
+            ) {
+                tracing::warn!("history add failed: {e}");
+            }
+
+            let name = format!("take-{index}.wav");
+            let url = match worker.artifact(&name, &wav) {
+                Ok(view) => view.url,
+                Err(e) => {
+                    worker.log(&format!("artifact {name}: {e}"));
+                    format!("/api/jobs/{}/files/{name}", worker.id())
+                }
+            };
+            produced += 1;
+            let b64 = base64::engine::general_purpose::STANDARD.encode(&wav);
+            worker.emit(
+                "audio",
+                serde_json::json!({
+                    "i": index,
+                    "n": samples,
+                    "sr": sample_rate,
+                    "ch": channels,
+                    "wav": b64,
+                    "url": url,
+                }),
+            );
+        }
+
+        if cancelled || worker.is_cancelled() {
+            worker.finish_cancelled(produced);
+        } else {
+            worker.finish(produced);
+        }
+    });
+
+    // A panic inside the engine must not leave the job "running" forever.
+    tokio::spawn(async move {
+        if let Err(e) = handle.await {
+            supervisor.fail(&format!("synthesis task failed: {e}"));
+        }
+    });
+
+    Ok((
+        StatusCode::ACCEPTED,
+        axum::Json(serde_json::json!({ "job_id": job.id() })),
+    )
+        .into_response())
 }
 
 fn error_frame(sse: &impl Fn(&str, &str) -> Bytes, message: &str) -> Bytes {

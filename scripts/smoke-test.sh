@@ -135,6 +135,71 @@ synth mixed "人工智能 artificial intelligence 正在改变生活。" news-fe
   -F 'speed=1.1'
 fi
 
+if want jobs; then
+echo "jobs"
+job_json=$(curl -s -X POST "$BASE/api/engines/$MODEL/synthesize" \
+  -H 'x-laverock-job: 1' \
+  -F "$(field text '你好，我是 Laverock 的后台任务。')" \
+  -F "prompt=@$DIR/test_wavs/leijun-1.wav" \
+  -F "$(field prompt_text '那还是36年前, 1987年. 我呢考上了武汉大学的计算机系.')")
+job_id=$(printf '%s' "$job_json" | sed -n 's/.*"job_id":"\([^"]*\)".*/\1/p')
+[ -n "$job_id" ] && ok "start job ($job_id)" || bad "start job: $job_json"
+
+job_status() { # job_status <id>
+  curl -s "$BASE/api/jobs/$1" | sed -n 's/.*"status":"\([^"]*\)".*/\1/p'
+}
+status=""
+for _ in $(seq 1 300); do
+  status=$(job_status "$job_id")
+  case "$status" in done|error|cancelled) break ;; esac
+  sleep 1
+done
+[ "$status" = "done" ] && ok "job finished" || bad "job status: $status"
+
+# A finished job replays its buffered events to a late subscriber.
+events=$(curl -sN --max-time 10 "$BASE/api/jobs/$job_id/events")
+case "$events" in *"event: snapshot"*) ok "event snapshot" ;; *) bad "event snapshot" ;; esac
+case "$events" in *"event: done"*) ok "event done" ;; *) bad "event done" ;; esac
+
+code=$(curl -s -o "$OUT/job-take.wav" -w '%{http_code}' \
+  "$BASE/api/jobs/$job_id/files/take-0.wav")
+[ "$code" = "200" ] && head -c 4 "$OUT/job-take.wav" | grep -q RIFF \
+  && ok "job artifact" || bad "job artifact (HTTP $code)"
+
+code=$(curl -s -o /dev/null -w '%{http_code}' \
+  "$BASE/api/jobs/$job_id/files/..%2F..%2Fsettings.json")
+case "$code" in
+  400|404) ok "artifact traversal rejected" ;;
+  *) bad "artifact traversal -> $code" ;;
+esac
+
+code=$(curl -s -o /dev/null -w '%{http_code}' "$BASE/api/jobs/does-not-exist")
+[ "$code" = "404" ] && ok "unknown job -> 404" || bad "unknown job -> $code"
+
+# Cancelling stops the run between takes: with two requested, the job
+# must end `cancelled` (possibly after the take already in flight).
+cancel_json=$(curl -s -X POST "$BASE/api/engines/$MODEL/synthesize" \
+  -H 'x-laverock-job: 1' \
+  -F "$(field text '这个任务会被取消。')" \
+  -F "prompt=@$DIR/test_wavs/leijun-1.wav" \
+  -F "$(field prompt_text '那还是36年前, 1987年. 我呢考上了武汉大学的计算机系.')" \
+  -F 'samples=2')
+cancel_id=$(printf '%s' "$cancel_json" | sed -n 's/.*"job_id":"\([^"]*\)".*/\1/p')
+if [ -n "$cancel_id" ]; then
+  code=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/jobs/$cancel_id/cancel")
+  [ "$code" = "202" ] && ok "cancel accepted" || bad "cancel -> $code"
+  status=""
+  for _ in $(seq 1 300); do
+    status=$(job_status "$cancel_id")
+    case "$status" in done|error|cancelled) break ;; esac
+    sleep 1
+  done
+  [ "$status" = "cancelled" ] && ok "job cancelled" || bad "cancel status: $status"
+else
+  bad "start job to cancel: $cancel_json"
+fi
+fi
+
 if want mp3; then
 echo "mp3 export (built-in encoder)"
 if curl -s "$BASE/api/health" | grep -q '"mp3":true'; then

@@ -16,7 +16,11 @@ Cookie）；以下均指回环监听。
 | --- | --- | --- |
 | GET | `/api/health` | 服务状态 |
 | GET | `/api/engines` | 已注册引擎及其默认参数 |
-| POST | `/api/engines/:id/synthesize` | multipart：`text` 加 `profile_id` 或（`prompt` WAV + `prompt_text`），可附引擎参数 → WAV |
+| POST | `/api/engines/:id/synthesize` | multipart：`text` 加 `profile_id` 或（`prompt` WAV + `prompt_text`），可附引擎参数 → WAV；加 `x-laverock-job: 1` 则作为后台任务运行 |
+| GET | `/api/jobs/:id` | 任务状态、进度与产物 |
+| GET | `/api/jobs/:id/events` | 任务的 Server-Sent Events（先发快照，再回放并跟进实时事件） |
+| POST | `/api/jobs/:id/cancel` | 请求停止任务 → `202` |
+| GET | `/api/jobs/:id/files/:name` | 下载任务产物 |
 | GET | `/api/profiles` | 已保存声音及时长、大小、素材段数 |
 | POST | `/api/profiles` | multipart：`name`、`prompt_text`、`prompt`（WAV），或重复的 `capture` id → 保存声音 |
 | POST | `/api/profiles/:id` | multipart：`name`、`prompt_text`、可选 `prompt` → 编辑声音 |
@@ -78,6 +82,19 @@ curl -X POST http://127.0.0.1:8787/api/engines/voxcpm2/synthesize \
   -F profile_id=p1793075127-c66c \
   -o out.wav
 ```
+
+## 后台任务
+
+长时间生成可以比发起它的请求活得更久。在 `POST /api/engines/:id/synthesize`
+上带 `x-laverock-job: 1`，服务端会立刻返回 `202 {"job_id": "…"}`，任务转入
+后台继续执行。任务保存在服务进程内，产物在 `data/jobs/<id>/` 下保留一天。
+
+`GET /api/jobs/:id/events` 是 SSE 流：第一帧是 `snapshot`（`id`、`kind`、
+`status`、`progress`、`message`、`artifacts`），随后回放已缓存的事件，再
+跟进实时事件，直到 `done` 或 `error`。事件类型为 `stage`、`progress`、
+`audio`、`artifact`、`done`、`error`。断线重连会补发错过的事件，所以刷新
+页面可以接着看进度而不是丢掉这次运行。`POST …/cancel` 置取消标志，工作
+线程会在两次生成之间停下。
 
 ## OpenAI 兼容 API
 
