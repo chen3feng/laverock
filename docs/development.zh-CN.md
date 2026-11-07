@@ -84,6 +84,12 @@ laverock-desktop  Tauri 外壳：托盘、开机自启、服务托管
 通过 audio.cpp 或 llama.cpp 二进制执行；Python 引擎由 `scripts/` 中的运行器以
 子进程方式驱动，各自运行在独立 venv 中。
 
+长文本由各引擎自行决定，因为每种运行时的稳定长度不同。通用分段器在
+`laverock-core::segment`：无法接受任意长度的引擎从 `SpeechEngine::long_text_policy`
+返回一个 `LongTextPolicy`，管理器据此把完整句子打包到该字符预算内、逐段合成、
+上报进度并用停顿拼接。运行时已经按调好的长度自行分段的引擎（Python 运行器、
+audio.cpp、sherpa-onnx）返回 `None`，保留自己的分段器，避免同一段文本被切两次。
+
 服务端负责声音、历史、设置、配对和模型目录。单页应用是纯 HTML/CSS/JS，由
 `include_str!` 编译进服务端。源码在 `crates/laverock-server/web/`：一个外壳
 `index.html`、样式表、页面标记，以及按功能分节的多个 JavaScript 文件；

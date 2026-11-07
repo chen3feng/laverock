@@ -98,6 +98,15 @@ Kokoro, SenseVoice) run in-process on the official
 go through the audio.cpp or llama.cpp binaries; Python engines are driven as
 subprocesses through a runner in `scripts/`, each in its own venv.
 
+Long text is an engine decision, because every runtime has a different
+stable length. The shared splitter lives in `laverock-core::segment`: an
+engine that cannot take arbitrary length returns a `LongTextPolicy` from
+`SpeechEngine::long_text_policy`, and the manager packs whole sentences up
+to that character budget, synthesizes the pieces one by one, reports
+progress, and joins them with a pause. Engines whose runtime already chunks
+with a tuned size (the Python runners, audio.cpp, sherpa-onnx) return `None`
+and keep their own chunker, so laverock does not split the text twice.
+
 The server owns profiles, history, settings, pairing and the model catalog.
 The SPA is plain HTML/CSS/JS compiled into the server with `include_str!`.
 Its sources live in `crates/laverock-server/web/` — a shell `index.html`, a
