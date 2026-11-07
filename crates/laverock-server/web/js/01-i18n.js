@@ -3,7 +3,7 @@
 const I18N = {
   zh: {
     'brand.sub': '本地语音工作室',
-    'nav.synthesize': '合成', 'nav.captures': '素材库', 'nav.voices': '声音',
+    'nav.synthesize': '合成', 'nav.music': '音乐', 'nav.captures': '素材库', 'nav.voices': '声音',
     'nav.models': '模型',
     'nav.history': '历史', 'nav.settings': '设置', 'state.title': '服务状态',
 
@@ -23,6 +23,21 @@ const I18N = {
     'go': '生成语音', 'download.wav': '下载 WAV', 'download.mp3': '下载 MP3',
     'synth.samples': '候选项',
     'synth.samples_hint': '一次生成多段候选项逐一试听，选中满意的再下载。克隆引擎会通过不同的种子/采样本产生差异。',
+
+    'music.title': '音乐',
+    'music.sub': '用文字描述风格，可选填歌词，在这台电脑上生成完整歌曲（48 kHz 立体声）。',
+    'music.engine': '音乐引擎',
+    'music.engine_hint': '选择一个已安装的音乐模型；首次生成需要先加载数 GB 权重。',
+    'music.caption': '风格描述',
+    'music.caption.ph': '例如：温暖的民谣，木吉他，女声，中速，怀旧',
+    'music.caption.hint': '描述曲风、乐器、情绪、人声与节奏；歌词留空即生成纯音乐。',
+    'music.go': '生成音乐',
+    'music.samples': '候选项',
+    'music.samples_hint': '一次生成多个版本，逐一试听后再下载。',
+    'music.first_load': '首次加载约需数十秒到数分钟。',
+    'music.generating': '正在生成音乐…',
+    'music.no_engine': '还没有安装音乐模型。请先到「模型」页下载 ACE-Step。',
+    'music.caption_required': '请先描述想要的音乐风格。',
 
     'voices.title': '声音库',
     'voices.sub': '保存的声音可以复用到任何克隆引擎，也可以由素材库里的多段录音组成。',
@@ -116,7 +131,8 @@ const I18N = {
     'models.available': '可安装',
 
     'history.title': '历史',
-    'history.sub': '本机生成的语音，最多保留 100 条或 1 GB。',
+    'history.sub': '本机生成的语音与音乐，最多保留 100 条或 1 GB。',
+    'history.music': '音乐',
     'history.clear': '清空全部',
     'history.empty': '还没有生成记录。去「合成」生成第一条吧。',
     'history.variant': '候选项 {n}',
@@ -151,6 +167,7 @@ const I18N = {
 
     'cap.tts': '语音合成', 'cap.clone': '声音克隆', 'cap.voice-design': '声音设计',
     'cap.instruct': '指令控制', 'cap.preset-voices': '预置音色', 'cap.stt': '语音识别',
+    'cap.music': '音乐生成',
 
     'cap.file': '选择文件', 'cap.record': '● 录音', 'cap.stop': '■ 停止', 'cap.none': '未选择',
     'cap.transcribe': '✎ 转写', 'transcribe.busy': '转写中…',
@@ -284,7 +301,7 @@ const I18N = {
   },
   en: {
     'brand.sub': 'Local voice studio',
-    'nav.synthesize': 'Synthesize', 'nav.captures': 'Library', 'nav.voices': 'Voices',
+    'nav.synthesize': 'Synthesize', 'nav.music': 'Music', 'nav.captures': 'Library', 'nav.voices': 'Voices',
     'nav.models': 'Models',
     'nav.history': 'History', 'nav.settings': 'Settings', 'state.title': 'Service status',
 
@@ -304,6 +321,21 @@ const I18N = {
     'go': 'Generate', 'download.wav': 'Download WAV', 'download.mp3': 'Download MP3',
     'synth.samples': 'Takes',
     'synth.samples_hint': 'Generate several takes at once to audition side by side, then download the one you like. Cloning engines vary them via seed/sampling.',
+
+    'music.title': 'Music',
+    'music.sub': 'Describe a style, optionally add lyrics, and generate a full song on this computer (48 kHz stereo).',
+    'music.engine': 'Music engine',
+    'music.engine_hint': 'Pick an installed music model; the first generation loads several GB of weights.',
+    'music.caption': 'Style description',
+    'music.caption.ph': 'e.g. warm folk, acoustic guitar, female vocal, mid-tempo, nostalgic',
+    'music.caption.hint': 'Describe genre, instruments, mood, vocals and tempo. Leave the lyrics empty for instrumental music.',
+    'music.go': 'Generate music',
+    'music.samples': 'Takes',
+    'music.samples_hint': 'Generate several versions at once, audition them, then download your favourite.',
+    'music.first_load': 'The first load can take tens of seconds to a few minutes.',
+    'music.generating': 'Generating music…',
+    'music.no_engine': 'No music model installed yet. Download ACE-Step from the Models page first.',
+    'music.caption_required': 'Describe the music you want first.',
 
     'voices.title': 'Voice library',
     'voices.sub': 'Saved voices work with any cloning engine, and can be built from several takes in the library.',
@@ -397,7 +429,8 @@ const I18N = {
     'models.available': 'Available',
 
     'history.title': 'History',
-    'history.sub': 'Speech generated on this computer, capped at 100 entries or 1 GB.',
+    'history.sub': 'Speech and music generated on this computer, capped at 100 entries or 1 GB.',
+    'history.music': 'Music',
     'history.clear': 'Clear all',
     'history.empty': 'No generations yet. Head to Synthesize to make the first one.',
     'history.variant': 'take #{n}',
@@ -433,6 +466,7 @@ const I18N = {
 
     'cap.tts': 'Speech synthesis', 'cap.clone': 'Voice cloning', 'cap.voice-design': 'Voice design',
     'cap.instruct': 'Voice instructions', 'cap.preset-voices': 'Preset voices', 'cap.stt': 'Speech-to-text',
+    'cap.music': 'Music generation',
 
     'cap.file': 'Choose file', 'cap.record': '● Record', 'cap.stop': '■ Stop', 'cap.none': 'None',
     'cap.transcribe': '✎ Transcribe', 'transcribe.busy': 'Transcribing…',

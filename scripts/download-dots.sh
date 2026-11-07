@@ -19,7 +19,7 @@ set -euo pipefail
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/laverock-lib.sh"
 lv_init dots
 
-AC_VERSION="${DOTS_VERSION:-v0.9.2-drama3-base-small}"
+AC_VERSION="${DOTS_VERSION:-v0.9.4}"
 MODEL_KIND="${DOTS_MODEL:-dots.tts-soar}"
 
 case "$MODEL_KIND" in

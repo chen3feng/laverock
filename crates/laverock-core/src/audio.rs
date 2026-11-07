@@ -359,12 +359,18 @@ pub fn cap_silences(samples: &[f32], sample_rate: u32, max_pause_secs: f32) -> C
 
 /// Encode mono f32 samples as 16-bit PCM WAV.
 pub fn encode_wav(samples: &[f32], sample_rate: i32) -> Result<Vec<u8>> {
+    encode_wav_channels(samples, sample_rate, 1)
+}
+
+/// Encode interleaved f32 samples as 16-bit PCM WAV with `channels`
+/// channels. Music output is stereo (L/R interleaved); speech is mono.
+pub fn encode_wav_channels(samples: &[f32], sample_rate: i32, channels: u16) -> Result<Vec<u8>> {
     let mut cursor = Cursor::new(Vec::new());
     {
         let mut writer = WavWriter::new(
             &mut cursor,
             WavSpec {
-                channels: 1,
+                channels: channels.max(1),
                 sample_rate: sample_rate as u32,
                 bits_per_sample: 16,
                 sample_format: SampleFormat::Int,

@@ -20,7 +20,7 @@ set -euo pipefail
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/laverock-lib.sh"
 lv_init indextts2
 
-AC_VERSION="${INDEXTTS_VERSION:-v0.9.2-drama3-base-small}"
+AC_VERSION="${INDEXTTS_VERSION:-v0.9.4}"
 PACKAGE="${INDEXTTS_PACKAGE:-IndexTTS2-GGUF/index-tts2-q8_0.gguf}"
 GGUF="$DEST/$(basename "$PACKAGE")"
 

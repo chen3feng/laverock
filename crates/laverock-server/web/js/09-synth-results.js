@@ -1,7 +1,8 @@
 // --------------------------------------------------------- synth results
 
-// Object URLs handed out by renderSynthResults, revoked on the next render.
-let synthResultUrls = [];
+// Object URLs handed out by renderSynthResults, revoked on the next render
+// of the same host (the speech and music pages each keep their own list).
+const synthResultUrls = new Map();
 
 function mkDownloadLink(label, handler) {
   const a = document.createElement('a');
@@ -12,10 +13,10 @@ function mkDownloadLink(label, handler) {
   return a;
 }
 
-function renderSynthResults(list, engine) {
-  const box = $('synthResults');
-  for (const url of synthResultUrls) URL.revokeObjectURL(url);
-  synthResultUrls = [];
+function renderSynthResults(list, engine, hostId = 'synthResults') {
+  const box = $(hostId);
+  for (const url of synthResultUrls.get(hostId) || []) URL.revokeObjectURL(url);
+  synthResultUrls.set(hostId, []);
   box.innerHTML = '';
   box.hidden = false;
   const multi = list.length > 1;
@@ -34,7 +35,7 @@ function renderSynthResults(list, engine) {
     audio.preload = 'none';
     audio.addEventListener('play', () => pauseOtherAudio(audio));
     const url = URL.createObjectURL(v.blob);
-    synthResultUrls.push(url);
+    synthResultUrls.get(hostId).push(url);
     audio.src = url;
     card.appendChild(audio);
 

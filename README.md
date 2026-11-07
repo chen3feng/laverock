@@ -12,9 +12,12 @@ generation history and a phone remote that joins over your local network.
 - **Voice cloning and preset voices** — save 3–10 s of speech as a named
   voice, then have any cloning engine read new text in it. Engines without a
   reference clip are covered by preset-voice and voice-design modes.
-- **16 models behind one interface** — from a 135 MB ONNX model that runs in
-  real time on CPU to 2B diffusion and LLM systems. Install, update and
-  remove them from the app, with live download progress.
+- **Music generation** — describe a style and optionally add lyrics; ACE-Step
+  renders a complete 48 kHz stereo song locally, with the same history and
+  downloads as speech.
+- **17 models behind one interface** — from a 135 MB ONNX model that runs in
+  real time on CPU to 2B diffusion and LLM systems, plus text-to-music.
+  Install, update and remove them from the app, with live download progress.
 - **Recording library and voices** — every recording becomes a take,
   transcribed automatically with on-device speech recognition. A take can
   have room noise or background music removed before it conditions a voice;
@@ -66,6 +69,7 @@ configure.
 | Chatterbox Multilingual | clone | 23 | ~5 GB |
 | IndexTTS-2 | clone | zh, en | ~3.6 GB |
 | MOSS-TTS-Delay | clone | 20 | ~10 GB |
+| ACE-Step 1.5 Turbo | text-to-music, lyrics | 50+ | ~10 GB (BF16) |
 | SenseVoice Small (optional) | speech recognition | 5 | ~234 MB |
 
 Requirements, per-engine notes and manual install scripts are in

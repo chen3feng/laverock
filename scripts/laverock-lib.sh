@@ -282,6 +282,22 @@ lv_audiocpp_bin() {
   # present.
   local bin="$dir/audiocpp_cli" exe="$dir/audiocpp_cli.exe"
   local srv="$dir/audiocpp_server" sexe="$dir/audiocpp_server.exe"
+
+  # Engines pin the release that first shipped the family they need
+  # (ACE-Step needs v0.9.4), so a runtime from a different release must be
+  # replaced rather than reused. Runtimes from before the marker existed
+  # have no recorded version and are replaced once.
+  local marker="$dir/.version"
+  if [ -f "$marker" ]; then
+    if [ "$(cat "$marker")" != "$version" ]; then
+      lv_stage "Updating the audio.cpp runtime to $version"
+      rm -rf "$dir"
+    fi
+  elif [ -x "$bin" ] || [ -x "$exe" ]; then
+    lv_stage "Updating the audio.cpp runtime to $version"
+    rm -rf "$dir"
+  fi
+
   if { [ -x "$bin" ] || [ -x "$exe" ]; } && { [ -x "$srv" ] || [ -x "$sexe" ]; }; then
     if [ -x "$bin" ]; then lv_native_path "$bin"; else lv_native_path "$exe"; fi
     return 0
@@ -289,7 +305,8 @@ lv_audiocpp_bin() {
 
   # A runtime installed by an earlier per-model engine still works; copy
   # it (and any backend DLLs beside it) into the shared location so removing
-  # that model cannot break us.
+  # that model cannot break us. Only reuse one whose recorded release
+  # matches, because an older binary may not know this engine's family.
   local legacy ldir
   legacy=$(find "$models" -maxdepth 4 -name audiocpp_cli -type f -perm -u+x 2>/dev/null | head -1)
   if [ -z "$legacy" ]; then
@@ -302,6 +319,11 @@ lv_audiocpp_bin() {
     if [ ! -f "$ldir/audiocpp_server" ] && [ ! -f "$ldir/audiocpp_server.exe" ]; then
       legacy=""
     fi
+    # An unmarked legacy runtime is from an older release; downloading the
+    # requested one is safer than guessing it supports the new family.
+    if [ -n "$legacy" ] && { [ ! -f "$ldir/.version" ] || [ "$(cat "$ldir/.version")" != "$version" ]; }; then
+      legacy=""
+    fi
   fi
   if [ -n "$legacy" ]; then
     ldir="$(dirname "$legacy")"
@@ -311,6 +333,7 @@ lv_audiocpp_bin() {
     [ -f "$ldir/audiocpp_server.exe" ] && cp "$ldir/audiocpp_server.exe" "$dir/"
     cp "$ldir"/*.dll "$dir/" 2>/dev/null || true
     [ -f "$ldir/LICENSE" ] && cp "$ldir/LICENSE" "$dir/"
+    [ -f "$ldir/.version" ] && cp "$ldir/.version" "$dir/"
     chmod +x "$dir/audiocpp_cli" "$exe" "$dir/audiocpp_server" "$dir/audiocpp_server.exe" 2>/dev/null || true
     lv_native_path "$dir/$(basename "$legacy")"
     return 0
@@ -349,6 +372,7 @@ lv_audiocpp_bin() {
     [ -f "$tmp/ex/LICENSE" ] && cp "$tmp/ex/LICENSE" "$dir/"
   fi
   chmod +x "$dir/audiocpp_cli" "$exe" "$dir/audiocpp_server" "$dir/audiocpp_server.exe" 2>/dev/null || true
+  printf '%s\n' "$version" > "$dir/.version"
   rm -rf "$tmp"
 
   if [ -x "$bin" ]; then lv_native_path "$bin"; else lv_native_path "$exe"; fi

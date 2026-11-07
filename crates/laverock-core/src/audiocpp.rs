@@ -11,15 +11,19 @@
 //!   cross-lingual and instruction templates.
 //! * `indextts2` — IndexTTS-2: GPT-style token model + flow-matching
 //!   vocoder, cloned from a reference clip (zh/en).
+//! * `ace_step` — ACE-Step 1.5: text/lyrics-to-music at 48 kHz stereo,
+//!   the only family here that is not speech.
 
 use crate::i18n::{self, Key};
 use crate::{
-    decode_wav, encode_wav, trim_reference, Audio, CoreError, Manifest, ProgressEvent, Result,
-    SpeechEngine, SynthRequest, VOXCPM2_MAX_REFERENCE_SECS,
+    decode_wav, decode_wav_channels, encode_wav, trim_reference, Audio, AudioCppManifest,
+    CoreError, Manifest, MusicManifest, ProgressEvent, Result, SpeechEngine, SynthRequest,
+    VOXCPM2_MAX_REFERENCE_SECS,
 };
 use serde_json::{json, Map, Value};
 use std::{
     borrow::Cow,
+    collections::BTreeMap,
     io::{BufRead, BufReader, Read},
     net::TcpListener,
     path::{Path, PathBuf},
@@ -51,6 +55,8 @@ pub enum Family {
     CosyVoice,
     VoxCpm2,
     IndexTts2,
+    /// Music generation (`--task gen`), currently ACE-Step 1.5.
+    AceStep,
 }
 
 impl Family {
@@ -61,6 +67,7 @@ impl Family {
             Family::CosyVoice => "cosyvoice3",
             Family::VoxCpm2 => "voxcpm2",
             Family::IndexTts2 => "index_tts2",
+            Family::AceStep => "ace_step",
         }
     }
 
@@ -70,6 +77,7 @@ impl Family {
             Family::CosyVoice => "CosyVoice3",
             Family::VoxCpm2 => "VoxCPM2",
             Family::IndexTts2 => "IndexTTS-2",
+            Family::AceStep => "ACE-Step",
         }
     }
 }
@@ -85,12 +93,71 @@ pub struct AudioCppEngine {
     guidance: Option<f32>,
     seed: i64,
     reference_duration: Option<f32>,
+    /// Fixed task for families that only run one (`gen` for music); the
+    /// speech families pick their task per request.
+    task: String,
+    load_options: Vec<(String, String)>,
+    session_options: Vec<(String, String)>,
     env: Vec<(String, String)>,
     run_lock: Mutex<()>,
     /// `audiocpp_server` beside the CLI; `None` keeps the one-shot path.
     server_bin: Option<PathBuf>,
     /// The server started for this model, kept across requests.
     resident: Mutex<Option<ResidentServer>>,
+}
+
+/// The manifest section a family reads, normalized across speech and music.
+struct Section {
+    binary: String,
+    model: String,
+    backend: String,
+    language: Option<String>,
+    guidance: Option<f32>,
+    seed: i64,
+    reference_duration: Option<f32>,
+    task: String,
+    load_options: BTreeMap<String, String>,
+    session_options: BTreeMap<String, String>,
+    env: BTreeMap<String, String>,
+    /// Speech weights are a single GGUF file; a music install may be a
+    /// directory holding a split checkpoint.
+    model_is_file: bool,
+}
+
+impl Section {
+    fn speech(cfg: &AudioCppManifest) -> Self {
+        Self {
+            binary: cfg.binary.clone(),
+            model: cfg.model.clone(),
+            backend: cfg.backend.clone(),
+            language: cfg.language.clone(),
+            guidance: cfg.guidance,
+            seed: cfg.seed,
+            reference_duration: cfg.reference_duration_sec,
+            task: String::new(),
+            load_options: BTreeMap::new(),
+            session_options: BTreeMap::new(),
+            env: cfg.env.clone(),
+            model_is_file: true,
+        }
+    }
+
+    fn music(cfg: &MusicManifest) -> Self {
+        Self {
+            binary: cfg.binary.clone(),
+            model: cfg.model.clone(),
+            backend: cfg.backend.clone(),
+            language: cfg.language.clone(),
+            guidance: cfg.guidance,
+            seed: cfg.seed,
+            reference_duration: None,
+            task: cfg.task.clone(),
+            load_options: cfg.load_options.clone(),
+            session_options: cfg.session_options.clone(),
+            env: cfg.env.clone(),
+            model_is_file: false,
+        }
+    }
 }
 
 /// A running `audiocpp_server` and the config file it was started with.
@@ -109,10 +176,11 @@ impl Drop for AudioCppEngine {
 impl AudioCppEngine {
     pub fn build(dir: &Path, manifest: &Manifest, family: Family) -> Result<Self> {
         let section = match family {
-            Family::Dots => manifest.dots.as_ref(),
-            Family::CosyVoice => manifest.cosyvoice.as_ref(),
-            Family::VoxCpm2 => manifest.voxcpm2.as_ref(),
-            Family::IndexTts2 => manifest.indextts2.as_ref(),
+            Family::Dots => manifest.dots.as_ref().map(Section::speech),
+            Family::CosyVoice => manifest.cosyvoice.as_ref().map(Section::speech),
+            Family::VoxCpm2 => manifest.voxcpm2.as_ref().map(Section::speech),
+            Family::IndexTts2 => manifest.indextts2.as_ref().map(Section::speech),
+            Family::AceStep => manifest.music.as_ref().map(Section::music),
         };
         let cfg = section.ok_or_else(|| {
             CoreError::Load(format!(
@@ -125,11 +193,18 @@ impl AudioCppEngine {
         // A manifest from an older runner (VoxCPM2 used llama.cpp-omni
         // with `base_lm`/`acoustic`) has no audio.cpp fields at all.
         if cfg.binary.is_empty() && cfg.model.is_empty() {
-            return Err(CoreError::Load(format!(
-                "{}: 该安装来自旧的运行器，请重新运行 scripts/download-voxcpm2.sh \
-                 （VoxCPM2 已改为 audio.cpp 运行时）",
-                manifest.id
-            )));
+            return Err(CoreError::Load(match family {
+                Family::VoxCpm2 => format!(
+                    "{}: 该安装来自旧的运行器，请重新运行 scripts/download-voxcpm2.sh \
+                     （VoxCPM2 已改为 audio.cpp 运行时）",
+                    manifest.id
+                ),
+                _ => format!(
+                    "{}: missing binary/model in [{}]",
+                    manifest.id,
+                    family.cli_name()
+                ),
+            }));
         }
 
         let binary = resolve_path(dir, &cfg.binary);
@@ -141,9 +216,14 @@ impl AudioCppEngine {
             )));
         }
         let model = resolve_path(dir, &cfg.model);
-        if !model.is_file() {
+        let model_present = if cfg.model_is_file {
+            model.is_file()
+        } else {
+            model.exists()
+        };
+        if !model_present {
             return Err(CoreError::Load(format!(
-                "{}: GGUF weights not found at {}",
+                "{}: model not found at {}",
                 manifest.id,
                 model.display()
             )));
@@ -178,12 +258,11 @@ impl AudioCppEngine {
             language: cfg.language.clone().unwrap_or_default(),
             guidance: cfg.guidance,
             seed: cfg.seed,
-            reference_duration: cfg.reference_duration_sec,
-            env: cfg
-                .env
-                .iter()
-                .map(|(k, v)| (k.clone(), v.clone()))
-                .collect(),
+            reference_duration: cfg.reference_duration,
+            task: cfg.task,
+            load_options: cfg.load_options.into_iter().collect(),
+            session_options: cfg.session_options.into_iter().collect(),
+            env: cfg.env.into_iter().collect(),
             run_lock: Mutex::new(()),
             server_bin,
             resident: Mutex::new(None),
@@ -204,6 +283,16 @@ impl AudioCppEngine {
         req.params
             .get(name)
             .and_then(Value::as_i64)
+            .unwrap_or(fallback)
+    }
+
+    /// Numeric parameter that may be declared as a float slider. JSON
+    /// numbers carry the same value as either integer or float, so
+    /// `as_f64` covers both.
+    fn param_f64(&self, req: &SynthRequest, name: &str, fallback: f64) -> f64 {
+        req.params
+            .get(name)
+            .and_then(Value::as_f64)
             .unwrap_or(fallback)
     }
 
@@ -237,7 +326,10 @@ impl SpeechEngine for AudioCppEngine {
     }
 
     fn synthesize(&self, req: &SynthRequest) -> Result<Audio> {
-        let has_prompt = !req.prompt_samples.is_empty();
+        let is_music = self.family == Family::AceStep;
+        // Music never clones a voice; a stray `samples` upload must not turn
+        // into a `--voice-ref` the music family does not understand.
+        let has_prompt = !is_music && !req.prompt_samples.is_empty();
         if !has_prompt
             && matches!(
                 self.family,
@@ -249,7 +341,7 @@ impl SpeechEngine for AudioCppEngine {
             ));
         }
         match self.family {
-            Family::Dots | Family::VoxCpm2 | Family::IndexTts2 => (),
+            Family::Dots | Family::VoxCpm2 | Family::IndexTts2 | Family::AceStep => (),
             Family::CosyVoice => {
                 let template = self.param_str(req, "template", "zero_shot");
                 if template == "zero_shot" && self.prompt_text(req).is_none() {
@@ -361,6 +453,13 @@ impl SpeechEngine for AudioCppEngine {
 
         self.add_family_options(req, &mut cmd)?;
 
+        for (key, value) in &self.load_options {
+            cmd.arg("--load-option").arg(format!("{key}={value}"));
+        }
+        for (key, value) in &self.session_options {
+            cmd.arg("--session-option").arg(format!("{key}={value}"));
+        }
+
         if let Some(seconds) = self.reference_duration {
             cmd.arg("--reference-duration-seconds")
                 .arg(format!("{seconds}"));
@@ -370,10 +469,17 @@ impl SpeechEngine for AudioCppEngine {
         }
 
         if let Some(cb) = &req.progress {
-            cb(ProgressEvent::Stage(format!(
-                "正在加载模型并合成（{} 首次加载约数秒）",
-                self.family.label()
-            )));
+            cb(ProgressEvent::Stage(if is_music {
+                format!(
+                    "正在加载模型并生成音乐（{}，首次加载约数秒）",
+                    self.family.label()
+                )
+            } else {
+                format!(
+                    "正在加载模型并合成（{} 首次加载约数秒）",
+                    self.family.label()
+                )
+            }));
         }
 
         cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
@@ -446,20 +552,27 @@ impl SpeechEngine for AudioCppEngine {
 
         let bytes = std::fs::read(&out_wav)
             .map_err(|e| CoreError::Synth(format!("runner produced no audio: {e}")))?;
-        let (samples, sample_rate) = decode_wav(&bytes)?;
+        let (samples, sample_rate, channels) = if is_music {
+            let (samples, channels, rate) = decode_wav_channels(&bytes)?;
+            (samples, rate as i32, channels)
+        } else {
+            let (samples, rate) = decode_wav(&bytes)?;
+            (samples, rate, 1)
+        };
 
         let _ = std::fs::remove_dir_all(&tmp);
 
         Ok(Audio {
             samples,
             sample_rate,
+            channels,
         })
     }
 }
 
 impl AudioCppEngine {
     /// audio.cpp task name for this request.
-    fn task(&self, req: &SynthRequest) -> &'static str {
+    fn task(&self, req: &SynthRequest) -> &str {
         match self.family {
             Family::Dots => "tts",
             Family::VoxCpm2 => {
@@ -479,6 +592,7 @@ impl AudioCppEngine {
             }
             // IndexTTS-2 has no preset voices: cloning is the only path.
             Family::IndexTts2 => "clon",
+            Family::AceStep => self.task.as_str(),
         }
     }
 
@@ -578,6 +692,27 @@ impl AudioCppEngine {
                         .arg(format!("instruct={instruct}"));
                 }
             }
+            Family::AceStep => {
+                // `--text` carries the style caption; the lyrics are a
+                // separate option and empty means instrumental.
+                let lyrics = self.param_str(req, "lyrics", "");
+                if !lyrics.is_empty() {
+                    cmd.arg("--lyrics").arg(lyrics);
+                }
+                let duration = self.param_f64(req, "duration_sec", 60.0).clamp(10.0, 600.0);
+                cmd.arg("--duration-seconds").arg(format!("{duration}"));
+                cmd.arg("--task-route")
+                    .arg(self.param_str(req, "task_route", "text2music"));
+                let guidance = req
+                    .params
+                    .get("guidance_scale")
+                    .and_then(Value::as_f64)
+                    .map(|v| v as f32)
+                    .or(self.guidance);
+                if let Some(guidance) = guidance {
+                    cmd.arg("--guidance-scale").arg(format!("{guidance}"));
+                }
+            }
         }
         Ok(())
     }
@@ -632,11 +767,12 @@ impl AudioCppEngine {
     /// Tasks this family can run. Each one becomes a separate entry in the
     /// server config, because a session is bound to its task; VoxCPM2 and
     /// CosyVoice3 switch between cloning and plain/instruction TTS.
-    fn server_tasks(&self) -> &'static [&'static str] {
+    fn server_tasks(&self) -> Vec<&str> {
         match self.family {
-            Family::Dots => &["tts"],
-            Family::VoxCpm2 | Family::CosyVoice => &["clon", "tts"],
-            Family::IndexTts2 => &["clon"],
+            Family::Dots => vec!["tts"],
+            Family::VoxCpm2 | Family::CosyVoice => vec!["clon", "tts"],
+            Family::IndexTts2 => vec!["clon"],
+            Family::AceStep => vec![self.task.as_str()],
         }
     }
 
@@ -661,13 +797,30 @@ impl AudioCppEngine {
             .server_tasks()
             .iter()
             .map(|task| {
-                json!({
+                let mut entry = json!({
                     "id": self.resident_id(task),
                     "family": self.family.cli_name(),
                     "path": model,
                     "task": task,
                     "mode": "offline",
-                })
+                });
+                if !self.load_options.is_empty() {
+                    entry["load_options"] = Value::Object(
+                        self.load_options
+                            .iter()
+                            .map(|(key, value)| (key.clone(), json!(value)))
+                            .collect(),
+                    );
+                }
+                if !self.session_options.is_empty() {
+                    entry["session_options"] = Value::Object(
+                        self.session_options
+                            .iter()
+                            .map(|(key, value)| (key.clone(), json!(value)))
+                            .collect(),
+                    );
+                }
+                entry
             })
             .collect();
         json!({
@@ -762,6 +915,31 @@ impl AudioCppEngine {
                     .param_i64(req, "interval_silence_ms", 400)
                     .clamp(0, 2000);
                 options.insert("interval_silence_ms".into(), json!(pause));
+            }
+            Family::AceStep => {
+                let lyrics = self.param_str(req, "lyrics", "");
+                if !lyrics.is_empty() {
+                    options.insert("lyrics".into(), json!(lyrics));
+                }
+                let duration = self.param_f64(req, "duration_sec", 60.0).clamp(10.0, 600.0);
+                options.insert("duration_sec".into(), json!(duration));
+                options.insert(
+                    "route".into(),
+                    json!(self.param_str(req, "task_route", "text2music")),
+                );
+                let guidance = req
+                    .params
+                    .get("guidance_scale")
+                    .and_then(Value::as_f64)
+                    .map(|v| v as f32)
+                    .or(self.guidance);
+                if let Some(guidance) = guidance {
+                    options.insert("guidance_scale".into(), json!(guidance));
+                }
+                options.insert("num_inference_steps".into(), json!(req.num_steps));
+                if let Some(code) = self.language_tag(req) {
+                    options.insert("language".into(), json!(code));
+                }
             }
         }
 
@@ -907,10 +1085,11 @@ impl AudioCppEngine {
         };
         let port = self.ensure_server().map_err(retry)?;
         if let Some(cb) = &req.progress {
-            cb(ProgressEvent::Stage(format!(
-                "正在合成（{} 常驻运行时）",
-                self.family.label()
-            )));
+            cb(ProgressEvent::Stage(if self.family == Family::AceStep {
+                format!("正在生成音乐（{} 常驻运行时）", self.family.label())
+            } else {
+                format!("正在合成（{} 常驻运行时）", self.family.label())
+            }));
         }
         // A malformed request fails the same way on a fresh server.
         let body = self
@@ -956,10 +1135,17 @@ impl AudioCppEngine {
                 ))))
             }
         }
-        let (samples, sample_rate) = decode_wav(&bytes).map_err(retry)?;
+        let (samples, sample_rate, channels) = if self.family == Family::AceStep {
+            let (samples, channels, rate) = decode_wav_channels(&bytes).map_err(retry)?;
+            (samples, rate as i32, channels)
+        } else {
+            let (samples, rate) = decode_wav(&bytes).map_err(retry)?;
+            (samples, rate, 1)
+        };
         Ok(Audio {
             samples,
             sample_rate,
+            channels,
         })
     }
 }
@@ -991,6 +1177,7 @@ mod tests {
             "dots" => ("dots", "dots"),
             "voxcpm2" => ("voxcpm2", "voxcpm2"),
             "indextts2" => ("indextts2", "indextts2"),
+            "music" => ("music", "ace-step"),
             _ => ("cosyvoice", "cosyvoice"),
         };
         let json = serde_json::json!({
@@ -1015,7 +1202,7 @@ mod tests {
              out=\"\"; ref=\"\"\nwhile [ $# -gt 0 ]; do [ \"$1\" = \"--out\" ] && out=$2; \
              [ \"$1\" = \"--voice-ref\" ] && ref=$2; shift; done\n\
              d=\"$(dirname \"$0\")\"; cp \"$d/fx.wav\" \"$out\"\n\
-             [ -n \"$ref\" ] && cp \"$ref\" \"$d/ref.wav\"\n",
+             [ -n \"$ref\" ] && cp \"$ref\" \"$d/ref.wav\"\nexit 0\n",
         )
         .unwrap();
         #[cfg(unix)]
@@ -1033,6 +1220,7 @@ mod tests {
             "dots" => super::Family::Dots,
             "voxcpm2" => super::Family::VoxCpm2,
             "indextts2" => super::Family::IndexTts2,
+            "music" => super::Family::AceStep,
             _ => super::Family::CosyVoice,
         };
         AudioCppEngine::build(dir, &m, family).expect("engine")
@@ -1316,6 +1504,94 @@ mod tests {
         let mut req = request(&[]);
         req.prompt_samples.clear();
         assert!(engine.synthesize(&req).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn ace_step_maps_music_options_and_keeps_stereo() {
+        let dir = args_dir("ace-step");
+        let engine = fixture(&dir, "music");
+        // 48 kHz stereo, the shape ACE-Step returns.
+        let interleaved: Vec<f32> = (0..48_000)
+            .map(|i| if i % 2 == 0 { 0.1 } else { -0.1 })
+            .collect();
+        std::fs::write(
+            dir.join("fx.wav"),
+            crate::encode_wav_channels(&interleaved, 48_000, 2).unwrap(),
+        )
+        .unwrap();
+
+        let audio = engine
+            .synthesize(&request(&[
+                ("lyrics", serde_json::json!("[verse] hello")),
+                ("duration_sec", serde_json::json!(90)),
+                ("task_route", serde_json::json!("text2music")),
+                ("guidance_scale", serde_json::json!(2.5)),
+            ]))
+            .expect("synthesis");
+        assert_eq!(audio.channels, 2);
+        assert_eq!(audio.sample_rate, 48_000);
+        assert_eq!(audio.samples.len(), 48_000);
+
+        let args: Vec<String> = std::fs::read_to_string(dir.join("args.txt"))
+            .unwrap()
+            .lines()
+            .map(str::to_string)
+            .collect();
+        assert!(args.windows(2).any(|w| w == ["--task", "gen"]));
+        assert!(args.windows(2).any(|w| w == ["--family", "ace_step"]));
+        assert!(args.windows(2).any(|w| w == ["--lyrics", "[verse] hello"]));
+        assert!(args.windows(2).any(|w| w == ["--duration-seconds", "90"]));
+        assert!(args.windows(2).any(|w| w == ["--task-route", "text2music"]));
+        assert!(args.windows(2).any(|w| w == ["--guidance-scale", "2.5"]));
+        // The request carried samples, but music must not clone a voice.
+        assert!(!args.iter().any(|a| a == "--voice-ref"));
+
+        // Instrumental: no lyrics, and still no reference clip required.
+        let mut req = request(&[("duration_sec", serde_json::json!(30))]);
+        req.prompt_samples.clear();
+        engine.synthesize(&req).expect("instrumental");
+        let args: Vec<String> = std::fs::read_to_string(dir.join("args.txt"))
+            .unwrap()
+            .lines()
+            .map(str::to_string)
+            .collect();
+        assert!(!args.iter().any(|a| a == "--lyrics"));
+        assert!(args.windows(2).any(|w| w == ["--duration-seconds", "30"]));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn ace_step_resident_config_and_body() {
+        let dir = args_dir("ace-step-resident");
+        let engine = fixture(&dir, "music");
+        let config = engine.server_config(1234);
+        let models = config["models"].as_array().expect("models");
+        assert_eq!(models.len(), 1);
+        assert_eq!(models[0]["id"], "laverock-gen");
+        assert_eq!(models[0]["family"], "ace_step");
+        assert_eq!(models[0]["task"], "gen");
+
+        let body = engine
+            .resident_body(
+                &request(&[
+                    ("lyrics", serde_json::json!("la la")),
+                    ("duration_sec", serde_json::json!(45)),
+                    ("guidance_scale", serde_json::json!(3.0)),
+                ]),
+                None,
+                9,
+            )
+            .expect("body");
+        assert_eq!(body["model"], "laverock-gen");
+        assert_eq!(body["input"], "hello");
+        assert_eq!(body["seed"], 9);
+        assert_eq!(body["options"]["lyrics"], "la la");
+        assert_eq!(body["options"]["duration_sec"].as_f64(), Some(45.0));
+        assert_eq!(body["options"]["route"], "text2music");
+        assert_eq!(body["options"]["guidance_scale"], 3.0);
+        assert_eq!(body["options"]["num_inference_steps"], 10);
+        assert!(body.get("voice_ref").is_none());
         let _ = std::fs::remove_dir_all(&dir);
     }
 

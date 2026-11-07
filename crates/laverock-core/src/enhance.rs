@@ -147,10 +147,7 @@ impl Enhancer {
     /// audio at the same rate.
     pub fn apply(&self, mode: EnhanceMode, samples: &[f32], rate: u32) -> Result<Audio> {
         if mode.is_off() || samples.is_empty() {
-            return Ok(Audio {
-                samples: samples.to_vec(),
-                sample_rate: rate as i32,
-            });
+            return Ok(Audio::mono(samples.to_vec(), rate as i32));
         }
         if !self.supports(mode) {
             return Err(CoreError::UserError(i18n::Message::new(
@@ -158,10 +155,7 @@ impl Enhancer {
             )));
         }
 
-        let mut audio = Audio {
-            samples: samples.to_vec(),
-            sample_rate: rate as i32,
-        };
+        let mut audio = Audio::mono(samples.to_vec(), rate as i32);
         if mode.needs_separation() {
             audio = self.separate(&audio)?;
         }
@@ -198,10 +192,7 @@ impl Enhancer {
             cleaned.sample_rate.max(1) as u32,
             audio.sample_rate as u32,
         );
-        Ok(Audio {
-            samples,
-            sample_rate: audio.sample_rate,
-        })
+        Ok(Audio::mono(samples, audio.sample_rate))
     }
 
     fn separate(&self, audio: &Audio) -> Result<Audio> {
@@ -281,10 +272,10 @@ impl Enhancer {
         let bytes = fs::read(&vocals)
             .map_err(|e| CoreError::Synth(format!("the separator produced no vocals stem: {e}")))?;
         let (samples, stem_rate) = decode_wav(&bytes)?;
-        Ok(Audio {
-            samples: resample_mono(&samples, stem_rate.max(1) as u32, audio.sample_rate as u32),
-            sample_rate: audio.sample_rate,
-        })
+        Ok(Audio::mono(
+            resample_mono(&samples, stem_rate.max(1) as u32, audio.sample_rate as u32),
+            audio.sample_rate,
+        ))
     }
 }
 

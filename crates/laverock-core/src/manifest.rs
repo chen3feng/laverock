@@ -34,6 +34,10 @@ pub enum EngineKind {
     /// MOSS-TTS-Delay (OpenMOSS) run by a native llama.cpp binary.
     #[serde(rename = "mosstts")]
     MossTts,
+    /// Music generation (audio.cpp `--task gen`). Not speech synthesis:
+    /// requests carry a caption, optional lyrics and a duration.
+    #[serde(rename = "music")]
+    Music,
     /// Speech-to-text models (SenseVoice via sherpa-onnx). Not a
     /// synthesis engine; discovered by the transcriber instead.
     #[serde(rename = "stt")]
@@ -82,6 +86,7 @@ impl EngineKind {
             EngineKind::Chatterbox => "chatterbox",
             EngineKind::IndexTts2 => "indextts2",
             EngineKind::MossTts => "mosstts",
+            EngineKind::Music => "music",
             EngineKind::Stt => "stt",
         }
     }
@@ -123,6 +128,9 @@ pub struct Manifest {
     pub indextts2: Option<AudioCppManifest>,
     #[serde(default)]
     pub mosstts: Option<MossTtsManifest>,
+    /// Music-generation configuration when `kind == "music"`.
+    #[serde(default)]
+    pub music: Option<MusicManifest>,
     /// STT configuration when `kind == "stt"`.
     #[serde(default)]
     pub stt: Option<SttManifest>,
@@ -206,6 +214,13 @@ impl Manifest {
                 .then(|| missing("indextts2"))
                 .flatten(),
             EngineKind::MossTts => self.mosstts.is_none().then(|| missing("mosstts")).flatten(),
+            EngineKind::Music => match &self.music {
+                None => missing("music"),
+                Some(c) if c.binary.trim().is_empty() && c.model.trim().is_empty() => {
+                    Some(Localized::Text("missing [music] binary/model".to_string()))
+                }
+                Some(_) => None,
+            },
             EngineKind::Stt => self.stt.is_none().then(|| missing("stt")).flatten(),
         };
         if structural.is_some() {
@@ -259,7 +274,7 @@ impl Manifest {
         match self.kind {
             EngineKind::VoxCpm2 => crate::VOXCPM2_MAX_REFERENCE_SECS,
             EngineKind::LongCat => 10.0,
-            EngineKind::Stt => 0.0,
+            EngineKind::Music | EngineKind::Stt => 0.0,
             _ => 15.0,
         }
     }
@@ -730,6 +745,94 @@ impl Manifest {
                     hint: (
                         "Same seed + text gives reproducible speech.",
                         "相同种子 + 文本得到可复现的声音",
+                    )
+                        .into(),
+                },
+            ],
+            // Music: the caption is the request's `text`; these are the
+            // per-request controls audio.cpp's `gen` task understands.
+            EngineKind::Music => vec![
+                ParamSpec {
+                    name: "lyrics".into(),
+                    label: ("Lyrics", "歌词").into(),
+                    kind: ParamKind::TextArea,
+                    min: None,
+                    max: None,
+                    step: None,
+                    options: Vec::new(),
+                    default: json!(""),
+                    hint: (
+                        "Leave empty for an instrumental; section tags like [verse] and [chorus] are understood.",
+                        "留空生成纯音乐；支持 [verse]、[chorus] 等段落标记。",
+                    )
+                        .into(),
+                },
+                ParamSpec::slider(
+                    "duration_sec",
+                    ("Duration (seconds)", "时长（秒）"),
+                    60.0,
+                    10.0,
+                    600.0,
+                    1.0,
+                    (
+                        "Requested song length; the planner may stop earlier.",
+                        "期望的歌曲长度；规划器可能提前结束。",
+                    ),
+                ),
+                ParamSpec::int_slider(
+                    "num_steps",
+                    ("Diffusion steps", "扩散步数"),
+                    8,
+                    1,
+                    32,
+                    1,
+                    (
+                        "ACE-Step Turbo uses 8 steps; more is slower.",
+                        "ACE-Step Turbo 使用 8 步；越多越慢。",
+                    ),
+                ),
+                ParamSpec::slider(
+                    "guidance_scale",
+                    ("Guidance strength", "引导强度"),
+                    1.0,
+                    0.0,
+                    10.0,
+                    0.1,
+                    (
+                        "Turbo checkpoints ignore this; base/SFT follow it.",
+                        "Turbo 检查点会忽略此值；base/SFT 会使用。",
+                    ),
+                ),
+                ParamSpec {
+                    name: "seed".into(),
+                    label: ("Random seed", "随机种子").into(),
+                    kind: ParamKind::Int,
+                    min: Some(json!(0)),
+                    max: Some(json!(4_294_967_295i64)),
+                    step: None,
+                    options: Vec::new(),
+                    default: json!(42),
+                    hint: (
+                        "Same seed + prompt gives a reproducible song.",
+                        "相同种子 + 提示词得到可复现的歌曲。",
+                    )
+                        .into(),
+                },
+                ParamSpec {
+                    name: "task_route".into(),
+                    label: ("Task route", "任务路由").into(),
+                    kind: ParamKind::Choice,
+                    min: None,
+                    max: None,
+                    step: None,
+                    options: vec![ParamOption {
+                        label: ("Text to music", "文本生成音乐").into(),
+                        value: "text2music".into(),
+                    }],
+                    default: json!("text2music"),
+                    hint: (
+                        "Editing routes (cover, repaint, extend) are planned for a later release.",
+                        "翻唱、重绘、续写等编辑路由将在后续版本加入。",
                     )
                         .into(),
                 },
@@ -1216,6 +1319,59 @@ fn default_dots_backend() -> String {
     "best".to_string()
 }
 fn default_dots_seed() -> i64 {
+    42
+}
+
+/// Music-generation configuration (audio.cpp `--task gen`).
+///
+/// The request shape differs from speech: `text` is a caption/style
+/// prompt, `lyrics` is optional (empty = instrumental), and the duration
+/// is an explicit request option rather than a reference-audio limit.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MusicManifest {
+    /// `audiocpp_cli` path, absolute or relative to the model directory.
+    #[serde(default)]
+    pub binary: String,
+    /// GGUF weights or a model package directory.
+    #[serde(default)]
+    pub model: String,
+    /// audio.cpp family, e.g. `ace_step`, `stable_audio`.
+    #[serde(default = "default_music_family")]
+    pub family: String,
+    /// audio.cpp backend: `best`, `metal`, `cuda`, `vulkan`, `cpu`…
+    #[serde(default = "default_music_backend")]
+    pub backend: String,
+    /// audio.cpp task, normally `gen`.
+    #[serde(default = "default_music_task")]
+    pub task: String,
+    /// Optional language hint for lyric parsing.
+    #[serde(default)]
+    pub language: Option<String>,
+    /// Default guidance strength; `None` leaves the family default alone.
+    #[serde(default)]
+    pub guidance: Option<f32>,
+    #[serde(default = "default_music_seed")]
+    pub seed: i64,
+    /// Passed as `--load-option k=v` and in the resident server config.
+    #[serde(default)]
+    pub load_options: std::collections::BTreeMap<String, String>,
+    /// Passed as `--session-option k=v` and in the resident server config.
+    #[serde(default)]
+    pub session_options: std::collections::BTreeMap<String, String>,
+    #[serde(default)]
+    pub env: std::collections::BTreeMap<String, String>,
+}
+
+fn default_music_family() -> String {
+    "ace_step".to_string()
+}
+fn default_music_backend() -> String {
+    "best".to_string()
+}
+fn default_music_task() -> String {
+    "gen".to_string()
+}
+fn default_music_seed() -> i64 {
     42
 }
 

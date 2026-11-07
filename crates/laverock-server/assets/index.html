@@ -256,6 +256,10 @@
       <svg viewBox="0 0 24 24"><path d="M11 5 6 9H2v6h4l5 4V5Z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M18.5 5.5a9 9 0 0 1 0 13"/></svg>
       <span data-i18n="nav.synthesize">合成</span>
     </a>
+    <a href="#/music" data-page="music">
+      <svg viewBox="0 0 24 24"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
+      <span data-i18n="nav.music">音乐</span>
+    </a>
     <a href="#/captures" data-page="captures">
       <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="4" rx="1"/><rect x="3" y="10" width="18" height="4" rx="1"/><rect x="3" y="16" width="18" height="4" rx="1"/></svg>
       <span data-i18n="nav.captures">素材库</span>
@@ -357,6 +361,46 @@
       <!-- Each take (or the single result) renders as a card here. -->
       <div id="synthResults" hidden></div>
       <audio id="previewer" hidden></audio>
+    </section>
+
+    <!-- ================= 音乐 ================= -->
+    <section id="page-music" class="page">
+      <div class="page-head"><h1 data-i18n="music.title">音乐</h1><p class="sub" data-i18n="music.sub">用文字描述风格，可选填歌词，在这台电脑上生成完整歌曲（48 kHz 立体声）。</p></div>
+
+      <div class="card">
+        <label for="musicEngine" data-i18n="music.engine">音乐引擎</label>
+        <select id="musicEngine"></select>
+        <div class="hint" id="musicEngineHint" data-i18n="music.engine_hint">选择一个已安装的音乐模型；首次生成需要先加载数 GB 权重。</div>
+      </div>
+
+      <div class="card">
+        <label for="musicCaption" data-i18n="music.caption">风格描述</label>
+        <textarea id="musicCaption" rows="3" data-i18n-ph="music.caption.ph" placeholder="例如：温暖的民谣，木吉他，女声，中速，怀旧"></textarea>
+        <div class="hint" data-i18n="music.caption.hint">描述曲风、乐器、情绪、人声与节奏；歌词留空即生成纯音乐。</div>
+      </div>
+
+      <!-- Lyrics, duration, steps, guidance and seed come from the
+           engine manifest, so a new music family needs no UI changes. -->
+      <div class="card" id="musicParams" hidden></div>
+
+      <div class="card">
+        <label for="musicSamples" data-i18n="music.samples">候选项</label>
+        <div class="prompt-box">
+          <button class="ghost" id="musicSamplesMinus" type="button">−</button>
+          <input type="number" id="musicSamples" min="1" max="2" value="1"
+                 style="width:74px;text-align:center" aria-label="takes" />
+          <button class="ghost" id="musicSamplesPlus" type="button">＋</button>
+        </div>
+        <div class="hint" data-i18n="music.samples_hint">一次生成多个版本，逐一试听后再下载。</div>
+      </div>
+
+      <div class="actions">
+        <button id="musicGo" type="button" data-i18n="music.go">生成音乐</button>
+        <span id="musicStatus"></span>
+      </div>
+      <div id="musicProgress" class="pbar" hidden><div class="pbar-fill indeterminate"></div></div>
+      <div id="musicProgressLabel" class="pbar-label" hidden><span></span><b></b></div>
+      <div id="musicResults" hidden></div>
     </section>
 
     <!-- ================= 素材库 ================= -->
@@ -635,7 +679,7 @@
 
 <script>
 const $ = (id) => document.getElementById(id);
-const PAGES = ['synthesize', 'captures', 'voices', 'history', 'models', 'settings'];
+const PAGES = ['synthesize', 'music', 'captures', 'voices', 'history', 'models', 'settings'];
 const HF_PRESETS = [
   { value: '', labelKey: 'preset.official.hf' },
   { value: 'https://hf-mirror.com', labelKey: 'preset.cn' },
@@ -651,7 +695,7 @@ const PIP_PRESETS = [
 const I18N = {
   zh: {
     'brand.sub': '本地语音工作室',
-    'nav.synthesize': '合成', 'nav.captures': '素材库', 'nav.voices': '声音',
+    'nav.synthesize': '合成', 'nav.music': '音乐', 'nav.captures': '素材库', 'nav.voices': '声音',
     'nav.models': '模型',
     'nav.history': '历史', 'nav.settings': '设置', 'state.title': '服务状态',
 
@@ -671,6 +715,21 @@ const I18N = {
     'go': '生成语音', 'download.wav': '下载 WAV', 'download.mp3': '下载 MP3',
     'synth.samples': '候选项',
     'synth.samples_hint': '一次生成多段候选项逐一试听，选中满意的再下载。克隆引擎会通过不同的种子/采样本产生差异。',
+
+    'music.title': '音乐',
+    'music.sub': '用文字描述风格，可选填歌词，在这台电脑上生成完整歌曲（48 kHz 立体声）。',
+    'music.engine': '音乐引擎',
+    'music.engine_hint': '选择一个已安装的音乐模型；首次生成需要先加载数 GB 权重。',
+    'music.caption': '风格描述',
+    'music.caption.ph': '例如：温暖的民谣，木吉他，女声，中速，怀旧',
+    'music.caption.hint': '描述曲风、乐器、情绪、人声与节奏；歌词留空即生成纯音乐。',
+    'music.go': '生成音乐',
+    'music.samples': '候选项',
+    'music.samples_hint': '一次生成多个版本，逐一试听后再下载。',
+    'music.first_load': '首次加载约需数十秒到数分钟。',
+    'music.generating': '正在生成音乐…',
+    'music.no_engine': '还没有安装音乐模型。请先到「模型」页下载 ACE-Step。',
+    'music.caption_required': '请先描述想要的音乐风格。',
 
     'voices.title': '声音库',
     'voices.sub': '保存的声音可以复用到任何克隆引擎，也可以由素材库里的多段录音组成。',
@@ -764,7 +823,8 @@ const I18N = {
     'models.available': '可安装',
 
     'history.title': '历史',
-    'history.sub': '本机生成的语音，最多保留 100 条或 1 GB。',
+    'history.sub': '本机生成的语音与音乐，最多保留 100 条或 1 GB。',
+    'history.music': '音乐',
     'history.clear': '清空全部',
     'history.empty': '还没有生成记录。去「合成」生成第一条吧。',
     'history.variant': '候选项 {n}',
@@ -799,6 +859,7 @@ const I18N = {
 
     'cap.tts': '语音合成', 'cap.clone': '声音克隆', 'cap.voice-design': '声音设计',
     'cap.instruct': '指令控制', 'cap.preset-voices': '预置音色', 'cap.stt': '语音识别',
+    'cap.music': '音乐生成',
 
     'cap.file': '选择文件', 'cap.record': '● 录音', 'cap.stop': '■ 停止', 'cap.none': '未选择',
     'cap.transcribe': '✎ 转写', 'transcribe.busy': '转写中…',
@@ -932,7 +993,7 @@ const I18N = {
   },
   en: {
     'brand.sub': 'Local voice studio',
-    'nav.synthesize': 'Synthesize', 'nav.captures': 'Library', 'nav.voices': 'Voices',
+    'nav.synthesize': 'Synthesize', 'nav.music': 'Music', 'nav.captures': 'Library', 'nav.voices': 'Voices',
     'nav.models': 'Models',
     'nav.history': 'History', 'nav.settings': 'Settings', 'state.title': 'Service status',
 
@@ -952,6 +1013,21 @@ const I18N = {
     'go': 'Generate', 'download.wav': 'Download WAV', 'download.mp3': 'Download MP3',
     'synth.samples': 'Takes',
     'synth.samples_hint': 'Generate several takes at once to audition side by side, then download the one you like. Cloning engines vary them via seed/sampling.',
+
+    'music.title': 'Music',
+    'music.sub': 'Describe a style, optionally add lyrics, and generate a full song on this computer (48 kHz stereo).',
+    'music.engine': 'Music engine',
+    'music.engine_hint': 'Pick an installed music model; the first generation loads several GB of weights.',
+    'music.caption': 'Style description',
+    'music.caption.ph': 'e.g. warm folk, acoustic guitar, female vocal, mid-tempo, nostalgic',
+    'music.caption.hint': 'Describe genre, instruments, mood, vocals and tempo. Leave the lyrics empty for instrumental music.',
+    'music.go': 'Generate music',
+    'music.samples': 'Takes',
+    'music.samples_hint': 'Generate several versions at once, audition them, then download your favourite.',
+    'music.first_load': 'The first load can take tens of seconds to a few minutes.',
+    'music.generating': 'Generating music…',
+    'music.no_engine': 'No music model installed yet. Download ACE-Step from the Models page first.',
+    'music.caption_required': 'Describe the music you want first.',
 
     'voices.title': 'Voice library',
     'voices.sub': 'Saved voices work with any cloning engine, and can be built from several takes in the library.',
@@ -1045,7 +1121,8 @@ const I18N = {
     'models.available': 'Available',
 
     'history.title': 'History',
-    'history.sub': 'Speech generated on this computer, capped at 100 entries or 1 GB.',
+    'history.sub': 'Speech and music generated on this computer, capped at 100 entries or 1 GB.',
+    'history.music': 'Music',
     'history.clear': 'Clear all',
     'history.empty': 'No generations yet. Head to Synthesize to make the first one.',
     'history.variant': 'take #{n}',
@@ -1081,6 +1158,7 @@ const I18N = {
 
     'cap.tts': 'Speech synthesis', 'cap.clone': 'Voice cloning', 'cap.voice-design': 'Voice design',
     'cap.instruct': 'Voice instructions', 'cap.preset-voices': 'Preset voices', 'cap.stt': 'Speech-to-text',
+    'cap.music': 'Music generation',
 
     'cap.file': 'Choose file', 'cap.record': '● Record', 'cap.stop': '■ Stop', 'cap.none': 'None',
     'cap.transcribe': '✎ Transcribe', 'transcribe.busy': 'Transcribing…',
@@ -2646,48 +2724,66 @@ async function loadEngines() {
     toast((t("ui.failed_to_load_engines")) + e.message, true);
     return;
   }
-  const sel = $('engine');
-  const current = sel.value;
-  // Rebuilding the list also rebuilds the parameter controls, dropping
+  // Music engines belong on their own page; the speech page must not offer
+  // them (and vice versa).
+  const synthList = engines.filter((e) => e.kind !== 'music');
+  const musicList = engines.filter((e) => e.kind === 'music');
+
+  // Rebuilding the lists also rebuilds the parameter controls, dropping
   // values the user tuned. When the set of engines did not change (the
-  // usual case when revisiting Models), leave the select and its
+  // usual case when revisiting Models), leave the selects and their
   // controls alone.
-  const unchanged = engines.length === sel.options.length
-    && engines.every((e, i) => sel.options[i].value === e.id);
-  if (unchanged) {
+  const sig = engines.map((e) => `${e.id}:${e.kind}`).join('|');
+  if (sig === loadEngines.sig) {
     if (currentPage() === 'models' && modelsData) renderModels();
     return;
   }
-  sel.innerHTML = '';
-  if (!engines.length) {
-    const o = document.createElement('option');
-    o.textContent = t("ui.no_models_found_download_one");
-    sel.appendChild(o);
-    $('go').disabled = true;
-  } else {
-    $('go').disabled = false;
-    for (const e of engines) {
-      const o = document.createElement('option');
-      o.value = e.id;
-      o.textContent = e.name;
-      sel.appendChild(o);
-    }
-    if (engines.some((e) => e.id === current)) sel.value = current;
-  }
+  loadEngines.sig = sig;
+
+  fillEngineSelect($('engine'), synthList);
+  fillEngineSelect($('musicEngine'), musicList);
+  $('go').disabled = synthList.length === 0;
+  $('musicGo').disabled = musicList.length === 0;
+  if (!musicList.length) $('musicStatus').textContent = t('music.no_engine');
+  else $('musicStatus').textContent = '';
   syncEngine();
+  syncMusicEngine();
   if (currentPage() === 'models') {
     if (modelsData) renderModels();
     else if (!session.loopback) renderInstalledOnly();
   }
 }
 
+// Fill an engine select, keeping the current choice when it still exists.
+function fillEngineSelect(sel, list) {
+  const current = sel.value;
+  sel.innerHTML = '';
+  if (!list.length) {
+    const o = document.createElement('option');
+    o.textContent = t("ui.no_models_found_download_one");
+    sel.appendChild(o);
+    return;
+  }
+  for (const e of list) {
+    const o = document.createElement('option');
+    o.value = e.id;
+    o.textContent = e.name;
+    sel.appendChild(o);
+  }
+  if (list.some((e) => e.id === current)) sel.value = current;
+}
+
 // Build tuning controls from the engine manifest's parameter list.
 // The backend declares name/label/type/range/default/hint, so new engines
 // and custom manifests need no UI changes.
 function renderEngineParams(e) {
-  const host = $('engineParams');
+  renderParamGrid($('engineParams'), (e && e.parameters) || [], 'param-');
+}
+
+// Same grid on any page; the prefix keeps control ids unique when the
+// speech and music pages are both in the DOM.
+function renderParamGrid(host, specs, prefix) {
   host.innerHTML = '';
-  const specs = (e && e.parameters) || [];
   host.hidden = specs.length === 0;
   if (!specs.length) return;
 
@@ -2699,7 +2795,7 @@ function renderEngineParams(e) {
   grid.style.marginTop = '10px';
   for (const p of specs) {
     const wrap = document.createElement('div');
-    wrap.appendChild(paramControl(p));
+    wrap.appendChild(paramControl(p, prefix));
     const hintText = paramHint(p);
     if (hintText) {
       const h = document.createElement('div');
@@ -2729,8 +2825,8 @@ function paramOptionLabel(option) {
   return loc(option.label) || option.value;
 }
 
-function paramControl(p) {
-  const id = 'param-' + p.name;
+function paramControl(p, prefix = 'param-') {
+  const id = prefix + p.name;
   const min = Number(p.min), max = Number(p.max), step = p.step != null ? Number(p.step) : null;
   const wideRange = p.type === 'int' && (min < 0 || max - min > 1000);
 
@@ -2801,8 +2897,12 @@ function paramControl(p) {
 }
 
 function collectEngineParams() {
+  return collectParams('engineParams');
+}
+
+function collectParams(hostId) {
   const out = {};
-  for (const el of document.querySelectorAll('#engineParams [data-param]')) {
+  for (const el of document.querySelectorAll(`#${hostId} [data-param]`)) {
     const type = el.dataset.type;
     out[el.dataset.param] = type === 'bool' ? String(el.checked) : el.value;
   }
@@ -2833,6 +2933,20 @@ function syncEngine() {
 // Engine/voice switches must not discard text the user already typed.
 $('engine').onchange = () => { syncEngine(); restoreDraftFields(); saveDraft(); };
 $('profile').onchange = () => { syncProfileUI(); restoreDraftFields(); saveDraft(); };
+
+function syncMusicEngine() {
+  const e = engines.find((x) => x.id === $('musicEngine').value);
+  if (!e) {
+    $('musicEngineHint').textContent = t('music.engine_hint');
+    renderParamGrid($('musicParams'), [], 'music-param-');
+    return;
+  }
+  const caps = (e.capabilities || []).map(capabilityLabel).join(t("ui.text"));
+  $('musicEngineHint').textContent =
+    `${e.kind} · ${(e.languages || []).join(' / ')} · ${caps}`;
+  renderParamGrid($('musicParams'), e.parameters || [], 'music-param-');
+}
+$('musicEngine').onchange = syncMusicEngine;
 
 // Rough codec-step budget for a text: CJK ~3.8 chars/s of speech,
 // whitespace-split Latin words ~2.6/s; the Qwen codec emits 12.5 steps/s.
@@ -3003,8 +3117,9 @@ $('go').onclick = async () => {
 
 // --------------------------------------------------------- synth results
 
-// Object URLs handed out by renderSynthResults, revoked on the next render.
-let synthResultUrls = [];
+// Object URLs handed out by renderSynthResults, revoked on the next render
+// of the same host (the speech and music pages each keep their own list).
+const synthResultUrls = new Map();
 
 function mkDownloadLink(label, handler) {
   const a = document.createElement('a');
@@ -3015,10 +3130,10 @@ function mkDownloadLink(label, handler) {
   return a;
 }
 
-function renderSynthResults(list, engine) {
-  const box = $('synthResults');
-  for (const url of synthResultUrls) URL.revokeObjectURL(url);
-  synthResultUrls = [];
+function renderSynthResults(list, engine, hostId = 'synthResults') {
+  const box = $(hostId);
+  for (const url of synthResultUrls.get(hostId) || []) URL.revokeObjectURL(url);
+  synthResultUrls.set(hostId, []);
   box.innerHTML = '';
   box.hidden = false;
   const multi = list.length > 1;
@@ -3037,7 +3152,7 @@ function renderSynthResults(list, engine) {
     audio.preload = 'none';
     audio.addEventListener('play', () => pauseOtherAudio(audio));
     const url = URL.createObjectURL(v.blob);
-    synthResultUrls.push(url);
+    synthResultUrls.get(hostId).push(url);
     audio.src = url;
     card.appendChild(audio);
 
@@ -3306,6 +3421,149 @@ function schedulePoll() {
   }, 1500);
 }
 
+// ---------------------------------------------------------------- music
+
+function wireMusicSamplesStepper() {
+  const input = $('musicSamples');
+  const clamp = () => {
+    let n = Math.round(Number(input.value));
+    if (!Number.isFinite(n)) n = 1;
+    input.value = Math.max(1, Math.min(2, n));
+  };
+  input.addEventListener('change', clamp);
+  $('musicSamplesMinus').onclick = () => {
+    input.value = Math.max(1, Number(input.value) - 1);
+  };
+  $('musicSamplesPlus').onclick = () => {
+    input.value = Math.min(2, Number(input.value) + 1);
+  };
+}
+wireMusicSamplesStepper();
+
+$('musicGo').onclick = async () => {
+  const status = $('musicStatus');
+  const caption = $('musicCaption').value.trim();
+  const engine = engines.find((x) => x.id === $('musicEngine').value);
+  if (!engine) {
+    status.className = 'err';
+    status.textContent = t('music.no_engine');
+    return;
+  }
+  if (!caption) {
+    status.className = 'err';
+    status.textContent = t('music.caption_required');
+    return;
+  }
+
+  const params = collectParams('musicParams');
+  const fd = new FormData();
+  fd.append('text', caption);
+  for (const [name, value] of Object.entries(params)) fd.append(name, value);
+  fd.append('samples', $('musicSamples').value);
+
+  const url = `/api/engines/${encodeURIComponent(engine.id)}/synthesize`;
+  $('musicGo').disabled = true;
+  status.className = '';
+
+  const labelEl = $('musicProgressLabel');
+  const pbar = $('musicProgress');
+  pbar.hidden = false;
+  labelEl.hidden = false;
+  const startedAt = Date.now();
+  const fmtElapsed = () => {
+    const s = (Date.now() - startedAt) / 1000;
+    return `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
+  };
+  const setStage = (text) => {
+    labelEl.querySelector('span').textContent = text;
+    labelEl.querySelector('b').textContent = fmtElapsed();
+    status.textContent = text;
+  };
+  const fill = pbar.querySelector('.pbar-fill');
+  const setDeterminate = (pct) => {
+    fill.classList.remove('indeterminate');
+    fill.style.width = Math.max(0, Math.min(98, pct)).toFixed(1) + '%';
+  };
+  fill.classList.add('indeterminate');
+  fill.style.width = '';
+  setStage(engine.loaded ? t('music.generating') : t('music.first_load'));
+  const timer = setInterval(() => {
+    labelEl.querySelector('b').textContent = fmtElapsed();
+  }, 250);
+  const totalSteps = Number(params.num_steps) || 0;
+
+  try {
+    const res = await apiFetch(url, {
+      method: 'POST',
+      body: fd,
+      headers: { 'X-Laverock-Stream': '1' },
+    });
+    if (!res.ok) {
+      const msg = await res.json().then((j) => j.error).catch(() => res.statusText);
+      throw new Error(msg);
+    }
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '';
+    const variants = [];
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      let sep;
+      while ((sep = buf.indexOf('\n\n')) !== -1) {
+        const raw = buf.slice(0, sep);
+        buf = buf.slice(sep + 2);
+        let event = '';
+        const dataLines = [];
+        for (const line of raw.split('\n')) {
+          if (line.startsWith('event:')) event = line.slice(6).trim();
+          else if (line.startsWith('data:')) dataLines.push(line.slice(5).trim());
+        }
+        const data = dataLines.join('\n');
+        if (event === 'stage') {
+          setStage(data + '…');
+        } else if (event === 'steps' && totalSteps > 0) {
+          const steps = Number(data);
+          if (Number.isFinite(steps)) setDeterminate((steps / totalSteps) * 100);
+        } else if (event === 'wav') {
+          const p = JSON.parse(data);
+          const bytes = Uint8Array.from(atob(p.wav), (c) => c.charCodeAt(0));
+          variants[Number(p.i)] = {
+            blob: new Blob([bytes], { type: 'audio/wav' }),
+            index: Number(p.i),
+            total: Number(p.n),
+          };
+        } else if (event === 'error') {
+          const j = JSON.parse(data);
+          throw new Error(j.message || t("ui.synthesis_failed"));
+        }
+      }
+    }
+
+    const got = variants.filter((v) => v && v.blob).sort((a, b) => a.index - b.index);
+    if (!got.length) throw new Error(t("ui.no_audio_data_received"));
+    setDeterminate(100);
+    renderSynthResults(got, engine, 'musicResults');
+    lastSynthBlob = got[got.length - 1].blob;
+    if (engine) engine.loaded = true;
+    status.className = 'ok';
+    const totalBytes = got.reduce((s, v) => s + v.blob.size, 0);
+    status.textContent =
+      `${t("ui.done")} · ${got.length > 1 ? got.length + '× · ' : ''}` +
+      `${(totalBytes / 1024).toFixed(0)} KB`;
+  } catch (e) {
+    status.className = 'err';
+    status.textContent = (t("ui.failed")) + e.message;
+  } finally {
+    clearInterval(timer);
+    pbar.hidden = true;
+    labelEl.hidden = true;
+    $('musicGo').disabled = false;
+  }
+};
+
 // ---------------------------------------------------------------- history
 
 let historyItems = [];
@@ -3386,6 +3644,12 @@ function buildHistoryTake(host, h, engineName, variantLabel) {
   chip.className = 'chip';
   chip.textContent = engineName[h.engine_id] || h.engine_name || h.engine_id;
   meta.appendChild(chip);
+  if (h.kind === 'music') {
+    const kind = document.createElement('span');
+    kind.className = 'chip';
+    kind.textContent = t('history.music');
+    meta.appendChild(kind);
+  }
   if (variantLabel) {
     const take = document.createElement('span');
     take.className = 'chip';

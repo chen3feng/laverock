@@ -7,48 +7,66 @@ async function loadEngines() {
     toast((t("ui.failed_to_load_engines")) + e.message, true);
     return;
   }
-  const sel = $('engine');
-  const current = sel.value;
-  // Rebuilding the list also rebuilds the parameter controls, dropping
+  // Music engines belong on their own page; the speech page must not offer
+  // them (and vice versa).
+  const synthList = engines.filter((e) => e.kind !== 'music');
+  const musicList = engines.filter((e) => e.kind === 'music');
+
+  // Rebuilding the lists also rebuilds the parameter controls, dropping
   // values the user tuned. When the set of engines did not change (the
-  // usual case when revisiting Models), leave the select and its
+  // usual case when revisiting Models), leave the selects and their
   // controls alone.
-  const unchanged = engines.length === sel.options.length
-    && engines.every((e, i) => sel.options[i].value === e.id);
-  if (unchanged) {
+  const sig = engines.map((e) => `${e.id}:${e.kind}`).join('|');
+  if (sig === loadEngines.sig) {
     if (currentPage() === 'models' && modelsData) renderModels();
     return;
   }
-  sel.innerHTML = '';
-  if (!engines.length) {
-    const o = document.createElement('option');
-    o.textContent = t("ui.no_models_found_download_one");
-    sel.appendChild(o);
-    $('go').disabled = true;
-  } else {
-    $('go').disabled = false;
-    for (const e of engines) {
-      const o = document.createElement('option');
-      o.value = e.id;
-      o.textContent = e.name;
-      sel.appendChild(o);
-    }
-    if (engines.some((e) => e.id === current)) sel.value = current;
-  }
+  loadEngines.sig = sig;
+
+  fillEngineSelect($('engine'), synthList);
+  fillEngineSelect($('musicEngine'), musicList);
+  $('go').disabled = synthList.length === 0;
+  $('musicGo').disabled = musicList.length === 0;
+  if (!musicList.length) $('musicStatus').textContent = t('music.no_engine');
+  else $('musicStatus').textContent = '';
   syncEngine();
+  syncMusicEngine();
   if (currentPage() === 'models') {
     if (modelsData) renderModels();
     else if (!session.loopback) renderInstalledOnly();
   }
 }
 
+// Fill an engine select, keeping the current choice when it still exists.
+function fillEngineSelect(sel, list) {
+  const current = sel.value;
+  sel.innerHTML = '';
+  if (!list.length) {
+    const o = document.createElement('option');
+    o.textContent = t("ui.no_models_found_download_one");
+    sel.appendChild(o);
+    return;
+  }
+  for (const e of list) {
+    const o = document.createElement('option');
+    o.value = e.id;
+    o.textContent = e.name;
+    sel.appendChild(o);
+  }
+  if (list.some((e) => e.id === current)) sel.value = current;
+}
+
 // Build tuning controls from the engine manifest's parameter list.
 // The backend declares name/label/type/range/default/hint, so new engines
 // and custom manifests need no UI changes.
 function renderEngineParams(e) {
-  const host = $('engineParams');
+  renderParamGrid($('engineParams'), (e && e.parameters) || [], 'param-');
+}
+
+// Same grid on any page; the prefix keeps control ids unique when the
+// speech and music pages are both in the DOM.
+function renderParamGrid(host, specs, prefix) {
   host.innerHTML = '';
-  const specs = (e && e.parameters) || [];
   host.hidden = specs.length === 0;
   if (!specs.length) return;
 
@@ -60,7 +78,7 @@ function renderEngineParams(e) {
   grid.style.marginTop = '10px';
   for (const p of specs) {
     const wrap = document.createElement('div');
-    wrap.appendChild(paramControl(p));
+    wrap.appendChild(paramControl(p, prefix));
     const hintText = paramHint(p);
     if (hintText) {
       const h = document.createElement('div');
@@ -90,8 +108,8 @@ function paramOptionLabel(option) {
   return loc(option.label) || option.value;
 }
 
-function paramControl(p) {
-  const id = 'param-' + p.name;
+function paramControl(p, prefix = 'param-') {
+  const id = prefix + p.name;
   const min = Number(p.min), max = Number(p.max), step = p.step != null ? Number(p.step) : null;
   const wideRange = p.type === 'int' && (min < 0 || max - min > 1000);
 
@@ -162,8 +180,12 @@ function paramControl(p) {
 }
 
 function collectEngineParams() {
+  return collectParams('engineParams');
+}
+
+function collectParams(hostId) {
   const out = {};
-  for (const el of document.querySelectorAll('#engineParams [data-param]')) {
+  for (const el of document.querySelectorAll(`#${hostId} [data-param]`)) {
     const type = el.dataset.type;
     out[el.dataset.param] = type === 'bool' ? String(el.checked) : el.value;
   }
@@ -194,6 +216,20 @@ function syncEngine() {
 // Engine/voice switches must not discard text the user already typed.
 $('engine').onchange = () => { syncEngine(); restoreDraftFields(); saveDraft(); };
 $('profile').onchange = () => { syncProfileUI(); restoreDraftFields(); saveDraft(); };
+
+function syncMusicEngine() {
+  const e = engines.find((x) => x.id === $('musicEngine').value);
+  if (!e) {
+    $('musicEngineHint').textContent = t('music.engine_hint');
+    renderParamGrid($('musicParams'), [], 'music-param-');
+    return;
+  }
+  const caps = (e.capabilities || []).map(capabilityLabel).join(t("ui.text"));
+  $('musicEngineHint').textContent =
+    `${e.kind} · ${(e.languages || []).join(' / ')} · ${caps}`;
+  renderParamGrid($('musicParams'), e.parameters || [], 'music-param-');
+}
+$('musicEngine').onchange = syncMusicEngine;
 
 // Rough codec-step budget for a text: CJK ~3.8 chars/s of speech,
 // whitespace-split Latin words ~2.6/s; the Qwen codec emits 12.5 steps/s.

@@ -260,6 +260,7 @@ impl EngineManager {
                 Arc::new(AudioCppEngine::build(&dir, &manifest, Family::IndexTts2)?)
             }
             EngineKind::MossTts => Arc::new(MossTtsEngine::build(&dir, &manifest)?),
+            EngineKind::Music => Arc::new(AudioCppEngine::build(&dir, &manifest, Family::AceStep)?),
             // STT models are discovered by the transcriber, not built as
             // synthesis engines.
             EngineKind::Stt => {
@@ -506,10 +507,7 @@ mod unload_tests {
         }
 
         fn synthesize(&self, _req: &SynthRequest) -> Result<Audio> {
-            Ok(Audio {
-                samples: vec![0.0; 16],
-                sample_rate: 24_000,
-            })
+            Ok(Audio::mono(vec![0.0; 16], 24_000))
         }
 
         fn unload(&self) {
@@ -563,5 +561,72 @@ mod unload_tests {
         manager.synthesize("second", &request()).expect("second");
         assert_eq!(first_unloads.load(Ordering::SeqCst), 1);
         assert_eq!(second_unloads.load(Ordering::SeqCst), 1);
+    }
+}
+
+#[cfg(all(test, unix))]
+mod music_tests {
+    use super::*;
+    use std::os::unix::fs::PermissionsExt;
+
+    /// A `kind: "music"` manifest registers as a music engine and builds
+    /// the shared audio.cpp engine with the ACE-Step family.
+    #[test]
+    fn music_manifests_build_an_ace_step_engine() {
+        let root = std::env::temp_dir().join(format!(
+            "laverock-music-manager-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.subsec_nanos())
+                .unwrap_or(0)
+        ));
+        let _ = fs::remove_dir_all(&root);
+        let dir = root.join("ace-step");
+        fs::create_dir_all(dir.join("turbo")).unwrap();
+        let cli = dir.join("fake_cli.sh");
+        fs::write(&cli, "#!/bin/sh\nexit 0\n").unwrap();
+        let mut perms = fs::metadata(&cli).unwrap().permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(&cli, perms).unwrap();
+        fs::write(dir.join("turbo/ace-step.gguf"), b"x").unwrap();
+        fs::write(
+            dir.join("engine.json"),
+            format!(
+                r#"{{
+                  "id": "ace-step",
+                  "kind": "music",
+                  "name": "ACE-Step",
+                  "music": {{
+                    "binary": "{}",
+                    "model": "turbo",
+                    "backend": "cpu",
+                    "family": "ace_step",
+                    "task": "gen"
+                  }},
+                  "defaults": {{ "speed": 1.0, "num_steps": 8 }}
+                }}"#,
+                cli.display()
+            ),
+        )
+        .unwrap();
+
+        let manager = EngineManager::open(&root).expect("manager");
+        let info = manager
+            .list()
+            .into_iter()
+            .find(|e| e.id == "ace-step")
+            .expect("registered");
+        assert_eq!(info.kind, "music");
+        assert_eq!(info.reference_limit_secs, 0.0);
+        let params = manager.parameters("ace-step").unwrap();
+        assert!(params.iter().any(|p| p.name == "lyrics"));
+        assert!(params.iter().any(|p| p.name == "duration_sec"));
+        assert!(params.iter().any(|p| p.name == "task_route"));
+
+        // The model path is a directory (a GGUF package), not a file.
+        let engine = manager.engine("ace-step").expect("engine builds");
+        assert_eq!(engine.id(), "ace-step");
+        let _ = fs::remove_dir_all(&root);
     }
 }

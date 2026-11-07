@@ -169,6 +169,30 @@
     }
   },
   {
+    "id": "ace-step",
+    "dir": "ace-step",
+    "name": "ACE-Step 1.5 Turbo",
+    "description": {
+      "en": "Text-to-music and lyrics-to-song: describe a style, optionally add lyrics, and generate a complete 48 kHz stereo song on this machine. 50+ languages, MIT licensed, running on audio.cpp's native Metal/CUDA runtime.",
+      "zh": "文字生成音乐 / 歌词生成歌曲：描述风格，可选填歌词，在本机生成完整的 48kHz 立体声歌曲。支持 50+ 语言，MIT 许可，通过 audio.cpp 原生 Metal/CUDA 运行时推理。"
+    },
+    "size": "~10 GB (BF16) / ~6.2 GB (Q8_0)",
+    "languages": [
+      "zh",
+      "en",
+      "+ 50 languages"
+    ],
+    "capabilities": [
+      "music"
+    ],
+    "script": "download-ace-step.sh",
+    "env": {},
+    "note": {
+      "en": "12 GB+ VRAM recommended. On an 8 GB card use CPU/offload and set ACE_STEP_QUANT=q8_0 when installing; the Q8_0 planner can occasionally fail to sample. Turbo ignores guidance_scale and caps at 8 diffusion steps. The first generation also loads several GB of weights.",
+      "zh": "建议 12 GB 以上显存。8 GB 显卡请使用 CPU/offload，并在安装时设置 ACE_STEP_QUANT=q8_0；Q8_0 的 planner 偶尔会采样失败。Turbo 忽略 guidance_scale，扩散步数最多 8 步。首次生成还需要加载数 GB 权重。"
+    }
+  },
+  {
     "id": "cosyvoice",
     "dir": "cosyvoice",
     "name": "CosyVoice3 0.5B (Q8_0)",

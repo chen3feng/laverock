@@ -369,10 +369,7 @@ impl SpeechEngine for MossTtsEngine {
 
         let _ = std::fs::remove_dir_all(&tmp);
 
-        Ok(Audio {
-            samples,
-            sample_rate: rate as i32,
-        })
+        Ok(Audio::mono(samples, rate as i32))
     }
 
     fn long_text_policy(&self) -> Option<LongTextPolicy> {

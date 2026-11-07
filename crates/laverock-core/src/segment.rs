@@ -381,10 +381,7 @@ mod tests {
         }
         fn synthesize(&self, req: &SynthRequest) -> Result<Audio> {
             self.texts.lock().unwrap().push(req.text.clone());
-            Ok(Audio {
-                samples: vec![1.0],
-                sample_rate: self.sample_rate,
-            })
+            Ok(Audio::mono(vec![1.0], self.sample_rate))
         }
     }
 

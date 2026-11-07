@@ -375,16 +375,28 @@ pub async fn create_speech(
 
     // Encode the WAV once (also what history stores), then convert on
     // demand for other formats. Recording history is best effort.
-    let wav_bytes = match laverock_core::encode_wav(&audio.samples, audio.sample_rate) {
-        Ok(b) => b,
-        Err(e) => return core_error(e),
-    };
-    if let Err(e) = state.history.add(
+    let wav_bytes =
+        match laverock_core::encode_wav_channels(&audio.samples, audio.sample_rate, audio.channels)
+        {
+            Ok(b) => b,
+            Err(e) => return core_error(e),
+        };
+    let engine_kind = state
+        .manager
+        .list()
+        .into_iter()
+        .find(|e| e.id == engine_id)
+        .map(|e| e.kind)
+        .unwrap_or_else(|| "speech".to_string());
+    if let Err(e) = state.history.add_typed(
         &engine_id,
         &engine_display(&state.manager, &engine_id),
+        &engine_kind,
         &spoken_text,
         &wav_bytes,
         audio.sample_rate,
+        audio.channels,
+        None,
     ) {
         tracing::warn!("history add failed: {e}");
     }

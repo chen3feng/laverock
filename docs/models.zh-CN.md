@@ -26,6 +26,7 @@ Laverock 的安装包不含模型权重：包里是应用本身，模型按需�
 ./scripts/download-chatterbox.sh   # Chatterbox 多语种，venv + 约 5 GB
 ./scripts/download-indextts2.sh    # IndexTTS-2，3.6 GB Q8_0 GGUF（共用运行时）
 ./scripts/download-mosstts.sh      # MOSS-TTS-Delay，仅 macOS/Linux，约 10 GB 权重
+./scripts/download-ace-step.sh     # ACE-Step 1.5 Turbo 音乐，BF16 约 10 GB（共用运行时）
 
 # 变体
 QWEN3TTS_VARIANT=custom ./scripts/download-qwen3tts.sh    # 9 个预置音色
@@ -35,6 +36,7 @@ MING3TTS_VARIANT=multilingual ./scripts/download-ming3tts.sh
 MING3TTS_VARIANT=ip ./scripts/download-ming3tts.sh        # Ming 内置音色
 LONGCAT_MODEL=meituan-longcat/LongCat-AudioDiT-3.5B ./scripts/download-longcat.sh
 DOTS_MODEL=dots.tts-mf ./scripts/download-dots.sh         # 4 步 MeanFlow 导出
+ACE_STEP_QUANT=q8_0 ./scripts/download-ace-step.sh        # 约 6.2 GB 音乐导出
 ```
 
 脚本会读取 **设置 → 下载网络** 中的代理与镜像设置（`HTTP_PROXY` /
@@ -68,6 +70,7 @@ DOTS_MODEL=dots.tts-mf ./scripts/download-dots.sh         # 4 步 MeanFlow 导�
 | `chatterbox` | Chatterbox Multilingual | 克隆 | 23 种语言 | 约 5 GB（含 venv） |
 | `indextts2` | IndexTTS-2 Q8_0 | 克隆 | 中、英 | 约 3.6 GB |
 | `mosstts` | MOSS-TTS-Delay | 克隆、多语种 | 20 种语言 | 约 10 GB（安装峰值约 16 GB） |
+| `ace-step` | ACE-Step 1.5 Turbo | 文字生成音乐、歌词 | 50+ 种语言 | 约 10 GB（BF16）/ 约 6.2 GB（Q8_0） |
 | `enhance` | 人声清理（GTCRN + BS-RoFormer） | 录音清理 | — | 约 165 MB |
 
 四个 Ming 条目共用同一份权重、同一个 venv 和同一份运行时，只有第一个需要完整
@@ -90,6 +93,7 @@ audio.cpp 运行时，每段录音大约耗时 1–2 倍时长，因此需要手
 | `instruct` | 接受语气/语速描述，例如「用温和的语气，语速稍慢」 |
 | `multilingual` | 可以朗读参考音频之外的语言 |
 | `stt` | 语音识别，用于转写参考音频；不是 TTS 引擎 |
+| `music` | 文字生成音乐 / 歌词生成歌曲；只出现在音乐页，不进入语音合成页 |
 
 ## 各引擎说明
 
@@ -166,6 +170,16 @@ M4 Pro 上 Q8_0 检查点实测 RTF 1.47，加载后内存约 4.1 GB（见「速
 后端，而且每隔几次运行就会破坏宿主堆内存，因此模型目录不再在 Windows 上提供它。
 运行时的 `-ngl` 可以把层卸载到自编译的 CUDA 版本，但在钉住的版本上，所有触碰 GPU
 的运行都崩溃了（见「速度」），所以也没有 GPU 这条退路。
+
+**ACE-Step 1.5 Turbo** —— 运行在共享 audio.cpp 运行时上的音乐生成模型。
+音乐页把风格描述作为 `text`，歌词作为可选的 `lyrics`；歌词留空即生成纯音乐。
+`duration_sec` 请求歌曲长度（规划器可能提前结束），Turbo 的 `num_steps`
+最多 8 步，`guidance_scale` 会被 Turbo 检查点忽略。输出为 48 kHz 立体声。
+翻唱、重绘、续写等编辑路由暂未开放。
+
+建议 12 GB 以上显存。8 GB 显卡可走 CPU/offload；安装时设置
+`ACE_STEP_QUANT=q8_0` 可把下载减半，但量化后的 planner 偶尔会采样失败，
+BF16 是更稳妥的默认值。
 
 **SenseVoice** —— 可选的本地语音识别，覆盖中英日韩粤。安装后，录音或上传的参考
 音频会自动转写并填入文字稿栏；「转写」按钮可以手动重跑。
@@ -286,7 +300,8 @@ INT8 模型没有可加速的算子。上表 Kokoro 一行仍是 INT8 的数字�
 | 功能 | 要求 |
 | --- | --- |
 | ONNX 引擎（ZipVoice、Kokoro、SenseVoice） | 除应用外无额外要求 |
-| audio.cpp 引擎（dots、CosyVoice、VoxCPM2、IndexTTS-2） | 下载预编译 CLI 与常驻服务 |
+| audio.cpp 引擎（dots、CosyVoice、VoxCPM2、IndexTTS-2、ACE-Step） | 下载预编译 CLI 与常驻服务 |
+| ACE-Step 音乐 | 建议 12 GB 以上显存；8 GB 显卡使用 CPU/offload |
 | Python 引擎（Qwen3-TTS、LongCat、Ming、Chatterbox） | Python 3.10–3.12；脚本自动创建隔离 venv |
 | MOSS-TTS | 仅 macOS/Linux（Windows 上不提供）；下载预编译运行时；一次性转换分词器需要 Python 3 |
 | Windows 上应用内安装 | Git for Windows 提供的 `bash` |

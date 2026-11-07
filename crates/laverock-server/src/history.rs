@@ -26,9 +26,16 @@ pub struct HistoryMeta {
     pub created_at: u64,
     pub engine_id: String,
     pub engine_name: String,
+    /// `"music"` for music generation, `"speech"` otherwise (older entries
+    /// predate the field and default to speech).
+    #[serde(default = "default_kind")]
+    pub kind: String,
     pub text: String,
     pub duration_secs: f32,
     pub bytes: u64,
+    /// 1 for speech, 2 for music. The WAV in the entry keeps this shape.
+    #[serde(default = "default_channels")]
+    pub channels: u16,
     /// Shared id for a batch of variants produced by one request.
     /// `None` for a single standalone entry.
     #[serde(default)]
@@ -36,6 +43,14 @@ pub struct HistoryMeta {
     /// Position within the generation batch (0-based). `None` for single.
     #[serde(default)]
     pub index: Option<u32>,
+}
+
+fn default_kind() -> String {
+    "speech".to_string()
+}
+
+fn default_channels() -> u16 {
+    1
 }
 
 pub struct HistoryStore {
@@ -86,26 +101,20 @@ impl HistoryStore {
         format!("g{}-{:04x}", now_secs(), random_suffix())
     }
 
-    pub fn add(
-        &self,
-        engine_id: &str,
-        engine_name: &str,
-        text: &str,
-        wav: &[u8],
-        sample_rate: i32,
-    ) -> Result<HistoryMeta> {
-        self.add_variant(engine_id, engine_name, text, wav, sample_rate, None)
-    }
-
     /// Add one entry. `batch` marks the entry as the Nth take of a
     /// multi-sample generation; single standalone entries pass `None`.
-    pub fn add_variant(
+    /// `kind` is `"music"` for music generation, `"speech"` otherwise;
+    /// `channels` records the WAV's spatial shape.
+    #[allow(clippy::too_many_arguments)]
+    pub fn add_typed(
         &self,
         engine_id: &str,
         engine_name: &str,
+        kind: &str,
         text: &str,
         wav: &[u8],
         sample_rate: i32,
+        channels: u16,
         batch: Option<(String, u32)>,
     ) -> Result<HistoryMeta> {
         let duration_secs = match decode_wav_bytes(wav, sample_rate) {
@@ -126,9 +135,11 @@ impl HistoryStore {
             created_at,
             engine_id: engine_id.to_string(),
             engine_name: engine_name.to_string(),
+            kind: kind.to_string(),
             text: text.chars().take(2000).collect(),
             duration_secs,
             bytes: wav.len() as u64,
+            channels: channels.max(1),
             generation: batch.as_ref().map(|(g, _)| g.clone()),
             index: batch.map(|(_, i)| i),
         };
@@ -294,22 +305,26 @@ mod tests {
         let gen = store.new_generation_id();
 
         let a = store
-            .add_variant(
+            .add_typed(
                 "zipvoice",
                 "ZipVoice",
+                "speech",
                 "你好",
                 &wav_bytes(),
                 24_000,
+                1,
                 Some((gen.clone(), 0)),
             )
             .unwrap();
         let b = store
-            .add_variant(
+            .add_typed(
                 "zipvoice",
                 "ZipVoice",
+                "speech",
                 "你好",
                 &wav_bytes(),
                 24_000,
+                1,
                 Some((gen.clone(), 1)),
             )
             .unwrap();
@@ -322,10 +337,36 @@ mod tests {
 
         // A standalone entry is not part of the batch.
         let single = store
-            .add("zipvoice", "ZipVoice", "再见", &wav_bytes(), 24_000)
+            .add_typed(
+                "zipvoice",
+                "ZipVoice",
+                "speech",
+                "再见",
+                &wav_bytes(),
+                24_000,
+                1,
+                None,
+            )
             .unwrap();
         assert_eq!(single.generation, None);
         assert_eq!(single.index, None);
+
+        // Music keeps its kind and channel count so the UI can label it.
+        let stereo = laverock_core::encode_wav_channels(&[0.0f32; 4_000], 48_000, 2).unwrap();
+        let music = store
+            .add_typed(
+                "ace-step",
+                "ACE-Step",
+                "music",
+                "calm piano",
+                &stereo,
+                48_000,
+                2,
+                None,
+            )
+            .unwrap();
+        assert_eq!(music.kind, "music");
+        assert_eq!(music.channels, 2);
 
         // Reload from disk preserves the grouping fields.
         let reopened = HistoryStore::open(&dir).unwrap();

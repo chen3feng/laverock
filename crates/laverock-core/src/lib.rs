@@ -23,8 +23,8 @@ mod transcribe;
 mod zipvoice;
 
 pub use audio::{
-    cap_silences, decode_wav, decode_wav_channels, encode_wav, resample_mono, silence_profile,
-    trim_reference, trim_silence, trim_trailing_low_level, SilenceProfile,
+    cap_silences, decode_wav, decode_wav_channels, encode_wav, encode_wav_channels, resample_mono,
+    silence_profile, trim_reference, trim_silence, trim_trailing_low_level, SilenceProfile,
     VOXCPM2_MAX_REFERENCE_SECS,
 };
 pub use enhance::{EnhanceMode, Enhancer, DENOISE_MODELS, ENHANCE_DIR, SEPARATION_MODEL};
@@ -33,7 +33,7 @@ pub use manager::{
 };
 pub use manifest::{
     AudioCppManifest, ChatterboxManifest, EngineKind, KokoroManifest, Localized, LongCatManifest,
-    Manifest, Ming3TtsManifest, MossTtsManifest, ParamKind, ParamOption, ParamSpec,
+    Manifest, Ming3TtsManifest, MossTtsManifest, MusicManifest, ParamKind, ParamOption, ParamSpec,
     Qwen3TtsManifest, SttManifest, SynthDefaults, ZipVoiceManifest,
 };
 pub use onnx::model_variant;
@@ -89,11 +89,27 @@ impl CoreError {
 
 pub type Result<T> = std::result::Result<T, CoreError>;
 
-/// Synthesized mono PCM at `sample_rate`.
+/// Synthesized PCM at `sample_rate`.
+///
+/// Speech engines return mono (`channels == 1`); music engines keep the
+/// model's native stereo, so callers must encode with `channels` rather
+/// than assuming mono.
 #[derive(Debug, Clone)]
 pub struct Audio {
     pub samples: Vec<f32>,
     pub sample_rate: i32,
+    pub channels: u16,
+}
+
+impl Audio {
+    /// Mono PCM, the shape every speech engine returns.
+    pub fn mono(samples: Vec<f32>, sample_rate: i32) -> Self {
+        Self {
+            samples,
+            sample_rate,
+            channels: 1,
+        }
+    }
 }
 
 /// Status of the running service, surfaced over HTTP.
