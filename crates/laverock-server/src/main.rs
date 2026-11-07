@@ -43,6 +43,7 @@ use axum::{
 };
 use laverock_core::{
     decode_wav, encode_wav_channels, trim_silence, Audio, CoreError, EngineManager, SynthRequest,
+    TaskKind,
 };
 use models::ModelService;
 use profiles::ProfileStore;
@@ -1164,8 +1165,25 @@ async fn import_profile(
 
 // ---------------------------------------------------------------- history
 
-async fn list_history(State(state): State<AppState>) -> Json<serde_json::Value> {
-    Json(serde_json::json!({ "history": state.history.list() }))
+#[derive(Debug, serde::Deserialize)]
+struct HistoryQuery {
+    task: Option<String>,
+}
+
+async fn list_history(
+    State(state): State<AppState>,
+    Query(query): Query<HistoryQuery>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let task = match query.task.as_deref() {
+        None | Some("") => None,
+        Some(raw) => Some(
+            TaskKind::parse(raw)
+                .ok_or_else(|| ApiError::bad_request(format!("unknown task: {raw}")))?,
+        ),
+    };
+    Ok(Json(
+        serde_json::json!({ "history": state.history.list_by_task(task) }),
+    ))
 }
 
 async fn delete_history(
@@ -1464,6 +1482,7 @@ async fn synthesize(
         .as_ref()
         .map(|e| e.kind.clone())
         .unwrap_or_else(|| "speech".to_string());
+    let task = TaskKind::from_output_kind(&engine_kind);
 
     // The desktop UI asks for a Server-Sent-Events stream so long Qwen
     // generations can report progress; other clients keep getting the WAV.
@@ -1504,6 +1523,7 @@ async fn synthesize(
         if let Err(e) = history.add_typed(
             &engine_id,
             &engine_name,
+            task,
             &engine_kind,
             &text,
             &wav,
@@ -1588,6 +1608,7 @@ async fn synthesize(
                         if let Err(e) = history.add_typed(
                             &engine_id,
                             &engine_name,
+                            task,
                             &engine_kind,
                             &history_text,
                             &wav,

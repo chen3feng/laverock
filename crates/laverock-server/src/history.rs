@@ -4,7 +4,7 @@
 //!   <data_dir>/history/<id>/meta.json
 //!   <data_dir>/history/<id>/audio.wav
 
-use laverock_core::{decode_wav, CoreError, Result};
+use laverock_core::{decode_wav, CoreError, Result, TaskKind};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
@@ -30,6 +30,11 @@ pub struct HistoryMeta {
     /// predate the field and default to speech).
     #[serde(default = "default_kind")]
     pub kind: String,
+    /// The operation that produced the entry. `kind` only says what the
+    /// output is; future transcription and voice-conversion entries need
+    /// the task to pick a card renderer and a filter.
+    #[serde(default)]
+    pub task: TaskKind,
     pub text: String,
     pub duration_secs: f32,
     pub bytes: u64,
@@ -77,7 +82,14 @@ impl HistoryStore {
                 .map_err(CoreError::from)
                 .and_then(|raw| serde_json::from_str::<HistoryMeta>(&raw).map_err(CoreError::from))
             {
-                Ok(meta) => entries.push(meta),
+                Ok(mut meta) => {
+                    // Entries written before `task` existed: infer it from
+                    // the output kind instead of leaving everything as Tts.
+                    if meta.task == TaskKind::Tts {
+                        meta.task = TaskKind::from_output_kind(&meta.kind);
+                    }
+                    entries.push(meta);
+                }
                 Err(e) => tracing::warn!(
                     "skipping unreadable history entry {}: {e}",
                     entry.path().display()
@@ -91,8 +103,13 @@ impl HistoryStore {
         })
     }
 
-    pub fn list(&self) -> Vec<HistoryMeta> {
-        self.entries.lock().expect("history lock").clone()
+    /// Entries for one task, or all of them when `task` is `None`.
+    pub fn list_by_task(&self, task: Option<TaskKind>) -> Vec<HistoryMeta> {
+        let entries = self.entries.lock().expect("history lock");
+        match task {
+            Some(task) => entries.iter().filter(|m| m.task == task).cloned().collect(),
+            None => entries.clone(),
+        }
     }
 
     /// A fresh group id so several `add_variant` calls from one request can
@@ -103,13 +120,15 @@ impl HistoryStore {
 
     /// Add one entry. `batch` marks the entry as the Nth take of a
     /// multi-sample generation; single standalone entries pass `None`.
-    /// `kind` is `"music"` for music generation, `"speech"` otherwise;
-    /// `channels` records the WAV's spatial shape.
+    /// `task` is the operation, `kind` the output medium (`"music"`,
+    /// `"speech"`, later `"transcript"`), and `channels` the WAV's
+    /// spatial shape.
     #[allow(clippy::too_many_arguments)]
     pub fn add_typed(
         &self,
         engine_id: &str,
         engine_name: &str,
+        task: TaskKind,
         kind: &str,
         text: &str,
         wav: &[u8],
@@ -136,6 +155,7 @@ impl HistoryStore {
             engine_id: engine_id.to_string(),
             engine_name: engine_name.to_string(),
             kind: kind.to_string(),
+            task,
             text: text.chars().take(2000).collect(),
             duration_secs,
             bytes: wav.len() as u64,
@@ -308,6 +328,7 @@ mod tests {
             .add_typed(
                 "zipvoice",
                 "ZipVoice",
+                TaskKind::Tts,
                 "speech",
                 "你好",
                 &wav_bytes(),
@@ -320,6 +341,7 @@ mod tests {
             .add_typed(
                 "zipvoice",
                 "ZipVoice",
+                TaskKind::Tts,
                 "speech",
                 "你好",
                 &wav_bytes(),
@@ -340,6 +362,7 @@ mod tests {
             .add_typed(
                 "zipvoice",
                 "ZipVoice",
+                TaskKind::Tts,
                 "speech",
                 "再见",
                 &wav_bytes(),
@@ -357,6 +380,7 @@ mod tests {
             .add_typed(
                 "ace-step",
                 "ACE-Step",
+                TaskKind::Music,
                 "music",
                 "calm piano",
                 &stereo,
@@ -366,17 +390,59 @@ mod tests {
             )
             .unwrap();
         assert_eq!(music.kind, "music");
+        assert_eq!(music.task, TaskKind::Music);
         assert_eq!(music.channels, 2);
+        assert_eq!(a.task, TaskKind::Tts);
+        assert_eq!(store.list_by_task(Some(TaskKind::Music)).len(), 1);
+        assert_eq!(store.list_by_task(Some(TaskKind::Tts)).len(), 3);
+        assert_eq!(store.list_by_task(None).len(), 4);
 
         // Reload from disk preserves the grouping fields.
         let reopened = HistoryStore::open(&dir).unwrap();
-        let metas = reopened.list();
+        let metas = reopened.list_by_task(None);
         assert!(metas
             .iter()
             .any(|m| m.id == a.id && m.generation.as_deref() == Some(gen.as_str())));
         assert!(metas
             .iter()
             .any(|m| m.id == single.id && m.generation.is_none()));
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn old_entries_infer_task_from_kind() {
+        let dir = temp_dir();
+        let store = HistoryStore::open(&dir).unwrap();
+        let stereo = laverock_core::encode_wav_channels(&[0.0f32; 4_000], 48_000, 2).unwrap();
+        let entry = store
+            .add_typed(
+                "ace-step",
+                "ACE-Step",
+                TaskKind::Music,
+                "music",
+                "calm piano",
+                &stereo,
+                48_000,
+                2,
+                None,
+            )
+            .unwrap();
+
+        // Simulate an entry written before `task` existed.
+        let path = dir.join("history").join(&entry.id).join("meta.json");
+        let mut value: serde_json::Value =
+            serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        value.as_object_mut().unwrap().remove("task");
+        fs::write(&path, serde_json::to_vec(&value).unwrap()).unwrap();
+
+        let reopened = HistoryStore::open(&dir).unwrap();
+        let meta = reopened
+            .list_by_task(None)
+            .into_iter()
+            .find(|m| m.id == entry.id)
+            .unwrap();
+        assert_eq!(meta.task, TaskKind::Music);
 
         let _ = fs::remove_dir_all(&dir);
     }

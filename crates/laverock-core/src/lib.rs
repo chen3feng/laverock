@@ -19,6 +19,7 @@ mod mosstts;
 mod onnx;
 mod qwen3tts;
 pub mod segment;
+mod task;
 mod transcribe;
 mod zipvoice;
 
@@ -37,6 +38,7 @@ pub use manifest::{
     Qwen3TtsManifest, SttManifest, SynthDefaults, ZipVoiceManifest,
 };
 pub use onnx::model_variant;
+pub use task::TaskKind;
 pub use transcribe::Transcriber;
 
 /// Re-exported for engines that need the underlying runtime.

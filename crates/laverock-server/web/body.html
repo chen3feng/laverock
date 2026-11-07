@@ -260,9 +260,10 @@
     <!-- ================= 历史 ================= -->
     <section id="page-history" class="page">
       <div class="page-head" style="display:flex;align-items:flex-end;justify-content:space-between;gap:12px;flex-wrap:wrap">
-        <div><h1 data-i18n="history.title">历史</h1><p class="sub" data-i18n="history.sub">本机生成的语音，最多保留 100 条或 1 GB。</p></div>
+        <div><h1 data-i18n="history.title">历史</h1><p class="sub" data-i18n="history.sub">本机生成的音频与文本记录，最多保留 100 条或 1 GB。</p></div>
         <button class="ghost danger" id="clearHistory" type="button" data-i18n="history.clear" hidden>清空全部</button>
       </div>
+      <div class="history-filters" id="historyFilters" role="group"></div>
       <div id="historyList"></div>
       <div class="empty" id="historyEmpty" data-i18n="history.empty" hidden>还没有生成记录。去「合成」生成第一条吧。</div>
     </section>

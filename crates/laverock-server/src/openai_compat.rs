@@ -21,7 +21,7 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
-use laverock_core::{EngineManager, SynthRequest};
+use laverock_core::{EngineManager, SynthRequest, TaskKind};
 
 use crate::{export, profiles::ProfileStore, AppState};
 
@@ -391,6 +391,7 @@ pub async fn create_speech(
     if let Err(e) = state.history.add_typed(
         &engine_id,
         &engine_display(&state.manager, &engine_id),
+        TaskKind::from_output_kind(&engine_kind),
         &engine_kind,
         &spoken_text,
         &wav_bytes,
