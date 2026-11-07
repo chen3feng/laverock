@@ -647,7 +647,9 @@ lv_fetch_parallel() {
     [ "$attempt" -lt 3 ] && lv_stage_key stage_resume "attempt=$((attempt + 1))"
   done
 
-  : >"$dest"
+  # Verify every slice before creating <dest>: appending parts as we go
+  # would leave a short file behind if a later slice turned out wrong,
+  # and the parts already consumed could no longer be resumed.
   for i in $(seq 0 $((workers - 1))); do
     want=$(lv_slice_size "$i")
     have=$(lv_filesize "$dest.part$i")
@@ -655,10 +657,14 @@ lv_fetch_parallel() {
       echo "part $i is $have bytes, expected $want" >&2
       return 1
     fi
+  done
+  : >"$dest"
+  for i in $(seq 0 $((workers - 1))); do
     cat "$dest.part$i" >>"$dest"
     rm -f "$dest.part$i"
   done
   if [ "$(lv_filesize "$dest")" -ne "$total" ]; then
+    rm -f "$dest"
     echo "assembled file has the wrong size" >&2
     return 1
   fi
@@ -852,17 +858,20 @@ lv_hf_download_repo() {
 #
 # Download one LFS file from <repo>'s main branch via a resolve URL, using
 # lv_fetch_parallel with the server-advertised size (resumable ranged
-# slices). A non-empty existing <dest> is left untouched.
+# slices). An existing <dest> is reused only when it already has the
+# advertised size: a short file left by an interrupted assembly must not
+# be mistaken for a finished download.
 lv_hf_download_file() {
   local repo="$1" rel="$2" dest="$3" workers="${4:-8}" label="${5:-Download $rel}"
-  if [ -s "$dest" ]; then
-    return 0
-  fi
   local url; url="$(lv_hf_base)/$repo/resolve/main/${rel// /%20}"
   local total; total="$(lv_content_length "$url")"
   if [ "${total:-0}" -le 0 ]; then
     echo "cannot determine the download size for $url" >&2
     return 1
+  fi
+  if [ -s "$dest" ]; then
+    [ "$(lv_filesize "$dest")" -eq "$total" ] && return 0
+    rm -f "$dest"
   fi
   lv_stage "$label"
   mkdir -p "$(dirname "$dest")"
