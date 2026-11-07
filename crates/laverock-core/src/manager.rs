@@ -98,6 +98,9 @@ impl std::fmt::Debug for SynthRequest {
 pub struct EngineInfo {
     pub id: String,
     pub kind: String,
+    /// What the model does (synthesis, music, transcription, …). The UI
+    /// groups models and picks a workspace from this, not from `kind`.
+    pub task: crate::TaskKind,
     pub name: String,
     /// Localized one-line description from the manifest; empty when the
     /// manifest has none (the server fills built-in models from the
@@ -193,6 +196,7 @@ impl EngineManager {
                 EngineInfo {
                     id: m.id.clone(),
                     kind: m.kind.as_str().to_string(),
+                    task: m.task(),
                     name: m.name.clone(),
                     description: m.description.clone(),
                     languages: m.languages.clone(),

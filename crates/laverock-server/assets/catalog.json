@@ -1,6 +1,7 @@
 [
   {
     "id": "zipvoice",
+    "task": "tts",
     "dir": "sherpa-onnx-zipvoice-distill-int8-zh-en-emilia",
     "name": "ZipVoice Distill INT8",
     "description": {
@@ -25,6 +26,7 @@
   },
   {
     "id": "kokoro",
+    "task": "tts",
     "dir": "kokoro-int8-multi-lang-v1_0",
     "name": "Kokoro 82M",
     "description": {
@@ -55,6 +57,7 @@
   },
   {
     "id": "stt-sensevoice",
+    "task": "asr",
     "dir": "sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17-int8",
     "name": "SenseVoice Small (INT8)",
     "description": {
@@ -81,6 +84,7 @@
   },
   {
     "id": "voxcpm2",
+    "task": "tts",
     "dir": "voxcpm2",
     "name": "VoxCPM2",
     "description": {
@@ -112,6 +116,7 @@
   },
   {
     "id": "longcat",
+    "task": "tts",
     "dir": "longcat",
     "name": "LongCat-AudioDiT 1B",
     "description": {
@@ -136,6 +141,7 @@
   },
   {
     "id": "dots",
+    "task": "tts",
     "dir": "dots",
     "name": "dots.tts SOAR (Q8_0)",
     "description": {
@@ -170,6 +176,7 @@
   },
   {
     "id": "ace-step",
+    "task": "music",
     "dir": "ace-step",
     "name": "ACE-Step 1.5 Turbo",
     "description": {
@@ -194,6 +201,7 @@
   },
   {
     "id": "cosyvoice",
+    "task": "tts",
     "dir": "cosyvoice",
     "name": "CosyVoice3 0.5B (Q8_0)",
     "description": {
@@ -227,6 +235,7 @@
   },
   {
     "id": "qwen3tts",
+    "task": "tts",
     "dir": "qwen3tts",
     "name": "Qwen3-TTS 0.6B",
     "description": {
@@ -261,6 +270,7 @@
   },
   {
     "id": "qwen3tts-custom",
+    "task": "tts",
     "dir": "qwen3tts-custom",
     "name": "Qwen3-TTS 0.6B (custom voice)",
     "description": {
@@ -296,6 +306,7 @@
   },
   {
     "id": "qwen3tts-design",
+    "task": "tts",
     "dir": "qwen3tts-design",
     "name": "Qwen3-TTS 1.7B (voice design)",
     "description": {
@@ -331,6 +342,7 @@
   },
   {
     "id": "ming3tts",
+    "task": "tts",
     "dir": "ming3tts",
     "name": "Ming-3.0-tts 0.5B (voice clone)",
     "description": {
@@ -362,6 +374,7 @@
   },
   {
     "id": "ming3tts-design",
+    "task": "tts",
     "dir": "ming3tts-design",
     "name": "Ming-3.0-tts 0.5B (voice design)",
     "description": {
@@ -394,6 +407,7 @@
   },
   {
     "id": "ming3tts-multilingual",
+    "task": "tts",
     "dir": "ming3tts-multilingual",
     "name": "Ming-3.0-tts 0.5B (multilingual clone)",
     "description": {
@@ -426,6 +440,7 @@
   },
   {
     "id": "ming3tts-ip",
+    "task": "tts",
     "dir": "ming3tts-ip",
     "name": "Ming-3.0-tts 0.5B (preset voices)",
     "description": {
@@ -452,6 +467,7 @@
   },
   {
     "id": "chatterbox",
+    "task": "tts",
     "dir": "chatterbox",
     "name": "Chatterbox Multilingual (voice clone)",
     "description": {
@@ -498,6 +514,7 @@
   },
   {
     "id": "indextts2",
+    "task": "tts",
     "dir": "indextts2",
     "name": "IndexTTS-2 (voice clone)",
     "description": {
@@ -522,6 +539,7 @@
   },
   {
     "id": "mosstts",
+    "task": "tts",
     "dir": "mosstts",
     "name": "MOSS-TTS (native llama.cpp)",
     "description": {
@@ -566,6 +584,7 @@
   },
   {
     "id": "enhance",
+    "task": "process",
     "dir": "enhance",
     "name": "Voice cleanup",
     "description": {

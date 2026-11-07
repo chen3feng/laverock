@@ -13,7 +13,7 @@ use crate::{
     settings::{ProxyMode, SettingsStore, PROXY_VARS},
 };
 use laverock_core::i18n::{self, Key};
-use laverock_core::{CoreError, EngineManager, Localized, Result};
+use laverock_core::{CoreError, EngineManager, Localized, Result, TaskKind};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
@@ -38,6 +38,10 @@ struct CatalogEntry {
     size: String,
     languages: Vec<String>,
     capabilities: Vec<String>,
+    /// The operation this model performs. Catalog entries declare it; the
+    /// capability fallback keeps third-party catalogs working.
+    #[serde(default)]
+    task: Option<TaskKind>,
     script: String,
     #[serde(default)]
     env: BTreeMap<String, String>,
@@ -54,6 +58,25 @@ struct CatalogEntry {
     /// weights instead.
     #[serde(default)]
     marker: Option<String>,
+}
+
+impl CatalogEntry {
+    /// Declared task, or one inferred from the capabilities for catalogs
+    /// written before the field existed.
+    fn task(&self) -> TaskKind {
+        self.task.unwrap_or_else(|| {
+            let has = |cap: &str| self.capabilities.iter().any(|c| c == cap);
+            if has("music") {
+                TaskKind::Music
+            } else if has("stt") {
+                TaskKind::Asr
+            } else if has("enhance") {
+                TaskKind::Process
+            } else {
+                TaskKind::Tts
+            }
+        })
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -109,6 +132,9 @@ pub struct ModelView {
     pub size: String,
     pub languages: Vec<String>,
     pub capabilities: Vec<String>,
+    /// What the model does; the Models page groups cards by it and offers
+    /// a shortcut to the matching workspace.
+    pub task: TaskKind,
     pub note: Option<String>,
     /// Set when the catalog excludes this model on the current OS; the
     /// UI shows it and disables the download.
@@ -227,6 +253,7 @@ impl ModelService {
                 size: entry.size.clone(),
                 languages: entry.languages.clone(),
                 capabilities: entry.capabilities.clone(),
+                task: entry.task(),
                 note: entry
                     .note
                     .as_ref()
@@ -265,6 +292,7 @@ impl ModelService {
                 size: String::new(),
                 languages: engine.languages,
                 capabilities: engine.capabilities,
+                task: engine.task,
                 note: None,
                 unsupported: None,
                 installed: true,
@@ -1080,6 +1108,24 @@ mod tests {
     }
 
     #[test]
+    fn catalog_tasks_match_their_workflows() {
+        let task = |id: &str| {
+            catalog()
+                .iter()
+                .find(|e| e.id == id)
+                .unwrap_or_else(|| panic!("{id} is cataloged"))
+                .task()
+        };
+        assert_eq!(task("zipvoice"), TaskKind::Tts);
+        assert_eq!(task("stt-sensevoice"), TaskKind::Asr);
+        assert_eq!(task("ace-step"), TaskKind::Music);
+        assert_eq!(task("enhance"), TaskKind::Process);
+        // Every entry names its task explicitly so grouping never depends
+        // on capability guessing.
+        assert!(catalog().iter().all(|e| e.task.is_some()));
+    }
+
+    #[test]
     fn every_catalog_entry_has_a_description() {
         for entry in catalog() {
             assert!(
@@ -1223,6 +1269,7 @@ mod tests {
             size: String::new(),
             languages: Vec::new(),
             capabilities: Vec::new(),
+            task: None,
             script: "fake.sh".to_string(),
             env: BTreeMap::new(),
             note: None,
@@ -1328,6 +1375,7 @@ mod tests {
             size: String::new(),
             languages: Vec::new(),
             capabilities: Vec::new(),
+            task: None,
             script: "x.sh".into(),
             env: BTreeMap::new(),
             note: Some(Localized::Translations {
@@ -1465,6 +1513,7 @@ mod tests {
             size: String::new(),
             languages: Vec::new(),
             capabilities: Vec::new(),
+            task: None,
             script: "m.sh".into(),
             env: BTreeMap::new(),
             note: None,
