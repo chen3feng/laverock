@@ -116,7 +116,9 @@ pub fn synthesize_long(
                 engine.name()
             )));
         }
-        return engine.synthesize(req);
+        let audio = engine.synthesize(req)?;
+        emit(req, &audio)?;
+        return Ok(audio);
     }
 
     let total = segments.len();
@@ -135,27 +137,54 @@ pub fn synthesize_long(
         }
         let mut piece_req = req.clone();
         piece_req.text = segment;
-        let audio = engine.synthesize(&piece_req)?;
+        let mut audio = engine.synthesize(&piece_req)?;
+        // The pause belongs to the piece that follows, so the streamed
+        // pieces concatenate to exactly the merged result.
+        if merged.is_some() && policy.pause_ms > 0 {
+            audio = with_leading_pause(audio, policy.pause_ms);
+        }
+        emit(req, &audio)?;
         match &mut merged {
             None => merged = Some(audio),
-            Some(merged) => join(merged, audio, policy.pause_ms)?,
+            Some(merged) => join(merged, audio)?,
         }
     }
     merged.ok_or_else(|| CoreError::Synth("long-text split produced no segments".into()))
 }
 
-/// Append `part` to `merged`, leaving `pause_ms` of silence between them.
-fn join(merged: &mut Audio, part: Audio, pause_ms: u32) -> Result<()> {
+/// Hand a finished piece to the streaming sink, if the caller asked for one.
+/// `false` means the consumer went away, so the rest is not worth generating.
+fn emit(req: &SynthRequest, audio: &Audio) -> Result<()> {
+    if let Some(sink) = &req.audio {
+        if !sink(audio.clone()) {
+            return Err(CoreError::Synth("audio stream closed".into()));
+        }
+    }
+    Ok(())
+}
+
+/// Prepend `pause_ms` of silence, for a piece that follows another one.
+pub fn with_leading_pause(mut audio: Audio, pause_ms: u32) -> Audio {
+    if pause_ms == 0 {
+        return audio;
+    }
+    let samples = (audio.sample_rate.max(0) as f64 * f64::from(pause_ms) / 1000.0).round() as usize;
+    if samples > 0 {
+        let mut padded = Vec::with_capacity(samples + audio.samples.len());
+        padded.resize(samples, 0.0);
+        padded.extend_from_slice(&audio.samples);
+        audio.samples = padded;
+    }
+    audio
+}
+
+/// Append `part` to `merged`. The inter-piece pause is already in `part`.
+fn join(merged: &mut Audio, part: Audio) -> Result<()> {
     if merged.sample_rate != part.sample_rate {
         return Err(CoreError::Synth(format!(
             "engine returned mixed sample rates ({} Hz then {} Hz)",
             merged.sample_rate, part.sample_rate
         )));
-    }
-    if pause_ms > 0 {
-        let samples =
-            (merged.sample_rate.max(0) as f64 * f64::from(pause_ms) / 1000.0).round() as usize;
-        merged.samples.extend(std::iter::repeat_n(0.0, samples));
     }
     merged.samples.extend_from_slice(&part.samples);
     Ok(())
@@ -437,5 +466,80 @@ mod tests {
         let audio = synthesize_long(&engine, &request("一句话。"), policy).unwrap();
         assert_eq!(*texts.lock().unwrap(), vec!["一句话。"]);
         assert_eq!(audio.samples.len(), 1);
+    }
+
+    #[test]
+    fn short_text_is_streamed_once() {
+        let engine = Recorder {
+            texts: Arc::new(Mutex::new(Vec::new())),
+            sample_rate: 1000,
+        };
+        let policy = LongTextPolicy {
+            max_chars: 200,
+            pause_ms: 100,
+            launch_pause_ms: 0,
+        };
+        let seen: Arc<Mutex<Vec<Audio>>> = Arc::new(Mutex::new(Vec::new()));
+        let sink_seen = seen.clone();
+        let mut req = request("一句话。");
+        req.audio = Some(Arc::new(move |audio| {
+            sink_seen.lock().unwrap().push(audio);
+            true
+        }));
+        synthesize_long(&engine, &req, policy).unwrap();
+        assert_eq!(seen.lock().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn streaming_sink_receives_each_piece_in_order() {
+        let engine = Recorder {
+            texts: Arc::new(Mutex::new(Vec::new())),
+            sample_rate: 1000,
+        };
+        let policy = LongTextPolicy {
+            max_chars: 8,
+            pause_ms: 100,
+            launch_pause_ms: 0,
+        };
+        let seen: Arc<Mutex<Vec<Audio>>> = Arc::new(Mutex::new(Vec::new()));
+        let sink_seen = seen.clone();
+        let mut req = request("句子一。句子二。句子三。");
+        req.audio = Some(Arc::new(move |audio| {
+            sink_seen.lock().unwrap().push(audio);
+            true
+        }));
+        let merged = synthesize_long(&engine, &req, policy).unwrap();
+
+        let seen = seen.lock().unwrap();
+        assert_eq!(seen.len(), 2);
+        // Concatenating what the sink saw reproduces the merged audio,
+        // including the pause in front of the second piece.
+        let joined: Vec<f32> = seen
+            .iter()
+            .flat_map(|audio| audio.samples.iter().copied())
+            .collect();
+        assert_eq!(joined, merged.samples);
+        assert_eq!(seen[1].samples[0], 0.0);
+        assert_eq!(seen[1].samples[100], 1.0);
+    }
+
+    #[test]
+    fn a_closed_sink_stops_segmented_synthesis() {
+        let engine = Recorder {
+            texts: Arc::new(Mutex::new(Vec::new())),
+            sample_rate: 1000,
+        };
+        let policy = LongTextPolicy {
+            max_chars: 8,
+            pause_ms: 100,
+            launch_pause_ms: 0,
+        };
+        let mut req = request("句子一。句子二。句子三。");
+        req.audio = Some(Arc::new(|_| false));
+        let err = synthesize_long(&engine, &req, policy).unwrap_err();
+        assert!(
+            err.to_string().contains("audio stream closed"),
+            "unexpected error: {err}"
+        );
     }
 }

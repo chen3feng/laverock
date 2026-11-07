@@ -288,6 +288,20 @@ $('go').onclick = async () => {
     fd.append(name, value);
   }
 
+  // Audio streaming is a single-take, speech-only mode: the server emits
+  // each sentence as an `audio` event while it is still generating.
+  const streamAudio = $('streamAudio').checked && Number($('samples').value) === 1;
+  if (streamAudio) fd.append('stream_audio', '1');
+  const streamPlayer = streamAudio ? createStreamPlayer() : null;
+  // Create the AudioContext inside this click so browsers allow it to play.
+  streamPlayer?.prime();
+  const abort = new AbortController();
+  $('stopStream').hidden = !streamPlayer;
+  $('stopStream').onclick = () => {
+    abort.abort();
+    streamPlayer?.stop();
+  };
+
   const url = `/api/engines/${encodeURIComponent($('engine').value)}/synthesize`;
   $('go').disabled = true;
   status.className = '';
@@ -338,6 +352,7 @@ $('go').onclick = async () => {
       method: 'POST',
       body: fd,
       headers: { 'X-Laverock-Stream': '1' },
+      signal: abort.signal,
     });
     if (!res.ok) {
       const msg = await res.json().then((j) => j.error).catch(() => res.statusText);
@@ -379,6 +394,19 @@ $('go').onclick = async () => {
             setDeterminate((steps / estCodecSteps(text)) * 100);
             audioText = ` · ${(steps / 12.5).toFixed(0)}s ${t("ui.audio")}`;
           }
+        } else if (event === 'audio') {
+          // One sentence, already encodable: play it now instead of
+          // waiting for the complete WAV frame.
+          const p = JSON.parse(data);
+          if (streamPlayer) {
+            try {
+              await streamPlayer.push(p.wav);
+            } catch (_) {
+              // A chunk that fails to decode is skipped; later ones may
+              // still play.
+            }
+            audioText = ` · ${streamPlayer.duration.toFixed(0)}s ${t("ui.audio")}`;
+          }
         } else if (event === 'wav') {
           const p = JSON.parse(data);
           const bytes = Uint8Array.from(atob(p.wav), (c) => c.charCodeAt(0));
@@ -395,6 +423,7 @@ $('go').onclick = async () => {
     }
     const got = variants.filter((v) => v && v.blob).sort((a, b) => a.index - b.index);
     if (!got.length) throw new Error(t("ui.no_audio_data_received"));
+    streamPlayer?.finish();
     setDeterminate(100);
     renderSynthResults(got, engine);
     // Keep the last take reachable for any downstream helper (e.g. the
@@ -407,12 +436,19 @@ $('go').onclick = async () => {
       `${t("ui.done")} · ${got.length > 1 ? got.length + '× · ' : ''}` +
       `${(totalBytes / 1024).toFixed(0)} KB · ${((performance.now() - t0) / 1000).toFixed(1)}s`;
   } catch (e) {
-    status.className = 'err';
-    status.textContent = (t("ui.failed")) + e.message;
+    streamPlayer?.stop();
+    if (e.name === 'AbortError') {
+      status.className = '';
+      status.textContent = t('synth.stopped');
+    } else {
+      status.className = 'err';
+      status.textContent = (t("ui.failed")) + e.message;
+    }
   } finally {
     clearInterval(timer);
     pbar.hidden = true;
     labelEl.hidden = true;
     $('go').disabled = false;
+    $('stopStream').hidden = true;
   }
 };

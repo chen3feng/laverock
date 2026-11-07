@@ -384,8 +384,17 @@
         <div class="hint" data-i18n="synth.samples_hint">一次生成多段候选项逐一试听，选中满意的再下载。</div>
       </div>
 
+      <div class="card">
+        <label class="switch">
+          <input type="checkbox" id="streamAudio" />
+          <span data-i18n="synth.stream_audio">边生成边播放</span>
+        </label>
+        <div class="hint" data-i18n="synth.stream_audio_hint">长文本在第一句生成后立即开始播放；仅单个候选项时生效。</div>
+      </div>
+
       <div class="actions">
         <button id="go" type="button" data-i18n="go">生成语音</button>
+        <button class="ghost" id="stopStream" type="button" hidden data-i18n="synth.stop_stream">停止播放</button>
         <span id="status"></span>
       </div>
       <div id="synthProgress" class="pbar" hidden><div class="pbar-fill indeterminate"></div></div>
@@ -750,6 +759,10 @@ addI18n({
     'go': '生成语音', 'download.wav': '下载 WAV', 'download.mp3': '下载 MP3',
     'synth.samples': '候选项',
     'synth.samples_hint': '一次生成多段候选项逐一试听，选中满意的再下载。克隆引擎会通过不同的种子/采样本产生差异。',
+    'synth.stream_audio': '边生成边播放',
+    'synth.stream_audio_hint': '长文本在第一句生成后立即开始播放；仅单个候选项时生效。',
+    'synth.stop_stream': '停止播放',
+    'synth.stopped': '已停止',
   },
   en: {
     'synth.title': 'Synthesize',
@@ -768,6 +781,10 @@ addI18n({
     'go': 'Generate', 'download.wav': 'Download WAV', 'download.mp3': 'Download MP3',
     'synth.samples': 'Takes',
     'synth.samples_hint': 'Generate several takes at once to audition side by side, then download the one you like. Cloning engines vary them via seed/sampling.',
+    'synth.stream_audio': 'Play as it generates',
+    'synth.stream_audio_hint': 'Start playing once the first sentence is ready; applies to a single take.',
+    'synth.stop_stream': 'Stop playing',
+    'synth.stopped': 'Stopped',
   },
 });
 
@@ -3221,6 +3238,20 @@ $('go').onclick = async () => {
     fd.append(name, value);
   }
 
+  // Audio streaming is a single-take, speech-only mode: the server emits
+  // each sentence as an `audio` event while it is still generating.
+  const streamAudio = $('streamAudio').checked && Number($('samples').value) === 1;
+  if (streamAudio) fd.append('stream_audio', '1');
+  const streamPlayer = streamAudio ? createStreamPlayer() : null;
+  // Create the AudioContext inside this click so browsers allow it to play.
+  streamPlayer?.prime();
+  const abort = new AbortController();
+  $('stopStream').hidden = !streamPlayer;
+  $('stopStream').onclick = () => {
+    abort.abort();
+    streamPlayer?.stop();
+  };
+
   const url = `/api/engines/${encodeURIComponent($('engine').value)}/synthesize`;
   $('go').disabled = true;
   status.className = '';
@@ -3271,6 +3302,7 @@ $('go').onclick = async () => {
       method: 'POST',
       body: fd,
       headers: { 'X-Laverock-Stream': '1' },
+      signal: abort.signal,
     });
     if (!res.ok) {
       const msg = await res.json().then((j) => j.error).catch(() => res.statusText);
@@ -3312,6 +3344,19 @@ $('go').onclick = async () => {
             setDeterminate((steps / estCodecSteps(text)) * 100);
             audioText = ` · ${(steps / 12.5).toFixed(0)}s ${t("ui.audio")}`;
           }
+        } else if (event === 'audio') {
+          // One sentence, already encodable: play it now instead of
+          // waiting for the complete WAV frame.
+          const p = JSON.parse(data);
+          if (streamPlayer) {
+            try {
+              await streamPlayer.push(p.wav);
+            } catch (_) {
+              // A chunk that fails to decode is skipped; later ones may
+              // still play.
+            }
+            audioText = ` · ${streamPlayer.duration.toFixed(0)}s ${t("ui.audio")}`;
+          }
         } else if (event === 'wav') {
           const p = JSON.parse(data);
           const bytes = Uint8Array.from(atob(p.wav), (c) => c.charCodeAt(0));
@@ -3328,6 +3373,7 @@ $('go').onclick = async () => {
     }
     const got = variants.filter((v) => v && v.blob).sort((a, b) => a.index - b.index);
     if (!got.length) throw new Error(t("ui.no_audio_data_received"));
+    streamPlayer?.finish();
     setDeterminate(100);
     renderSynthResults(got, engine);
     // Keep the last take reachable for any downstream helper (e.g. the
@@ -3340,15 +3386,119 @@ $('go').onclick = async () => {
       `${t("ui.done")} · ${got.length > 1 ? got.length + '× · ' : ''}` +
       `${(totalBytes / 1024).toFixed(0)} KB · ${((performance.now() - t0) / 1000).toFixed(1)}s`;
   } catch (e) {
-    status.className = 'err';
-    status.textContent = (t("ui.failed")) + e.message;
+    streamPlayer?.stop();
+    if (e.name === 'AbortError') {
+      status.className = '';
+      status.textContent = t('synth.stopped');
+    } else {
+      status.className = 'err';
+      status.textContent = (t("ui.failed")) + e.message;
+    }
   } finally {
     clearInterval(timer);
     pbar.hidden = true;
     labelEl.hidden = true;
     $('go').disabled = false;
+    $('stopStream').hidden = true;
   }
 };
+
+// Streaming playback: decode base64 WAV chunks and schedule them back to
+// back on one AudioContext, so the first sentence plays while the rest is
+// still being generated.
+//
+//   const player = createStreamPlayer();
+//   player.prime();                 // inside the click handler
+//   await player.push(base64Wav);   // one per `audio` event
+//   player.finish();                // closes the context after the drain
+//   player.stop();                  // user pressed stop / request failed
+
+function createStreamPlayer() {
+  const Ctx = window.AudioContext || window.webkitAudioContext;
+  let ctx = null;
+  let nextTime = 0;
+  let scheduled = 0;
+  let closed = false;
+  let finished = false;
+  const sources = new Set();
+
+  const close = () => {
+    if (closed) return;
+    closed = true;
+    for (const source of sources) {
+      try {
+        source.stop();
+      } catch (_) {
+        // Already ended or never started.
+      }
+    }
+    sources.clear();
+    if (ctx) {
+      const dying = ctx;
+      ctx = null;
+      try {
+        dying.close();
+      } catch (_) {
+        // Already closed.
+      }
+    }
+  };
+
+  const ensureContext = () => {
+    if (!ctx && !closed && Ctx) {
+      ctx = new Ctx();
+      // The context is created inside the generate click, so the page has
+      // a user gesture; resume() covers a context that started suspended.
+      if (ctx.state === 'suspended') ctx.resume().catch(() => {});
+    }
+    return ctx;
+  };
+
+  return {
+    // Create the context while the click gesture is still active.
+    prime() {
+      ensureContext();
+    },
+
+    async push(base64) {
+      const context = ensureContext();
+      if (!context) return;
+      const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
+      const buffer = await context.decodeAudioData(bytes.buffer);
+      if (closed || !ctx) return;
+      const source = ctx.createBufferSource();
+      source.buffer = buffer;
+      source.connect(ctx.destination);
+      // Small lead so scheduling never lands in the past.
+      const at = Math.max(nextTime, ctx.currentTime + 0.05);
+      source.start(at);
+      nextTime = at + buffer.duration;
+      scheduled += buffer.duration;
+      sources.add(source);
+      source.onended = () => {
+        sources.delete(source);
+        if (finished && sources.size === 0) close();
+      };
+    },
+
+    // No more chunks are coming; close the context once playback drains.
+    finish() {
+      finished = true;
+      if (sources.size === 0) close();
+    },
+
+    stop: close,
+
+    // Seconds of audio received so far, for the progress label.
+    get duration() {
+      return scheduled;
+    },
+
+    get active() {
+      return !closed && sources.size > 0;
+    },
+  };
+}
 
 // --------------------------------------------------------- synth results
 

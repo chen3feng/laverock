@@ -116,6 +116,24 @@ async function main() {
   // exists; headless Chromium cannot answer it, so use the anchor fallback.
   await context.addInitScript(() => {
     try { delete window.showSaveFilePicker; } catch (_) { /* ignore */ }
+
+    // Stand-in for Web Audio: streaming playback only needs to decode and
+    // schedule chunks, so count them instead of producing sound in CI.
+    window.__streamChunks = 0;
+    class FakeAudioContext {
+      constructor() { this.currentTime = 0; this.state = 'running'; this.destination = {}; }
+      resume() { return Promise.resolve(); }
+      decodeAudioData() {
+        window.__streamChunks += 1;
+        return Promise.resolve({ duration: 1 });
+      }
+      createBufferSource() {
+        return { buffer: null, connect() {}, start() {}, stop() {}, onended: null };
+      }
+      close() { return Promise.resolve(); }
+    }
+    window.AudioContext = FakeAudioContext;
+    window.webkitAudioContext = FakeAudioContext;
   });
   const page = await context.newPage();
   const pageErrors = [];
@@ -160,6 +178,25 @@ async function main() {
     assert.ok(fs.statSync(synthWav).size > 44, 'downloaded WAV has a header');
     fs.accessSync(synthWav);
     pass(`result downloaded (${path.basename(synthWav)})`);
+
+    // ------------------------------------------------- streamed synthesis
+    say('streaming synthesis');
+    const streamText =
+      '你好，我是 Laverock 的流式合成演示。这是一段比较长的文字，用来验证第一句生成后就能开始播放，'
+      + '而不是等整段完成。流式合成会按句子切分文本，每生成一段就立刻发送一个音频帧，浏览器收到后'
+      + '按顺序排入播放队列。这样长文本的首字节延迟就缩短到了第一句的生成时间。';
+    await page.fill('#text', streamText);
+    await page.check('#streamAudio');
+    // Clear the previous run's status so waiting for .ok cannot match it.
+    await page.evaluate(() => {
+      document.getElementById('status').className = '';
+      document.getElementById('status').textContent = '';
+    });
+    await page.click('#go');
+    await page.waitForSelector('#status.ok', { timeout: 300_000 });
+    const chunks = await page.evaluate(() => window.__streamChunks);
+    assert.ok(chunks >= 2, `expected streamed audio chunks, got ${chunks}`);
+    pass(`streamed audio (${chunks} chunks)`);
 
     // --------------------------------------------------------------- history
     say('history');
