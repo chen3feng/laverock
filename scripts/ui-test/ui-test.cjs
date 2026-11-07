@@ -265,6 +265,23 @@ async function main() {
     );
     pass('capture saved with its transcript');
 
+    // Re-transcribing stores timed cues; the card shows them and offers
+    // SRT/VTT downloads.
+    const capture = page.locator('.capture-card').first();
+    await capture.locator('.tr').click();
+    await page.waitForFunction(
+      () => document.querySelectorAll('.capture-card .voice-seg').length > 0,
+      null,
+      { timeout: 120_000 },
+    );
+    const cues = await page.locator('.capture-card .voice-seg').count();
+    assert.ok(cues >= 1, 'timed cues rendered');
+    pass(`capture shows ${cues} timed cue(s)`);
+    const srtFile = await saveDownload(page, capture.locator('.sub-srt'), artifacts);
+    const srtBody = fs.readFileSync(srtFile, 'utf8');
+    assert.ok(srtBody.includes(' --> '), 'SRT contains cue timings');
+    pass(`subtitle export (${path.basename(srtFile)})`);
+
     // ---------------------------------------------------------------- voices
     say('voices');
     await page.click('nav a[data-page="voices"]');

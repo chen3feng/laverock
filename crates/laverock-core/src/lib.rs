@@ -40,7 +40,7 @@ pub use manifest::{
 };
 pub use onnx::model_variant;
 pub use task::TaskKind;
-pub use transcribe::Transcriber;
+pub use transcribe::{Transcriber, Transcript, TranscriptSegment};
 
 /// Re-exported for engines that need the underlying runtime.
 pub use sherpa_onnx;

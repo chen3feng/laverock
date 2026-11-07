@@ -336,10 +336,16 @@ impl ProfileStore {
         Ok(meta)
     }
 
-    /// Replace a take's transcript and refresh every voice built from it,
-    /// so a re-transcription shows up in the voice library too.
-    pub fn set_capture_transcript(&self, id: &str, text: &str) -> Result<CaptureMeta> {
-        let meta = self.captures.update(id, None, Some(text))?;
+    /// Replace a take's transcript and timed cues, and refresh every voice
+    /// built from it, so a re-transcription shows up in the voice library
+    /// too.
+    pub fn set_capture_transcript(
+        &self,
+        id: &str,
+        text: &str,
+        segments: Vec<laverock_core::TranscriptSegment>,
+    ) -> Result<CaptureMeta> {
+        let meta = self.captures.set_transcript(id, text, segments)?;
         for view in self.list()? {
             let mut voice = view.meta;
             if !voice.captures.iter().any(|cid| cid == id) {
@@ -1382,7 +1388,7 @@ mod tests {
 
         // A re-transcription lands on the voice too.
         store
-            .set_capture_transcript(&b.id, "第二段改")
+            .set_capture_transcript(&b.id, "第二段改", Vec::new())
             .expect("retranscribe");
         let (voice, _) = store.get(&voice.id).expect("get");
         assert_eq!(voice.prompt_text, "第一段 第二段改");

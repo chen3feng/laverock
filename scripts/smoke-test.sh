@@ -439,6 +439,61 @@ curl -s -o /dev/null -X DELETE "$BASE/api/profiles/$solo"
 ok "cleaned up takes"
 fi
 
+if want subtitles; then
+echo "subtitles"
+if curl -s "$BASE/api/health" | grep -q '"transcribe":true'; then
+  take_id() { sed -n 's/.*"id":"\([^"]*\)".*/\1/p'; }
+  details=$(curl -s -X POST "$BASE/api/transcribe/details" \
+    -F "audio=@$DIR/test_wavs/leijun-1.wav")
+  case "$details" in
+    *'"segments":[{'*) ok "detailed transcript segments" ;;
+    *) bad "details: $(printf '%s' "$details" | head -c 160)" ;;
+  esac
+  case "$details" in
+    *武汉*) ok "detailed transcript text" ;;
+    *) bad "detailed transcript text" ;;
+  esac
+  case "$details" in
+    *'"duration":'*) ok "detailed transcript duration" ;;
+    *) bad "details duration missing" ;;
+  esac
+
+  srt=$(curl -s -X POST "$BASE/api/transcribe/subtitles?format=srt" \
+    -F "audio=@$DIR/test_wavs/leijun-1.wav")
+  case "$srt" in
+    *' --> '*) ok "uploaded subtitle cues" ;;
+    *) bad "srt: $(printf '%s' "$srt" | head -c 120)" ;;
+  esac
+  vtt=$(curl -s -X POST "$BASE/api/transcribe/subtitles?format=vtt" \
+    -F "audio=@$DIR/test_wavs/leijun-1.wav")
+  case "$vtt" in
+    WEBVTT*) ok "vtt header" ;;
+    *) bad "vtt: $(printf '%s' "$vtt" | head -c 120)" ;;
+  esac
+  code=$(curl -s -o /dev/null -w '%{http_code}' -X POST \
+    "$BASE/api/transcribe/subtitles?format=ass" \
+    -F "audio=@$DIR/test_wavs/leijun-1.wav")
+  [ "$code" = "400" ] && ok "unknown subtitle format -> 400" \
+    || bad "unknown subtitle format -> $code"
+
+  sub=$(curl -s -X POST "$BASE/api/captures" -F 'name=smoke-subs' \
+    -F "audio=@$DIR/test_wavs/leijun-1.wav" | take_id)
+  heard=$(curl -s -X POST "$BASE/api/captures/$sub/transcribe")
+  case "$heard" in
+    *'"transcript_segments":[{') ok "take stores timed cues" ;;
+    *) bad "take cues missing: $(printf '%s' "$heard" | head -c 160)" ;;
+  esac
+  take_srt=$(curl -s "$BASE/api/captures/$sub/subtitles?format=srt")
+  case "$take_srt" in
+    *' --> '*) ok "take subtitle download" ;;
+    *) bad "take subtitles: $(printf '%s' "$take_srt" | head -c 120)" ;;
+  esac
+  curl -s -o /dev/null -X DELETE "$BASE/api/captures/$sub"
+else
+  echo "  skip (no speech-to-text model)"
+fi
+fi
+
 if want voxcpm2; then
 if case "$engines_json" in *'"id":"voxcpm2"'*) true ;; *) false ;; esac; then
   echo "voxcpm2"

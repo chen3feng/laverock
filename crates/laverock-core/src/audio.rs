@@ -229,6 +229,57 @@ pub fn silence_profile(samples: &[f32], sample_rate: u32) -> SilenceProfile {
     }
 }
 
+/// Voiced sample ranges, split on silences of at least `min_gap_secs`.
+/// Used by the transcriber when the recognizer reports no token
+/// timestamps: each range is recognized on its own so subtitles still get
+/// real boundaries.
+pub(crate) fn speech_chunks(
+    samples: &[f32],
+    sample_rate: u32,
+    min_gap_secs: f32,
+) -> Vec<(usize, usize)> {
+    let frame_len = silence_frame_len(sample_rate);
+    if samples.len() < frame_len {
+        return Vec::new();
+    }
+    let frame_secs = frame_len as f32 / sample_rate.max(1) as f32;
+    let min_gap_frames = (min_gap_secs.max(0.0) / frame_secs).ceil().max(1.0) as usize;
+    let quiet = silence_flags(samples, frame_len);
+
+    // Frame ranges, merged while the silent gap between them is shorter
+    // than the minimum pause.
+    let mut ranges: Vec<(usize, usize)> = Vec::new();
+    let mut i = 0;
+    while i < quiet.len() {
+        if quiet[i] {
+            i += 1;
+            continue;
+        }
+        let start = i;
+        while i < quiet.len() && !quiet[i] {
+            i += 1;
+        }
+        if let Some(last) = ranges.last_mut() {
+            if start - last.1 < min_gap_frames {
+                last.1 = i;
+                continue;
+            }
+        }
+        ranges.push((start, i));
+    }
+
+    // Convert to sample ranges with half a frame of margin on each side.
+    let pad = frame_len / 2;
+    ranges
+        .into_iter()
+        .map(|(start, end)| {
+            let start = (start * frame_len).saturating_sub(pad);
+            let end = ((end * frame_len) + pad).min(samples.len());
+            (start, end)
+        })
+        .collect()
+}
+
 /// Remove leading and trailing near-silence, keeping `keep_seconds` of
 /// margin at each end. Inputs that are entirely silent become empty.
 pub fn trim_silence(samples: &[f32], sample_rate: u32, keep_seconds: f32) -> Cow<'_, [f32]> {
@@ -672,5 +723,24 @@ mod tests {
         // Shorter than one analysis frame: returned untouched.
         assert_eq!(trim_silence(&[0.0; 3], 24_000, 0.05).len(), 3);
         assert_eq!(trim_silence(&[0.2; 10], 24_000, 0.05).len(), 10);
+    }
+
+    #[test]
+    fn speech_chunks_splits_on_long_pauses_only() {
+        let mut samples = vec![0.0; 2_400]; // 0.1 s leading
+        samples.extend(tone_gap_tone(0.5, 1.0)); // voice, 1 s gap, voice
+        samples.extend(vec![0.0; 2_400]);
+        let chunks = speech_chunks(&samples, 24_000, 0.45);
+        assert_eq!(chunks.len(), 2, "{chunks:?}");
+        let rate = 24_000.0;
+        assert!((chunks[0].0 as f32 / rate - 0.1).abs() < 0.02);
+        assert!((chunks[1].0 as f32 / rate - 1.6).abs() < 0.02);
+        assert!(chunks[0].1 < chunks[1].0);
+
+        // A quiet gap shorter than the minimum stays inside one chunk.
+        let mut tight = tone_gap_tone(0.5, 0.2);
+        tight.extend(tone_gap_tone(0.0, 0.2));
+        assert_eq!(speech_chunks(&tight, 24_000, 0.45).len(), 1);
+        assert!(speech_chunks(&[0.0; 24_000], 24_000, 0.45).is_empty());
     }
 }

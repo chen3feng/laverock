@@ -32,6 +32,7 @@ mod reference;
 mod remote;
 mod routes;
 mod settings;
+mod subtitles;
 mod system;
 
 pub(crate) use routes::AppState;

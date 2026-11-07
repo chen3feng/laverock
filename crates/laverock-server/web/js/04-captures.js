@@ -101,6 +101,11 @@ function renderCaptures() {
     const transcript = c.prompt_text
       ? esc(c.prompt_text)
       : `<span class="muted">${esc(t('captures.not_transcribed'))}</span>`;
+    const segments = c.transcript_segments || [];
+    const cues = segments.length
+      ? `<div class="voice-segments">${segments.map((s) =>
+        `<div class="voice-seg"><time>${fmtStamp(s.start)}</time><span>${esc(s.text)}</span></div>`).join('')}</div>`
+      : '';
     el.innerHTML = `
       <div class="voice-top">
         <label class="cap-check"><input type="checkbox" class="pick"${checked} /></label>
@@ -111,9 +116,14 @@ function renderCaptures() {
       <div class="voice-meta">${fmtDur(c.duration_secs)} · ${fmtBytes(c.bytes)} · ${fmtDate(c.created_at)}</div>
       ${c.issues.map((i) => `<div class="voice-warn">⚠ ${esc(captureIssueText(i))}</div>`).join('')}
       <div class="voice-text">${transcript}</div>
+      ${cues}
       <div class="voice-actions">
         <button class="ghost small play" type="button">${previewId === c.id ? t('stop') : t('preview')}</button>
         <button class="ghost small tr" type="button"${transcribeAvailable ? '' : ' disabled'}>${t('captures.retranscribe')}</button>
+        ${segments.length
+          ? `<button class="ghost small sub-srt" type="button" title="${esc(t('captures.subtitles'))}">SRT</button>
+             <button class="ghost small sub-vtt" type="button" title="${esc(t('captures.subtitles'))}">VTT</button>`
+          : ''}
         <button class="ghost small enh" type="button"${enhanceStatus.denoise || enhanceStatus.vocals ? '' : ' disabled'}>${t('captures.enhance.action')}</button>
         <button class="ghost small edit" type="button">${t('captures.rename')}</button>
         <button class="ghost small danger del" type="button">${t('ui.delete')}</button>
@@ -125,12 +135,33 @@ function renderCaptures() {
     };
     el.querySelector('.play').onclick = () => togglePreview(c.id, captureUrl(c.id));
     el.querySelector('.tr').onclick = () => transcribeCapture(c);
+    const srt = el.querySelector('.sub-srt');
+    if (srt) srt.onclick = () => downloadSubtitles(c, 'srt');
+    const vtt = el.querySelector('.sub-vtt');
+    if (vtt) vtt.onclick = () => downloadSubtitles(c, 'vtt');
     el.querySelector('.enh').onclick = () => enhanceCapture(c);
     el.querySelector('.edit').onclick = () => editCapture(c);
     el.querySelector('.del').onclick = () => deleteCapture(c);
     grid.appendChild(el);
   }
   syncCaptureBar();
+}
+
+// Download the timed cues stored with a take. The server renders both
+// formats from the same segments, so SRT and VTT always agree.
+async function downloadSubtitles(c, format) {
+  try {
+    const res = await apiFetch(
+      `/api/captures/${encodeURIComponent(c.id)}/subtitles?format=${format}`);
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.error || res.statusText || ('HTTP ' + res.status));
+    }
+    const name = (c.name || 'laverock').replace(/[\\/:*?"<>|]+/g, '_');
+    await saveBlob(await res.blob(), `${name}.${format}`);
+  } catch (e) {
+    toast(t('ui.download_failed') + e.message, true);
+  }
 }
 
 async function transcribeCapture(c) {

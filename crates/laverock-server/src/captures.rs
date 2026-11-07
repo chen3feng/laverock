@@ -18,7 +18,7 @@ use crate::reference::{
 };
 use laverock_core::{
     decode_wav, encode_wav, resample_mono, trim_reference, trim_silence, CoreError, EnhanceMode,
-    Enhancer, Result,
+    Enhancer, Result, TranscriptSegment,
 };
 use serde::{Deserialize, Serialize};
 use std::{
@@ -42,6 +42,10 @@ pub struct CaptureMeta {
     /// Transcript of this take. Empty when it has not been transcribed
     /// yet, which is a normal intermediate state.
     pub prompt_text: String,
+    /// Timed cues from the last automatic transcription. Cleared when the
+    /// transcript is edited by hand, because they would no longer match.
+    #[serde(default)]
+    pub transcript_segments: Vec<TranscriptSegment>,
     /// Unix seconds.
     pub created_at: u64,
     /// Missing on captures written before analysis existed.
@@ -389,6 +393,7 @@ impl CaptureStore {
             id: id.clone(),
             name: name.trim().to_string(),
             prompt_text: prompt_text.trim().to_string(),
+            transcript_segments: Vec::new(),
             created_at,
             reference: Some(prepared.facts.clone()),
             sha256: sha256_hex(&prepared.wav),
@@ -423,7 +428,29 @@ impl CaptureStore {
         }
         if let Some(text) = prompt_text {
             meta.prompt_text = text.trim().to_string();
+            // Timed cues describe the old text; a manual edit invalidates
+            // them, and the next transcription rebuilds both.
+            meta.transcript_segments.clear();
         }
+        write_atomic(
+            &dir.join("capture.json"),
+            &serde_json::to_vec_pretty(&meta)?,
+        )?;
+        Ok(meta)
+    }
+
+    /// Store an automatic transcription's text and timed cues in one write.
+    pub fn set_transcript(
+        &self,
+        id: &str,
+        text: &str,
+        segments: Vec<TranscriptSegment>,
+    ) -> Result<CaptureMeta> {
+        let dir = self.dir(id)?;
+        let raw = fs::read_to_string(dir.join("capture.json"))?;
+        let mut meta: CaptureMeta = serde_json::from_str(&raw)?;
+        meta.prompt_text = text.trim().to_string();
+        meta.transcript_segments = segments;
         write_atomic(
             &dir.join("capture.json"),
             &serde_json::to_vec_pretty(&meta)?,
@@ -562,6 +589,7 @@ mod tests {
             id: name.into(),
             name: name.into(),
             prompt_text: text.into(),
+            transcript_segments: Vec::new(),
             created_at: 0,
             reference: None,
             sha256: String::new(),
@@ -578,6 +606,29 @@ mod tests {
         assert_eq!(meta.sha256, "");
         let round = serde_json::to_string(&meta).expect("serialize");
         assert!(!round.contains("enhancement"), "unset field is skipped");
+    }
+
+    #[test]
+    fn transcripts_keep_timed_cues_until_edited_by_hand() {
+        let (store, dir) = store();
+        let take = store.create("a", "", &tone(2.0), false).expect("create");
+        let cues = vec![TranscriptSegment {
+            start: 0.0,
+            end: 1.0,
+            text: "你好".into(),
+        }];
+        let updated = store
+            .set_transcript(&take.id, "你好世界", cues.clone())
+            .expect("set");
+        assert_eq!(updated.transcript_segments, cues);
+        let (reloaded, _) = store.get(&take.id).expect("get");
+        assert_eq!(reloaded.transcript_segments, cues);
+
+        // A hand edit replaces the text, so the old timings no longer apply.
+        let edited = store.update(&take.id, None, Some("手动改")).expect("edit");
+        assert_eq!(edited.prompt_text, "手动改");
+        assert!(edited.transcript_segments.is_empty());
+        fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
