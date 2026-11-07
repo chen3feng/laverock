@@ -154,6 +154,11 @@ and `stt`.
 
 - `capabilities` drives the UI (`clone`, `preset-voices`, `voice-design`,
   `instruct`, `multilingual`, `stt`).
+- `task` is optional and says what the model does (`tts`, `music`, `asr`,
+  `vc`, `design`, `process`). Without it the task follows `kind` (`music` →
+  music, `stt` → transcription, everything else → TTS). Set it when a
+  backend kind serves a different task, such as a voice-conversion engine
+  reusing the TTS runtime.
 - `parameters` is the whole control surface: `name`, `label`, `type`
   (`float` / `int` / `bool` / `choice`), `min`, `max`, `step`, `options`
   (label/value pairs), `default` and `hint`. The synth page builds the
@@ -166,9 +171,9 @@ and `stt`.
   from a retired runner) before the user hits a synthesis error.
 
 To make a model installable from the UI, add an entry to
-`crates/laverock-server/assets/catalog.json` with its `id`, `dir`, localized
-`name`/`description`/`note`, `size`, `languages`, `capabilities` and the
-`script` that installs it.
+`crates/laverock-server/assets/catalog.json` with its `id`, `task`, `dir`,
+localized `name`/`description`/`note`, `size`, `languages`, `capabilities`
+and the `script` that installs it.
 
 ## Installer scripts
 

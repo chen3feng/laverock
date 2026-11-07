@@ -7,16 +7,18 @@ async function loadEngines() {
     toast((t("ui.failed_to_load_engines")) + e.message, true);
     return;
   }
-  // Music engines belong on their own page; the speech page must not offer
-  // them (and vice versa).
-  const synthList = engines.filter((e) => e.kind !== 'music');
-  const musicList = engines.filter((e) => e.kind === 'music');
+  // Route engines by task, not backend kind: a future voice-conversion or
+  // design engine must not appear in the speech picker just because it
+  // shares a TTS runtime. Older servers omit `task`.
+  const task = (e) => e.task || (e.kind === 'music' ? 'music' : 'tts');
+  const synthList = engines.filter((e) => task(e) === 'tts');
+  const musicList = engines.filter((e) => task(e) === 'music');
 
   // Rebuilding the lists also rebuilds the parameter controls, dropping
   // values the user tuned. When the set of engines did not change (the
   // usual case when revisiting Models), leave the selects and their
   // controls alone.
-  const sig = engines.map((e) => `${e.id}:${e.kind}`).join('|');
+  const sig = engines.map((e) => `${e.id}:${e.kind}:${e.task || ''}`).join('|');
   if (sig === loadEngines.sig) {
     if (currentPage() === 'models' && modelsData) renderModels();
     return;

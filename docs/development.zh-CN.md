@@ -134,6 +134,10 @@ CI 会执行 `build-web.py --check`，产物落后于源码的 PR 合不进去�
 
 - `capabilities` 决定界面行为（`clone`、`preset-voices`、`voice-design`、
   `instruct`、`multilingual`、`stt`）。
+- `task` 可选，声明模型执行的任务（`tts`、`music`、`asr`、`vc`、`design`、
+  `process`）。省略时由 `kind` 推导（`music` → 音乐，`stt` → 语音识别，其余 →
+  语音合成）。当同一后端类型用于别的任务时（例如复用 TTS 运行时的声音转换引擎）
+  才需要显式设置。
 - `parameters` 就是整套控件：`name`、`label`、`type`（`float` / `int` / `bool` /
   `choice`）、`min`、`max`、`step`、`options`（label/value 对）、`default` 和
   `hint`。合成页据此生成控件，服务端按同一份列表校验提交值。未声明时使用各类型
@@ -144,9 +148,9 @@ CI 会执行 `build-web.py --check`，产物落后于源码的 PR 合不进去�
   旧运行器的安装）。
 
 要让模型出现在界面的可安装目录中，在
-`crates/laverock-server/assets/catalog.json` 里加一条记录，包含 `id`、`dir`、
-本地化的 `name`/`description`/`note`、`size`、`languages`、`capabilities` 和
-负责安装的 `script`。
+`crates/laverock-server/assets/catalog.json` 里加一条记录，包含 `id`、`task`、
+`dir`、本地化的 `name`/`description`/`note`、`size`、`languages`、
+`capabilities` 和负责安装的 `script`。
 
 ## 安装脚本
 

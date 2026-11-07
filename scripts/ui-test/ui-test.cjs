@@ -6,6 +6,7 @@
 //
 //   choose engine -> upload a reference -> transcribe -> synthesize
 //   -> history entry and download
+//   -> models grouped by task, installed model opens its workspace
 //   -> capture upload -> transcribe -> save
 //   -> voice upload -> transcribe -> save -> export -> import
 //
@@ -177,6 +178,28 @@ async function main() {
     assert.ok(fs.statSync(histWav).size > 44, 'history WAV has a header');
     assert.ok(histWav.endsWith('.wav'), 'history download is a WAV');
     pass(`history download (${path.basename(histWav)})`);
+
+    // ---------------------------------------------------------------- models
+    say('models');
+    await page.click('nav a[data-page="models"]');
+    await page.waitForSelector('#page-models.active');
+    await page.waitForSelector('#modelGroups .model-card');
+    const groupTitles = await page.$$eval('#modelGroups .section-title', (els) =>
+      els.map((el) => el.textContent.trim()));
+    assert.ok(groupTitles.length >= 2, `models are grouped by task: ${groupTitles}`);
+    pass(`model groups rendered (${groupTitles.join(', ')})`);
+
+    const sttCard = page.locator('.model-card', { hasText: 'SenseVoice' }).first();
+    assert.equal(
+      await sttCard.locator('.model-actions button').count(), 1,
+      'a transcription model has no workspace yet, so only Delete is offered',
+    );
+
+    const zipCard = page.locator('.model-card', { hasText: 'ZipVoice' }).first();
+    await zipCard.locator('.model-actions button').first().click();
+    await page.waitForFunction(() => location.hash === '#/synthesize');
+    assert.equal(await page.$eval('#engine', (select) => select.value), engineId);
+    pass('installed model opens its workspace with the model selected');
 
     // -------------------------------------------------------------- captures
     say('captures');

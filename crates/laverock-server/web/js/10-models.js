@@ -4,19 +4,22 @@
 // re-render the list without collapsing everything.
 const expandedModels = new Set();
 
-const MODEL_CATEGORIES = [
-  { key: 'tts', caps: ['tts'] },
-  { key: 'stt', caps: ['stt'] },
-  { key: 'music', caps: ['music'] },
-  { key: 'audio', caps: ['enhance'] },
-];
+// Cards are grouped by what the model does. The server sends `task`; the
+// capability fallback keeps older remote servers and cached bundles
+// working.
+const MODEL_TASK_ORDER = ['tts', 'music', 'asr', 'process', 'design', 'vc'];
 
-function modelCategory(caps) {
-  const list = caps || [];
-  for (const category of MODEL_CATEGORIES) {
-    if (category.caps.some((cap) => list.includes(cap))) return category.key;
-  }
-  return 'other';
+// Tasks that already have a workspace. Installed models get a button that
+// opens it; other tasks are still listed and managed here.
+const MODEL_TASK_PAGE = { tts: 'synthesize', music: 'music', process: 'captures' };
+
+function modelTask(model) {
+  if (model.task) return model.task;
+  const caps = model.capabilities || [];
+  if (caps.includes('music')) return 'music';
+  if (caps.includes('stt')) return 'asr';
+  if (caps.includes('enhance')) return 'process';
+  return 'tts';
 }
 
 // Manual installs have a manifest but no catalog entry; give them the
@@ -30,6 +33,7 @@ function engineAsModel(engine) {
     size: '',
     languages: engine.languages || [],
     capabilities: engine.capabilities || [],
+    task: engine.task,
     note: null,
     unsupported: null,
     installed: true,
@@ -95,20 +99,20 @@ function renderModelGroups(entries, readonly) {
 
   const groups = new Map();
   for (const entry of entries) {
-    const key = modelCategory(entry.model.capabilities);
+    const key = modelTask(entry.model);
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push(entry);
   }
 
   let shown = 0;
-  for (const key of [...MODEL_CATEGORIES.map((c) => c.key), 'other']) {
+  for (const key of [...MODEL_TASK_ORDER, 'other']) {
     const items = groups.get(key);
     if (!items || items.length === 0) continue;
     // Installed models first; everything else keeps catalog order.
     items.sort((a, b) => Number(b.installed) - Number(a.installed));
     const title = document.createElement('h2');
     title.className = 'section-title';
-    title.textContent = t('models.cat.' + key);
+    title.textContent = t('models.task.' + key);
     box.appendChild(title);
     const grid = document.createElement('div');
     grid.className = 'grid';
@@ -198,6 +202,7 @@ function modelCard(model, installed, readonly) {
 
   const actions = el.querySelector('.model-actions');
   if (installed && !stale) {
+    if (MODEL_TASK_PAGE[modelTask(model)]) actions.appendChild(useButton(model));
     actions.appendChild(deleteButton(model));
     return el;
   }
@@ -224,6 +229,29 @@ function modelCard(model, installed, readonly) {
     actions.appendChild(hint);
   }
   return el;
+}
+
+// Open the workspace that uses this model, selecting it there when the
+// page has an engine picker.
+function useButton(model) {
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'small';
+  btn.textContent = t('models.use');
+  btn.onclick = () => {
+    const page = MODEL_TASK_PAGE[modelTask(model)];
+    if (!page) return;
+    if (page === 'synthesize' || page === 'music') {
+      const sel = $(page === 'music' ? 'musicEngine' : 'engine');
+      const id = model.engine_id || model.dir;
+      if ([...sel.options].some((o) => o.value === id)) {
+        sel.value = id;
+        sel.dispatchEvent(new Event('change'));
+      }
+    }
+    location.hash = '#/' + page;
+  };
+  return btn;
 }
 
 // Deleting removes files from disk, so it goes through the same

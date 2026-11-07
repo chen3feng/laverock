@@ -4,6 +4,7 @@
 //! `engine.json`: it is the single source of truth for which files an
 //! engine uses and what its default synthesis parameters are.
 
+use crate::task::TaskKind;
 use serde::{Deserialize, Serialize};
 
 /// Supported backend kinds. Adding a new kind is a code change; adding a
@@ -97,6 +98,13 @@ pub struct Manifest {
     /// Stable identifier, also the directory name in practice.
     pub id: String,
     pub kind: EngineKind,
+    /// The operation this model performs. When absent it follows `kind`
+    /// (`music` → music, `stt` → transcription, everything else → TTS),
+    /// so existing manifests need no change. Set it explicitly for a model
+    /// whose backend kind serves a different task, such as a future
+    /// voice-conversion engine.
+    #[serde(default)]
+    pub task: Option<TaskKind>,
     pub name: String,
     /// One-line blurb for model pickers. Built-in installs inherit the
     /// catalog text through the server; hand-written manifests may set it.
@@ -143,6 +151,16 @@ pub struct Manifest {
 }
 
 impl Manifest {
+    /// The task this model serves. Falls back to the backend kind so
+    /// manifests written before the field existed keep working.
+    pub fn task(&self) -> TaskKind {
+        self.task.unwrap_or(match self.kind {
+            EngineKind::Music => TaskKind::Music,
+            EngineKind::Stt => TaskKind::Asr,
+            _ => TaskKind::Tts,
+        })
+    }
+
     /// Structural problems that make this install unusable, e.g. a
     /// VoxCPM2 directory written by the retired llama.cpp-omni runner.
     /// Cheap to compute (no model load), so the model manager can flag
@@ -1461,6 +1479,28 @@ mod tests {
         .expect("manifest with description");
         assert_eq!(with.description.for_lang("en"), "Fast cloning");
         assert_eq!(with.description.for_lang("zh"), "快速克隆");
+    }
+
+    #[test]
+    fn task_follows_kind_unless_declared() {
+        let parse = |raw: &str| serde_json::from_str::<Manifest>(raw).expect("manifest");
+        assert_eq!(
+            parse(r#"{"id":"s","kind":"kokoro","name":"s"}"#).task(),
+            TaskKind::Tts
+        );
+        assert_eq!(
+            parse(r#"{"id":"m","kind":"music","name":"m"}"#).task(),
+            TaskKind::Music
+        );
+        assert_eq!(
+            parse(r#"{"id":"a","kind":"stt","name":"a"}"#).task(),
+            TaskKind::Asr
+        );
+        // A kind can serve another task when the manifest says so.
+        assert_eq!(
+            parse(r#"{"id":"v","kind":"zipvoice","name":"v","task":"vc"}"#).task(),
+            TaskKind::Vc
+        );
     }
 
     #[test]
