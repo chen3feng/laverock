@@ -18,7 +18,11 @@ describes the loopback listener.
 | --- | --- | --- |
 | GET | `/api/health` | service status |
 | GET | `/api/engines` | registered engines and their defaults |
-| POST | `/api/engines/:id/synthesize` | multipart `text` plus either `profile_id` or (`prompt` WAV + `prompt_text`); optional engine parameters → WAV |
+| POST | `/api/engines/:id/synthesize` | multipart `text` plus either `profile_id` or (`prompt` WAV + `prompt_text`); optional engine parameters → WAV. Add `x-laverock-job: 1` to run it as a background job |
+| GET | `/api/jobs/:id` | job status, progress and artifacts |
+| GET | `/api/jobs/:id/events` | job events as Server-Sent Events (snapshot, then replay and live) |
+| POST | `/api/jobs/:id/cancel` | ask the worker to stop → `202` |
+| GET | `/api/jobs/:id/files/:name` | download a finished artifact |
 | GET | `/api/profiles` | saved voices with duration, size and take count |
 | POST | `/api/profiles` | multipart `name`, `prompt_text`, `prompt` (WAV), or repeated `capture` ids → saved voice |
 | POST | `/api/profiles/:id` | multipart `name`, `prompt_text`, optional `prompt` → edit a saved voice |
@@ -83,6 +87,22 @@ curl -X POST http://127.0.0.1:8787/api/engines/voxcpm2/synthesize \
   -F profile_id=p1793075127-c66c \
   -o out.wav
 ```
+
+## Background jobs
+
+A long generation can outlive the request that started it. Send
+`x-laverock-job: 1` with `POST /api/engines/:id/synthesize` and the server
+answers `202 {"job_id": "…"}` immediately; the work continues in the
+background. Jobs live in the server process and their artifacts stay under
+`data/jobs/<id>/` for a day.
+
+`GET /api/jobs/:id/events` is an SSE stream: the first frame is a
+`snapshot` (`id`, `kind`, `status`, `progress`, `message`, `artifacts`),
+then buffered events are replayed and live ones follow until `done` or
+`error`. Event kinds are `stage`, `progress`, `audio`, `artifact`, `done`
+and `error`. Reconnecting replays what was missed, so a refreshed page
+resumes instead of losing the run. `POST …/cancel` sets the cancellation
+flag; the worker stops between takes.
 
 ## OpenAI-compatible API
 

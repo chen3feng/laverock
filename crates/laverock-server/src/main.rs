@@ -23,6 +23,7 @@
 mod captures;
 mod export;
 mod history;
+mod jobs;
 mod models;
 mod openai_compat;
 mod profiles;
@@ -117,6 +118,7 @@ async fn main() {
         tracing::info!("migrated {migrated} saved voices into the recording library");
     }
     let history = Arc::new(history::HistoryStore::open(&data_dir).expect("open history"));
+    let jobs = Arc::new(jobs::JobStore::open(std::path::Path::new(&data_dir)).expect("open jobs"));
     let remote = Arc::new(RemoteState::open(&data_dir).expect("open remote state"));
     let scripts_dir = models::resolve_scripts_dir();
     let model_service = Arc::new(ModelService::new_multi(
@@ -147,6 +149,7 @@ async fn main() {
         settings,
         models: model_service,
         transcriber: Arc::new(laverock_core::Transcriber::new_all(models_dirs.clone())),
+        jobs,
         lan: lan_tx,
         port,
     };
