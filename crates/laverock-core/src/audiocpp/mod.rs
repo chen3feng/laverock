@@ -13,6 +13,9 @@
 //!   vocoder, cloned from a reference clip (zh/en).
 //! * `ace_step` — ACE-Step 1.5: text/lyrics-to-music at 48 kHz stereo,
 //!   the only family here that is not speech.
+//!
+//! This file owns the shared CLI/resident-server plumbing; each family's
+//! flags and resident options live in `families/<family>.rs`.
 
 use crate::i18n::{self, Key};
 use crate::{
@@ -32,13 +35,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-/// Characters per CosyVoice3 long-form chunk. Its 0.5B LLM starts
-/// dropping and repeating words once a single request carries much more
-/// than ~150 characters (a 158-character request already repeated its
-/// final clause, a 551-character one lost half the text), while
-/// audio.cpp's long-form chunker defaults to 600 — far above that cliff.
-/// 100 keeps every chunk inside the model's stable range.
-const COSYVOICE_TEXT_CHUNK_CHARS: i64 = 100;
+mod families;
 
 /// How long a resident `audiocpp_server` keeps its weights after the last
 /// request. The process itself stays up, so a follow-up request is warm.
@@ -165,6 +162,22 @@ struct ResidentServer {
     child: Child,
     port: u16,
     dir: PathBuf,
+}
+
+/// Per-family options for a resident-server request: the OpenAI-style
+/// `options` object plus the separate `reference_text` field.
+pub(crate) struct FamilyResident {
+    pub(crate) options: Map<String, Value>,
+    pub(crate) reference_text: Option<String>,
+}
+
+impl FamilyResident {
+    pub(crate) fn new() -> Self {
+        Self {
+            options: Map::new(),
+            reference_text: None,
+        }
+    }
 }
 
 impl Drop for AudioCppEngine {
@@ -349,22 +362,7 @@ impl SpeechEngine for AudioCppEngine {
                 i18n::Message::new(Key::ReferenceAudioRequired).arg("engine", self.family.label()),
             ));
         }
-        match self.family {
-            Family::Dots | Family::VoxCpm2 | Family::IndexTts2 | Family::AceStep => (),
-            Family::CosyVoice => {
-                let template = self.param_str(req, "template", "zero_shot");
-                if template == "zero_shot" && self.prompt_text(req).is_none() {
-                    return Err(CoreError::UserError(i18n::Message::new(
-                        Key::ZeroShotTranscriptRequired,
-                    )));
-                }
-                if template == "instruct" && self.param_str(req, "instruct", "").is_empty() {
-                    return Err(CoreError::UserError(i18n::Message::new(
-                        Key::InstructRequired,
-                    )));
-                }
-            }
-        }
+        self.validate(req)?;
 
         let _guard = self.run_lock.lock().expect("audiocpp run lock");
 
@@ -580,150 +578,33 @@ impl SpeechEngine for AudioCppEngine {
 }
 
 impl AudioCppEngine {
+    /// Family-specific request validation that must run before any work.
+    fn validate(&self, req: &SynthRequest) -> Result<()> {
+        match self.family {
+            Family::CosyVoice => self.cosyvoice_validate(req),
+            _ => Ok(()),
+        }
+    }
+
     /// audio.cpp task name for this request.
     fn task(&self, req: &SynthRequest) -> &str {
         match self.family {
-            Family::Dots => "tts",
-            Family::VoxCpm2 => {
-                if req.prompt_samples.is_empty() {
-                    "tts"
-                } else {
-                    "clon"
-                }
-            }
-            Family::CosyVoice => {
-                let template = self.param_str(req, "template", "zero_shot");
-                if template == "instruct" {
-                    "tts"
-                } else {
-                    "clon"
-                }
-            }
-            // IndexTTS-2 has no preset voices: cloning is the only path.
-            Family::IndexTts2 => "clon",
-            Family::AceStep => self.task.as_str(),
+            Family::Dots => self.dots_task(req),
+            Family::VoxCpm2 => self.voxcpm2_task(req),
+            Family::CosyVoice => self.cosyvoice_task(req),
+            Family::IndexTts2 => self.indextts2_task(req),
+            Family::AceStep => self.ace_step_task(req),
         }
     }
 
     fn add_family_options(&self, req: &SynthRequest, cmd: &mut Command) -> Result<()> {
         match self.family {
-            Family::VoxCpm2 => {
-                // VoxCPM2 shares dots' guidance knob; voice-design text is
-                // passed by the UI as the model's parenthesized description.
-                let guidance = req
-                    .params
-                    .get("guidance")
-                    .and_then(Value::as_f64)
-                    .map(|v| v as f32)
-                    .or(self.guidance);
-                if let Some(guidance) = guidance {
-                    cmd.arg("--guidance-scale").arg(format!("{guidance}"));
-                }
-            }
-            Family::Dots => {
-                // x-vector (audio only) or continuation (audio + text).
-                let clone_mode = self.param_str(req, "clone_mode", "xvector");
-                if clone_mode == "continuation" {
-                    match self.prompt_text(req) {
-                        Some(text) => {
-                            cmd.arg("--reference-text").arg(text);
-                        }
-                        None => {
-                            return Err(CoreError::UserError(i18n::Message::new(
-                                Key::TranscriptRequired,
-                            )))
-                        }
-                    }
-                }
-                let guidance = req
-                    .params
-                    .get("guidance")
-                    .and_then(Value::as_f64)
-                    .map(|v| v as f32)
-                    .or(self.guidance);
-                if let Some(guidance) = guidance {
-                    cmd.arg("--guidance-scale").arg(format!("{guidance}"));
-                }
-                if let Some(code) = self.language_tag(req) {
-                    cmd.arg("--language").arg(code);
-                }
-            }
-            Family::IndexTts2 => {
-                // The language label helps the text front-end read mixed
-                // zh/en text. "auto" (the default) lets audio.cpp pick zh
-                // when the text contains Han characters and en otherwise,
-                // so it is passed as no option at all.
-                if let Some(code) = self.language_tag(req).filter(|c| c != "auto") {
-                    cmd.arg("--language").arg(code);
-                }
-                // Beam search (the model default of 3) reads noticeably
-                // better but costs ~20% more GPT decode time; greedy
-                // decoding (1) is the fast path.
-                let beams = match req.params.get("num_beams") {
-                    Some(Value::String(raw)) => raw.trim().parse::<u32>().ok(),
-                    Some(value) => value.as_u64().map(|n| n as u32),
-                    None => None,
-                }
-                .unwrap_or(3)
-                .clamp(1, 8);
-                cmd.arg("--request-option")
-                    .arg(format!("num_beams={beams}"));
-                // Long text is cut into segments by audio.cpp; the model's
-                // own full-stop pause inside a segment is shorter than a
-                // comma's, so the only audible lever is where segments are
-                // cut and how much silence goes between them.
-                let chunk = self.param_i64(req, "text_chunk_size", 600).clamp(40, 600);
-                cmd.arg("--text-chunk-size").arg(chunk.to_string());
-                let pause = self
-                    .param_i64(req, "interval_silence_ms", 400)
-                    .clamp(0, 2000);
-                cmd.arg("--request-option")
-                    .arg(format!("interval_silence_ms={pause}"));
-            }
-            Family::CosyVoice => {
-                let template = self.param_str(req, "template", "zero_shot");
-                cmd.arg("--request-option")
-                    .arg(format!("template_name={template}"));
-                let top_k = self.param_i64(req, "top_k", 25);
-                cmd.arg("--request-option").arg(format!("top_k={top_k}"));
-                // Long text must be split before the LLM degenerates;
-                // audio.cpp then stitches the chunks into one take.
-                cmd.arg("--text-chunk-size")
-                    .arg(COSYVOICE_TEXT_CHUNK_CHARS.to_string());
-                if template == "zero_shot" {
-                    if let Some(text) = self.prompt_text(req) {
-                        cmd.arg("--reference-text").arg(text);
-                    }
-                }
-                if template == "instruct" {
-                    let instruct = self.param_str(req, "instruct", "");
-                    cmd.arg("--request-option")
-                        .arg(format!("instruct={instruct}"));
-                }
-            }
-            Family::AceStep => {
-                // `--text` carries the style caption; the lyrics are a
-                // separate option and empty means instrumental.
-                let lyrics = self.param_str(req, "lyrics", "");
-                if !lyrics.is_empty() {
-                    cmd.arg("--lyrics").arg(lyrics);
-                }
-                let duration = self.param_f64(req, "duration_sec", 60.0).clamp(10.0, 600.0);
-                cmd.arg("--duration-seconds").arg(format!("{duration}"));
-                cmd.arg("--task-route")
-                    .arg(self.param_str(req, "task_route", "text2music"));
-                let guidance = req
-                    .params
-                    .get("guidance_scale")
-                    .and_then(Value::as_f64)
-                    .map(|v| v as f32)
-                    .or(self.guidance);
-                if let Some(guidance) = guidance {
-                    cmd.arg("--guidance-scale").arg(format!("{guidance}"));
-                }
-            }
+            Family::Dots => self.dots_options(req, cmd),
+            Family::VoxCpm2 => self.voxcpm2_options(req, cmd),
+            Family::CosyVoice => self.cosyvoice_options(req, cmd),
+            Family::IndexTts2 => self.indextts2_options(req, cmd),
+            Family::AceStep => self.ace_step_options(req, cmd),
         }
-        Ok(())
     }
 
     fn language_tag(&self, req: &SynthRequest) -> Option<String> {
@@ -778,10 +659,11 @@ impl AudioCppEngine {
     /// CosyVoice3 switch between cloning and plain/instruction TTS.
     fn server_tasks(&self) -> Vec<&str> {
         match self.family {
-            Family::Dots => vec!["tts"],
-            Family::VoxCpm2 | Family::CosyVoice => vec!["clon", "tts"],
-            Family::IndexTts2 => vec!["clon"],
-            Family::AceStep => vec![self.task.as_str()],
+            Family::Dots => self.dots_server_tasks(),
+            Family::VoxCpm2 => self.voxcpm2_server_tasks(),
+            Family::CosyVoice => self.cosyvoice_server_tasks(),
+            Family::IndexTts2 => self.indextts2_server_tasks(),
+            Family::AceStep => self.ace_step_server_tasks(),
         }
     }
 
@@ -850,118 +732,24 @@ impl AudioCppEngine {
         ref_wav: Option<&Path>,
         seed: i64,
     ) -> Result<Value> {
-        let mut options = Map::new();
-        let mut reference_text: Option<String> = None;
-        match self.family {
-            Family::Dots => {
-                let clone_mode = self.param_str(req, "clone_mode", "xvector");
-                if clone_mode == "continuation" {
-                    match self.prompt_text(req) {
-                        Some(text) => reference_text = Some(text.to_string()),
-                        None => {
-                            return Err(CoreError::UserError(i18n::Message::new(
-                                Key::TranscriptRequired,
-                            )))
-                        }
-                    }
-                }
-                let guidance = req
-                    .params
-                    .get("guidance")
-                    .and_then(Value::as_f64)
-                    .map(|v| v as f32)
-                    .or(self.guidance);
-                if let Some(guidance) = guidance {
-                    options.insert("guidance_scale".into(), json!(guidance));
-                }
-                if let Some(code) = self.language_tag(req) {
-                    options.insert("language".into(), json!(code));
-                }
-                options.insert("num_inference_steps".into(), json!(req.num_steps));
-            }
-            Family::VoxCpm2 => {
-                let guidance = req
-                    .params
-                    .get("guidance")
-                    .and_then(Value::as_f64)
-                    .map(|v| v as f32)
-                    .or(self.guidance);
-                if let Some(guidance) = guidance {
-                    options.insert("guidance_scale".into(), json!(guidance));
-                }
-                options.insert("num_inference_steps".into(), json!(req.num_steps));
-            }
-            Family::CosyVoice => {
-                let template = self.param_str(req, "template", "zero_shot");
-                options.insert("template_name".into(), json!(template));
-                options.insert("top_k".into(), json!(self.param_i64(req, "top_k", 25)));
-                options.insert("text_chunk_size".into(), json!(COSYVOICE_TEXT_CHUNK_CHARS));
-                if template == "zero_shot" {
-                    reference_text = self.prompt_text(req).map(str::to_string);
-                }
-                if template == "instruct" {
-                    options.insert(
-                        "instruct".into(),
-                        json!(self.param_str(req, "instruct", "")),
-                    );
-                }
-            }
-            Family::IndexTts2 => {
-                if let Some(code) = self.language_tag(req).filter(|c| c != "auto") {
-                    options.insert("language".into(), json!(code));
-                }
-                let beams = match req.params.get("num_beams") {
-                    Some(Value::String(raw)) => raw.trim().parse::<u32>().ok(),
-                    Some(value) => value.as_u64().map(|n| n as u32),
-                    None => None,
-                }
-                .unwrap_or(3)
-                .clamp(1, 8);
-                options.insert("num_beams".into(), json!(beams));
-                let chunk = self.param_i64(req, "text_chunk_size", 600).clamp(40, 600);
-                options.insert("text_chunk_size".into(), json!(chunk));
-                let pause = self
-                    .param_i64(req, "interval_silence_ms", 400)
-                    .clamp(0, 2000);
-                options.insert("interval_silence_ms".into(), json!(pause));
-            }
-            Family::AceStep => {
-                let lyrics = self.param_str(req, "lyrics", "");
-                if !lyrics.is_empty() {
-                    options.insert("lyrics".into(), json!(lyrics));
-                }
-                let duration = self.param_f64(req, "duration_sec", 60.0).clamp(10.0, 600.0);
-                options.insert("duration_sec".into(), json!(duration));
-                options.insert(
-                    "route".into(),
-                    json!(self.param_str(req, "task_route", "text2music")),
-                );
-                let guidance = req
-                    .params
-                    .get("guidance_scale")
-                    .and_then(Value::as_f64)
-                    .map(|v| v as f32)
-                    .or(self.guidance);
-                if let Some(guidance) = guidance {
-                    options.insert("guidance_scale".into(), json!(guidance));
-                }
-                options.insert("num_inference_steps".into(), json!(req.num_steps));
-                if let Some(code) = self.language_tag(req) {
-                    options.insert("language".into(), json!(code));
-                }
-            }
-        }
+        let family = match self.family {
+            Family::Dots => self.dots_resident(req)?,
+            Family::VoxCpm2 => self.voxcpm2_resident(req)?,
+            Family::CosyVoice => self.cosyvoice_resident(req)?,
+            Family::IndexTts2 => self.indextts2_resident(req)?,
+            Family::AceStep => self.ace_step_resident(req)?,
+        };
 
         let mut body = json!({
             "model": self.resident_id(self.task(req)),
             "input": req.text,
             "seed": seed,
-            "options": Value::Object(options),
+            "options": Value::Object(family.options),
         });
         if let Some(path) = ref_wav {
             body["voice_ref"] = json!(path.to_string_lossy());
         }
-        if let Some(text) = reference_text {
+        if let Some(text) = family.reference_text {
             body["reference_text"] = json!(text);
         }
         Ok(body)
