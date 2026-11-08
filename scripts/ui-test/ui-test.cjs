@@ -349,6 +349,50 @@ async function main() {
       }
     }
 
+    // --------------------------------------------------------------- projects
+    say('subtitle projects');
+    await page.click('nav a[data-page="projects"]');
+    await page.waitForSelector('#page-projects.active');
+    const projectsBefore = new Set(
+      (await apiJson(context.request, `${base}/api/projects`)).map((p) => p.id),
+    );
+    await page.click('#newProjectBtn');
+    await page.setInputFiles('#projectCapture .cap-file', ref);
+    await page.fill('#projectName', 'UI subtitle test');
+    await page.click('#projectCreate');
+    // Creating transcribes automatically when the model is installed; the
+    // editor opens either way.
+    await page.waitForSelector('#projectEditor:not([hidden])', { timeout: 240_000 });
+    if (await page.locator('#projectSegments .seg-row').count() === 0) {
+      await page.click('#projectAddSegment');
+      await page.fill('#projectSegments .seg-row .seg-start', '0');
+      await page.fill('#projectSegments .seg-row .seg-end', '1.5');
+    }
+    await page.fill('#projectSegments .seg-row .seg-text', 'edited cue');
+    const [projectSaved] = await Promise.all([
+      page.waitForResponse(
+        (r) => /\/api\/projects\/[^/]+$/.test(r.url()) && r.request().method() === 'PATCH',
+        { timeout: 60_000 },
+      ),
+      page.click('#projectSave'),
+    ]);
+    assert.ok(projectSaved.ok(), `save cues -> HTTP ${projectSaved.status()}`);
+    pass('project cues saved');
+
+    const projectSrt = await saveDownload(page, page.locator('#projectSrt'), artifacts);
+    const projectSrtBody = fs.readFileSync(projectSrt, 'utf8');
+    assert.ok(
+      projectSrtBody.includes('edited cue') && projectSrtBody.includes(' --> '),
+      'project SRT contains the edited cue',
+    );
+    pass(`project subtitle export (${path.basename(projectSrt)})`);
+
+    const projectId = (await apiJson(context.request, `${base}/api/projects`))
+      .map((p) => p.id)
+      .find((id) => !projectsBefore.has(id));
+    assert.ok(projectId, 'project created');
+    await context.request.delete(`${base}/api/projects/${projectId}`);
+
     // ---------------------------------------------------------------- voices
     say('voices');
     await page.click('nav a[data-page="voices"]');

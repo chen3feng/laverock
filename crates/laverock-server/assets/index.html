@@ -187,6 +187,39 @@
     width: 100%; height: 6px; margin-top: 12px;
     accent-color: var(--accent);
   }
+  /* ---------- subtitle projects ---------- */
+  .project-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .project-title {
+    flex: 1 1 220px; min-width: 0; font-size: 16px; font-weight: 600;
+    background: transparent; border: 1px solid transparent; border-radius: 8px;
+    padding: 6px 8px; color: var(--text);
+  }
+  .project-title:hover, .project-title:focus { border-color: var(--line); background: var(--panel2); }
+  .project-head .hint { margin: 0; }
+  .seg-list { display: flex; flex-direction: column; gap: 8px; margin-top: 14px; }
+  .seg-row {
+    display: grid; grid-template-columns: 26px 78px auto 78px minmax(0, 1fr) 30px;
+    align-items: start; gap: 8px;
+  }
+  .seg-row input[type="number"] {
+    width: 100%; background: var(--panel2); color: var(--text);
+    border: 1px solid var(--line); border-radius: 9px; padding: 7px 8px;
+    font: inherit; font-size: 13px; outline: none;
+    font-variant-numeric: tabular-nums;
+  }
+  .seg-row input[type="number"]:focus { border-color: var(--accent2); }
+  .seg-index {
+    color: var(--muted); font-size: 12px; text-align: right; padding-top: 9px;
+    font-variant-numeric: tabular-nums;
+  }
+  .seg-arrow { color: var(--muted); padding-top: 8px; }
+  .seg-text { min-height: 38px; padding: 7px 10px; font-size: 13.5px; }
+  .seg-del { padding: 7px 0; line-height: 1; }
+  @media (max-width: 640px) {
+    .seg-row { grid-template-columns: 22px minmax(0, 1fr) minmax(0, 1fr) 30px; }
+    .seg-row .seg-arrow { display: none; }
+    .seg-text { grid-column: 1 / -1; }
+  }
   .empty {
     border: 1px dashed var(--line); border-radius: 14px; padding: 34px 20px;
     text-align: center; color: var(--muted); font-size: 13.5px;
@@ -326,6 +359,10 @@
     <a href="#/tools" data-page="tools">
       <svg viewBox="0 0 24 24"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
       <span data-i18n="nav.tools">工具</span>
+    </a>
+    <a href="#/projects" data-page="projects">
+      <svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M7 15h4"/><path d="M13 15h4"/><path d="M7 11h10"/></svg>
+      <span data-i18n="nav.projects">字幕</span>
     </a>
     <a href="#/voices" data-page="voices">
       <svg viewBox="0 0 24 24"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><path d="M12 19v3"/></svg>
@@ -558,6 +595,50 @@
         </div>
         <div class="actions" id="toolDownloads"></div>
         <div class="hint" data-i18n="tools.ephemeral">结果保存在本机任务目录中，24 小时后自动清理。</div>
+      </div>
+    </section>
+
+    <!-- ================= 字幕项目 ================= -->
+    <section id="page-projects" class="page">
+      <div class="page-head" style="display:flex;align-items:flex-end;justify-content:space-between;gap:12px;flex-wrap:wrap">
+        <div><h1 data-i18n="projects.title">字幕项目</h1><p class="sub" data-i18n="projects.sub">导入一段音频，自动转写并校对时间轴，导出 SRT/VTT。</p></div>
+        <div><button id="newProjectBtn" type="button" data-i18n="projects.new">＋ 新建项目</button></div>
+      </div>
+
+      <div class="card" id="newProjectCard" hidden>
+        <label data-i18n="projects.audio">音频（WAV）</label>
+        <div id="projectCapture"></div>
+        <label for="projectName" data-i18n="projects.name">项目名称</label>
+        <input id="projectName" type="text" data-i18n-ph="projects.name.ph" />
+        <label for="projectSubtitles" data-i18n="projects.import">已有字幕（可选）</label>
+        <input id="projectSubtitles" type="file" accept=".srt,.vtt" />
+        <div class="hint" data-i18n="projects.hint">导入字幕后不再自动转写；没有字幕时会用 SenseVoice 转写。</div>
+        <div class="actions" style="margin-top:16px">
+          <button id="projectCreate" type="button" data-i18n="projects.create">创建项目</button>
+          <button class="ghost" id="projectCreateCancel" type="button" data-i18n="cancel">取消</button>
+          <span class="hint" id="projectCreateHint"></span>
+        </div>
+      </div>
+
+      <div class="grid" id="projectGrid"></div>
+      <div class="empty" id="projectsEmpty" data-i18n="projects.empty" hidden>还没有项目。点击「新建项目」导入一段音频。</div>
+
+      <div class="card" id="projectEditor" hidden>
+        <div class="project-head">
+          <input id="projectTitle" class="project-title" type="text" />
+          <span class="hint" id="projectMeta"></span>
+        </div>
+        <div class="actions">
+          <button id="projectSave" type="button" data-i18n="projects.save">保存分段</button>
+          <button class="ghost" id="projectTranscribe" type="button" data-i18n="projects.transcribe">重新转写</button>
+          <button class="ghost" id="projectSrt" type="button">SRT</button>
+          <button class="ghost" id="projectVtt" type="button">VTT</button>
+          <button class="ghost danger" id="projectDelete" type="button" data-i18n="ui.delete">删除</button>
+          <button class="ghost" id="projectClose" type="button" data-i18n="projects.close">关闭</button>
+        </div>
+        <audio id="projectAudio" controls></audio>
+        <div class="seg-list" id="projectSegments"></div>
+        <button class="ghost small" id="projectAddSegment" type="button" data-i18n="projects.add_segment">＋ 添加分段</button>
       </div>
     </section>
 
@@ -1306,6 +1387,69 @@ addI18n({
 
 addI18n({
   zh: {
+    'nav.projects': '字幕',
+    'projects.title': '字幕项目',
+    'projects.sub': '导入一段音频，自动转写并校对时间轴，导出 SRT/VTT。',
+    'projects.new': '＋ 新建项目',
+    'projects.audio': '音频（WAV）',
+    'projects.name': '项目名称',
+    'projects.name.ph': '例如：访谈第一期',
+    'projects.import': '已有字幕（可选）',
+    'projects.hint': '导入字幕后不再自动转写；没有字幕时会用 SenseVoice 转写。',
+    'projects.create': '创建项目',
+    'projects.creating': '正在创建…',
+    'projects.default_name': '未命名项目',
+    'projects.need_audio': '请先选择或录制一段音频。',
+    'projects.too_large': '音频不能超过 200 MB。',
+    'projects.empty': '还没有项目。点击「新建项目」导入一段音频。',
+    'projects.load_failed': '读取项目失败：',
+    'projects.segments': '{n} 段字幕',
+    'projects.open': '打开',
+    'projects.save': '保存分段',
+    'projects.saved': '已保存',
+    'projects.transcribe': '重新转写',
+    'projects.transcribing': '正在转写，长音频可能需要几分钟…',
+    'projects.transcribed': '转写完成',
+    'projects.transcribe_failed': '转写失败：',
+    'projects.add_segment': '＋ 添加分段',
+    'projects.close': '关闭',
+    'projects.deleted': '项目已删除',
+    'projects.delete_confirm': '删除项目「{name}」？源音频和字幕会一并删除，此操作不可撤销。',
+  },
+  en: {
+    'nav.projects': 'Subtitles',
+    'projects.title': 'Subtitle projects',
+    'projects.sub': 'Import a clip, transcribe it, fix the timeline, and export SRT/VTT.',
+    'projects.new': '+ New project',
+    'projects.audio': 'Audio (WAV)',
+    'projects.name': 'Project name',
+    'projects.name.ph': 'e.g. Interview, episode 1',
+    'projects.import': 'Existing subtitles (optional)',
+    'projects.hint': 'With a subtitle file the clip is not transcribed; without one SenseVoice transcribes it.',
+    'projects.create': 'Create project',
+    'projects.creating': 'Creating…',
+    'projects.default_name': 'Untitled project',
+    'projects.need_audio': 'Choose or record a clip first.',
+    'projects.too_large': 'The clip must be 200 MB or smaller.',
+    'projects.empty': 'No projects yet. Use “New project” to import a clip.',
+    'projects.load_failed': 'Could not load projects: ',
+    'projects.segments': '{n} cues',
+    'projects.open': 'Open',
+    'projects.save': 'Save cues',
+    'projects.saved': 'Saved',
+    'projects.transcribe': 'Re-transcribe',
+    'projects.transcribing': 'Transcribing; long clips can take a few minutes…',
+    'projects.transcribed': 'Transcription complete',
+    'projects.transcribe_failed': 'Transcription failed: ',
+    'projects.add_segment': '+ Add cue',
+    'projects.close': 'Close',
+    'projects.deleted': 'Project deleted',
+    'projects.delete_confirm': 'Delete “{name}”? Its source clip and cues are removed too. This cannot be undone.',
+  },
+});
+
+addI18n({
+  zh: {
     'cap.file': '选择文件', 'cap.record': '● 录音', 'cap.stop': '■ 停止', 'cap.none': '未选择',
     'cap.transcribe': '✎ 转写', 'transcribe.busy': '转写中…',
     'preset.official.hf': '官方（huggingface.co）', 'preset.cn': 'hf-mirror.com（国内加速）',
@@ -1675,7 +1819,7 @@ async function jobSnapshot(id) {
 }
 
 const $ = (id) => document.getElementById(id);
-const PAGES = ["synthesize", "music", "captures", "tools", "voices", "models", "history", "settings"];
+const PAGES = ["synthesize", "music", "captures", "tools", "projects", "voices", "models", "history", "settings"];
 const HF_PRESETS = [
   { value: '', labelKey: 'preset.official.hf' },
   { value: 'https://hf-mirror.com', labelKey: 'preset.cn' },
@@ -1725,7 +1869,7 @@ async function setLanguage(next, { persist = true } = {}) {
   fillPreset($('hfPreset'), HF_PRESETS);
   fillPreset($('pipPreset'), PIP_PRESETS);
   syncProxyMode();
-  await Promise.all([loadEngines(), loadProfiles(), loadCaptures(), loadSettingsPage(), loadToolsPage()]);
+  await Promise.all([loadEngines(), loadProfiles(), loadCaptures(), loadSettingsPage(), loadToolsPage(), loadProjects()]);
   renderHistory();
   await loadModels();
   if (session && session.lan_enabled) loadDevices();
@@ -4778,6 +4922,277 @@ $('saveSettings').onclick = async () => {
   }
 };
 
+// ---------------------------------------------------------------- subtitle projects
+
+// A project owns one source clip and its timed cues. This stage covers the
+// subtitle workflow: import or transcribe, edit the cues against the audio,
+// and export SRT/VTT. Per-segment TTS and video packaging come later, but
+// the stored schema already carries their fields.
+let projectList = [];
+let currentProject = null;
+
+async function loadProjects() {
+  try {
+    projectList = await api('/api/projects');
+  } catch (e) {
+    toast(t('projects.load_failed') + e.message, true);
+    return;
+  }
+  renderProjects();
+  if (currentProject) updateProjectMeta(currentProject);
+}
+
+function renderProjects() {
+  const grid = $('projectGrid');
+  if (!grid) return;
+  grid.innerHTML = '';
+  $('projectsEmpty').hidden = projectList.length > 0;
+  for (const project of projectList) {
+    const el = document.createElement('div');
+    el.className = 'voice-card project-card';
+    el.dataset.id = project.id;
+    const count = (project.segments || []).length;
+    el.innerHTML = `
+      <div class="voice-top"><b>${esc(project.name)}</b></div>
+      <div class="voice-meta">${fmtDur(project.source.duration)} · ${esc(t('projects.segments', { n: count }))} · ${fmtDate(project.updated_at)}</div>
+      <div class="voice-actions">
+        <button class="ghost small open" type="button">${esc(t('projects.open'))}</button>
+        <button class="ghost small danger del" type="button">${esc(t('ui.delete'))}</button>
+      </div>`;
+    el.querySelector('.open').onclick = () => openProject(project);
+    el.querySelector('.del').onclick = () => deleteProject(project);
+    grid.appendChild(el);
+  }
+}
+
+function updateProjectMeta(project) {
+  const count = (project.segments || []).length;
+  $('projectMeta').textContent =
+    `${fmtDur(project.source.duration)} · ${t('projects.segments', { n: count })}`;
+}
+
+function openProject(project) {
+  currentProject = project;
+  $('projectEditor').hidden = false;
+  $('projectTitle').value = project.name;
+  updateProjectMeta(project);
+  $('projectAudio').src = `/api/projects/${encodeURIComponent(project.id)}/source`;
+  renderSegments(project.segments || []);
+  $('projectEditor').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function closeProjectEditor() {
+  currentProject = null;
+  $('projectEditor').hidden = true;
+  $('projectSegments').innerHTML = '';
+  $('projectAudio').pause();
+  $('projectAudio').removeAttribute('src');
+}
+
+function renderSegments(segments) {
+  const host = $('projectSegments');
+  host.innerHTML = '';
+  segments.forEach((segment, index) => host.appendChild(segmentRow(segment, index)));
+}
+
+function segmentRow(segment, index) {
+  const row = document.createElement('div');
+  row.className = 'seg-row';
+  row.dataset.id = segment.id || '';
+  const start = Number.isFinite(segment.start) ? segment.start : 0;
+  const end = Number.isFinite(segment.end) ? segment.end : start + 1;
+  row.innerHTML = `
+    <span class="seg-index">${index + 1}</span>
+    <input class="seg-start" type="number" min="0" step="0.01" value="${start.toFixed(2)}" />
+    <span class="seg-arrow">→</span>
+    <input class="seg-end" type="number" min="0" step="0.01" value="${end.toFixed(2)}" />
+    <textarea class="seg-text" rows="2">${esc(segment.text || '')}</textarea>
+    <button class="ghost small danger seg-del" type="button" title="${esc(t('ui.delete'))}">×</button>`;
+  row.querySelector('.seg-del').onclick = () => {
+    row.remove();
+    renumberSegments();
+  };
+  return row;
+}
+
+function renumberSegments() {
+  document.querySelectorAll('#projectSegments .seg-index').forEach((el, index) => {
+    el.textContent = String(index + 1);
+  });
+}
+
+// Keep the fields this stage does not edit (translation, TTS, status) from
+// being reset by a subtitle-only save.
+function collectSegments() {
+  const existing = new Map((currentProject?.segments || []).map((s) => [s.id, s]));
+  return [...document.querySelectorAll('#projectSegments .seg-row')].map((row, index) => {
+    const id = row.dataset.id || `s${index + 1}`;
+    const old = existing.get(id) || {};
+    return {
+      ...old,
+      id,
+      start: parseFloat(row.querySelector('.seg-start').value) || 0,
+      end: parseFloat(row.querySelector('.seg-end').value) || 0,
+      text: row.querySelector('.seg-text').value,
+    };
+  });
+}
+
+async function saveProject() {
+  if (!currentProject) return;
+  try {
+    currentProject = await api(`/api/projects/${encodeURIComponent(currentProject.id)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: $('projectTitle').value, segments: collectSegments() }),
+    });
+    toast(t('projects.saved'));
+    await loadProjects();
+    openProject(currentProject);
+  } catch (e) {
+    toast(t('ui.failed') + e.message, true);
+  }
+}
+
+async function transcribeProject() {
+  if (!currentProject) return;
+  if (!transcribeAvailable) {
+    toast(t('ui.install_the_sensevoice_speech_to'), true);
+    return;
+  }
+  const button = $('projectTranscribe');
+  button.disabled = true;
+  toast(t('projects.transcribing'));
+  try {
+    currentProject = await api(
+      `/api/projects/${encodeURIComponent(currentProject.id)}/transcribe`,
+      { method: 'POST' },
+    );
+    toast(t('projects.transcribed'));
+    await loadProjects();
+    openProject(currentProject);
+  } catch (e) {
+    toast(t('ui.transcription_failed') + e.message, true);
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function deleteProject(project) {
+  if (!(await confirmAction(t('projects.delete_confirm').replace('{name}', project.name)))) return;
+  try {
+    await api(`/api/projects/${encodeURIComponent(project.id)}`, { method: 'DELETE' });
+    toast(t('projects.deleted'));
+    if (currentProject && currentProject.id === project.id) closeProjectEditor();
+    await loadProjects();
+  } catch (e) {
+    toast(t('ui.failed') + e.message, true);
+  }
+}
+
+async function downloadProjectSubtitles(format) {
+  if (!currentProject) return;
+  try {
+    const res = await apiFetch(
+      `/api/projects/${encodeURIComponent(currentProject.id)}/subtitles?format=${format}`);
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.error || res.statusText || ('HTTP ' + res.status));
+    }
+    const name = (currentProject.name || 'laverock').replace(/[\\/:*?"<>|]+/g, '_');
+    await saveBlob(await res.blob(), `${name}.${format}`);
+  } catch (e) {
+    toast(t('ui.download_failed') + e.message, true);
+  }
+}
+
+function addSegment() {
+  const rows = document.querySelectorAll('#projectSegments .seg-row');
+  const last = rows.length
+    ? parseFloat(rows[rows.length - 1].querySelector('.seg-end').value) || 0
+    : 0;
+  const row = segmentRow({ start: last, end: last + 2, text: '' }, rows.length);
+  $('projectSegments').appendChild(row);
+}
+
+const projectCapture = new Capture($('projectCapture'));
+// The project has its own transcription step; keep the shared component's
+// per-clip transcribe button out of this form.
+projectCapture.syncTranscribeButton = () => { projectCapture.transBtn.hidden = true; };
+projectCapture.syncTranscribeButton();
+if (!window.isSecureContext) {
+  projectCapture.rec.disabled = true;
+  projectCapture.rec.title = t('ui.microphone_access_requires_https_or');
+}
+
+async function createProject() {
+  if (!projectCapture.blob) {
+    toast(t('projects.need_audio'), true);
+    return;
+  }
+  if (projectCapture.blob.size > 200 * 1024 * 1024) {
+    toast(t('projects.too_large'), true);
+    return;
+  }
+  const fd = new FormData();
+  fd.append('audio', projectCapture.blob, projectCapture.filename || 'source.wav');
+  fd.append('name', $('projectName').value.trim() || t('projects.default_name'));
+  const subtitleFile = $('projectSubtitles').files[0];
+  if (subtitleFile) fd.append('subtitles', await subtitleFile.text());
+
+  const button = $('projectCreate');
+  button.disabled = true;
+  $('projectCreateHint').textContent = t('projects.creating');
+  try {
+    let project = await api('/api/projects', { method: 'POST', body: fd });
+    // Without an imported subtitle file, transcribe immediately so the
+    // editor opens with cues. A failure leaves the project empty and the
+    // editor's Re-transcribe button can retry.
+    if (!project.segments.length && transcribeAvailable) {
+      try {
+        project = await api(
+          `/api/projects/${encodeURIComponent(project.id)}/transcribe`,
+          { method: 'POST' },
+        );
+      } catch (e) {
+        toast(t('projects.transcribe_failed') + e.message, true);
+      }
+    }
+    $('newProjectCard').hidden = true;
+    $('projectName').value = '';
+    $('projectSubtitles').value = '';
+    projectCapture.clear();
+    await loadProjects();
+    openProject(project);
+  } catch (e) {
+    toast(t('ui.failed') + e.message, true);
+  } finally {
+    button.disabled = false;
+    $('projectCreateHint').textContent = '';
+  }
+}
+
+$('newProjectBtn').onclick = () => {
+  $('newProjectCard').hidden = false;
+  $('projectCreateHint').textContent = '';
+};
+$('projectCreateCancel').onclick = () => {
+  $('newProjectCard').hidden = true;
+  projectCapture.clear();
+  $('projectName').value = '';
+  $('projectSubtitles').value = '';
+};
+$('projectCreate').onclick = createProject;
+$('projectSave').onclick = saveProject;
+$('projectTranscribe').onclick = transcribeProject;
+$('projectSrt').onclick = () => downloadProjectSubtitles('srt');
+$('projectVtt').onclick = () => downloadProjectSubtitles('vtt');
+$('projectDelete').onclick = () => {
+  if (currentProject) deleteProject(currentProject);
+};
+$('projectClose').onclick = closeProjectEditor;
+$('projectAddSegment').onclick = addSegment;
+
 // ---------------------------------------------------------------- remote / pairing
 
 async function loadSession() {
@@ -5176,6 +5591,7 @@ function showPage(page) {
   document.title = `${t('nav.' + page)} · Laverock`;
   if (page === 'captures') { loadCaptures(); loadEnhanceStatus(); }
   if (page === 'tools') loadToolsPage();
+  if (page === 'projects') loadProjects();
   if (page === 'voices') loadProfiles();
   if (page === 'history') loadHistory();
   // Installs run on the server and can finish while another page is open,

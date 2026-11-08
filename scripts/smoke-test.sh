@@ -599,6 +599,86 @@ else
 fi
 fi
 
+if want projects; then
+echo "projects"
+project_id() { sed -n 's/^{"id":"\([^"]*\)".*/\1/p'; }
+printf '1\n00:00:00,000 --> 00:00:01,000\nhello\n\n2\n00:00:01,200 --> 00:00:02,400\nworld\n' \
+  >"$OUT/cues.srt"
+pj=$(curl -s -X POST "$BASE/api/projects" -F 'name=smoke-project' \
+  -F "audio=@$DIR/test_wavs/leijun-1.wav" -F "subtitles=<$OUT/cues.srt" | project_id)
+[ -n "$pj" ] && ok "create project ($pj)" || bad "create project"
+case "$(curl -s "$BASE/api/projects")" in
+  *"\"$pj\""*) ok "project listed" ;;
+  *) bad "project missing from list" ;;
+esac
+pj_json=$(curl -s "$BASE/api/projects/$pj")
+case "$pj_json" in
+  *'"segments":[{"id":"s1","start":0.0,"end":1.0,"text":"hello"'*)
+    ok "imported cues" ;;
+  *) bad "imported cues: $(printf '%s' "$pj_json" | head -c 160)" ;;
+esac
+curl -sf "$BASE/api/projects/$pj/source" -o "$OUT/project.wav" \
+  && head -c 4 "$OUT/project.wav" | grep -q RIFF \
+  && ok "project source" || bad "project source"
+
+# PATCH replaces the whole cue list, as the editor sends it.
+printf '{"name":"smoke-project-2","segments":[{"id":"s1","start":0.0,"end":1.5,"text":"edited"}]}' \
+  >"$OUT/project.json"
+code=$(curl -s -o "$OUT/project-patched.json" -w '%{http_code}' -X PATCH \
+  "$BASE/api/projects/$pj" -H 'Content-Type: application/json' \
+  --data-binary @"$OUT/project.json")
+[ "$code" = "200" ] && grep -q '"name":"smoke-project-2"' "$OUT/project-patched.json" \
+  && ok "patch project" || bad "patch project (HTTP $code)"
+code=$(curl -s -o /dev/null -w '%{http_code}' -X PATCH "$BASE/api/projects/$pj" \
+  -H 'Content-Type: application/json' \
+  -d '{"segments":[{"id":"s1","start":2.0,"end":1.0,"text":"bad"}]}')
+[ "$code" = "400" ] && ok "bad cue range -> 400" || bad "bad cue range -> $code"
+
+srt=$(curl -s "$BASE/api/projects/$pj/subtitles?format=srt")
+case "$srt" in
+  *' --> '*edited*) ok "project srt export" ;;
+  *) bad "project srt: $(printf '%s' "$srt" | head -c 120)" ;;
+esac
+vtt=$(curl -s "$BASE/api/projects/$pj/subtitles?format=vtt")
+case "$vtt" in
+  WEBVTT*edited*) ok "project vtt export" ;;
+  *) bad "project vtt: $(printf '%s' "$vtt" | head -c 120)" ;;
+esac
+code=$(curl -s -o /dev/null -w '%{http_code}' \
+  "$BASE/api/projects/$pj/subtitles?format=ass")
+[ "$code" = "400" ] && ok "unknown project subtitle format -> 400" \
+  || bad "unknown project subtitle format -> $code"
+
+if curl -s "$BASE/api/health" | grep -q '"transcribe":true'; then
+  heard=$(curl -s -X POST "$BASE/api/projects/$pj/transcribe")
+  case "$heard" in
+    *武汉*) ok "transcribe project" ;;
+    *) bad "transcribe project: $(printf '%s' "$heard" | head -c 160)" ;;
+  esac
+else
+  echo "  skip transcribing project (no speech-to-text model)"
+fi
+
+# An empty project has nothing to export, and a renamed text file is not a
+# source clip.
+empty=$(curl -s -X POST "$BASE/api/projects" -F 'name=smoke-empty' \
+  -F "audio=@$DIR/test_wavs/leijun-1.wav" | project_id)
+code=$(curl -s -o /dev/null -w '%{http_code}' \
+  "$BASE/api/projects/$empty/subtitles?format=srt")
+[ "$code" = "400" ] && ok "empty project has no subtitles" \
+  || bad "empty project export -> $code"
+printf 'not a wav\n' >"$OUT/not-a-wav-project.txt"
+code=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/projects" \
+  -F 'name=bad' -F "audio=@$OUT/not-a-wav-project.txt;filename=note.wav")
+[ "$code" = "400" ] && ok "non-WAV project -> 400" || bad "non-WAV project -> $code"
+
+for id in "$pj" "$empty"; do
+  curl -s -o /dev/null -X DELETE "$BASE/api/projects/$id"
+done
+code=$(curl -s -o /dev/null -w '%{http_code}' "$BASE/api/projects/$pj")
+[ "$code" = "404" ] && ok "delete project" || bad "deleted project -> $code"
+fi
+
 if want voxcpm2; then
 if case "$engines_json" in *'"id":"voxcpm2"'*) true ;; *) false ;; esac; then
   echo "voxcpm2"

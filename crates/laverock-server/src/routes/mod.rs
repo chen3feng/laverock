@@ -13,6 +13,7 @@ pub(crate) mod jobs;
 pub(crate) mod models;
 pub(crate) mod openai;
 pub(crate) mod profiles;
+pub(crate) mod projects;
 pub(crate) mod session;
 pub(crate) mod settings;
 pub(crate) mod synth;
@@ -35,6 +36,7 @@ use crate::{
     jobs::JobStore,
     models::ModelService,
     profiles::ProfileStore,
+    projects::ProjectStore,
     remote::{LanCmd, RemoteState},
     settings::SettingsStore,
 };
@@ -43,6 +45,7 @@ use crate::{
 pub(crate) struct AppState {
     pub(crate) manager: Arc<EngineManager>,
     pub(crate) profiles: Arc<ProfileStore>,
+    pub(crate) projects: Arc<ProjectStore>,
     pub(crate) history: Arc<HistoryStore>,
     pub(crate) remote: Arc<RemoteState>,
     pub(crate) settings: Arc<SettingsStore>,
@@ -257,6 +260,7 @@ pub(crate) fn router(state: AppState) -> Router {
         .merge(synth::router())
         .merge(profiles::router())
         .merge(captures::router())
+        .merge(projects::router())
         .merge(history::router())
         .merge(audio::router())
         .merge(session::router())

@@ -144,6 +144,12 @@ messages! {
         { en: "Separating vocals and instrumental…", zh: "正在分离人声与伴奏…" },
     ToolStageDenoising = "tool_stage_denoising"
         { en: "Removing background noise…", zh: "正在降噪…" },
+    ProjectWavOnly = "project_wav_only"
+        { en: "Projects accept WAV audio for now; video and other formats come with media packaging.",
+          zh: "项目目前只支持 WAV 音频；视频等格式会在媒体封装阶段支持。" },
+    ProjectNoCues = "project_no_cues"
+        { en: "This project has no subtitle cues yet; transcribe it first.",
+          zh: "这个项目还没有字幕分段；请先转写。" },
     ReferenceSilent = "reference_silent"
         { en: "The reference audio is silent; record or upload a clip with speech.",
           zh: "参考音频几乎全是静音，请重新录制或上传一段有人声的音频。" },
