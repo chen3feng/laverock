@@ -14,6 +14,11 @@ async function loadEngines() {
   const synthList = engines.filter((e) => task(e) === 'tts');
   const musicList = engines.filter((e) => task(e) === 'music');
   const vcList = engines.filter((e) => task(e) === 'vc');
+  // Non-commercial weights are never the default while a commercial
+  // alternative is installed; the sort is stable, so catalog order holds
+  // within each group.
+  const commercial = (e) => !(e.license && e.license.noncommercial);
+  musicList.sort((a, b) => Number(commercial(b)) - Number(commercial(a)));
 
   // Rebuilding the lists also rebuilds the parameter controls, dropping
   // values the user tuned. When the set of engines did not change (the
@@ -251,8 +256,13 @@ function syncMusicEngine() {
     return;
   }
   const caps = (e.capabilities || []).map(capabilityLabel).join(t("ui.text"));
+  const license = e.license
+    ? ` · ${e.license.name}${e.license.noncommercial
+      ? ` (${t('models.noncommercial')})`
+      : ''}`
+    : '';
   $('musicEngineHint').textContent =
-    `${e.kind} · ${(e.languages || []).join(' / ')} · ${caps}`;
+    `${e.kind} · ${(e.languages || []).join(' / ')} · ${caps}${license}`;
   renderParamGrid($('musicParams'), e.parameters || [], 'music-param-', musicParamActions());
   syncMusicRoute();
 }

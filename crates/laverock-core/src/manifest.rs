@@ -114,6 +114,18 @@ impl EngineKind {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct License {
+    /// Short name shown in the UI, e.g. `MIT` or `CC BY-NC 4.0`.
+    pub name: String,
+    #[serde(default)]
+    pub url: Option<String>,
+    /// The licence forbids commercial use. The music picker avoids
+    /// defaulting to such a model when a commercial alternative exists.
+    #[serde(default)]
+    pub noncommercial: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Manifest {
     /// Stable identifier, also the directory name in practice.
@@ -135,6 +147,10 @@ pub struct Manifest {
     pub languages: Vec<String>,
     #[serde(default)]
     pub capabilities: Vec<String>,
+    /// Terms the weights are distributed under, copied from the catalog
+    /// by the installer. Absent for installs written before this field.
+    #[serde(default)]
+    pub license: Option<License>,
     #[serde(default)]
     pub zipvoice: Option<ZipVoiceManifest>,
     #[serde(default)]
@@ -2003,6 +2019,27 @@ mod tests {
         assert_eq!(params[0].default, serde_json::json!(30.0));
         assert!(!names.contains(&"task_route"), "no ACE-Step routes");
         assert!(!names.contains(&"lyrics"), "Stable Audio takes no lyrics");
+    }
+
+    #[test]
+    fn manifests_carry_a_licence() {
+        let manifest: Manifest = serde_json::from_str(
+            r#"{"id":"x","kind":"music","name":"x",
+                "license":{"name":"CC BY-NC 4.0","noncommercial":true},
+                "music":{"binary":"/b","model":"/m"}}"#,
+        )
+        .expect("manifest with a licence");
+        let license = manifest.license.expect("licence");
+        assert_eq!(license.name, "CC BY-NC 4.0");
+        assert!(license.noncommercial);
+        assert_eq!(license.url, None);
+
+        let plain: Manifest = serde_json::from_str(
+            r#"{"id":"y","kind":"music","name":"y",
+                "music":{"binary":"/b","model":"/m"}}"#,
+        )
+        .expect("manifest without a licence");
+        assert!(plain.license.is_none());
     }
 
     #[test]

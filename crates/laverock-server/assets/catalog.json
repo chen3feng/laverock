@@ -192,6 +192,7 @@
     "capabilities": [
       "music"
     ],
+    "license": { "name": "MIT", "url": "https://huggingface.co/ACE-Step/Ace-Step1.5", "noncommercial": false },
     "script": "download-ace-step.sh",
     "env": {},
     "note": {
@@ -216,6 +217,7 @@
       "music",
       "audio-conditioning"
     ],
+    "license": { "name": "Stability AI Community License", "url": "https://huggingface.co/stabilityai/stable-audio-3-small-music", "noncommercial": false },
     "script": "download-stable-audio.sh",
     "env": {
       "STABLE_AUDIO_VARIANT": "music"
@@ -242,6 +244,7 @@
       "music",
       "sfx"
     ],
+    "license": { "name": "Stability AI Community License", "url": "https://huggingface.co/stabilityai/stable-audio-3-small-music", "noncommercial": false },
     "script": "download-stable-audio.sh",
     "env": {
       "STABLE_AUDIO_VARIANT": "sfx"
@@ -268,6 +271,7 @@
       "music",
       "audio-conditioning"
     ],
+    "license": { "name": "Stability AI Community License", "url": "https://huggingface.co/stabilityai/stable-audio-3-small-music", "noncommercial": false },
     "script": "download-stable-audio.sh",
     "env": {
       "STABLE_AUDIO_VARIANT": "medium"

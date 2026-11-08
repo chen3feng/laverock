@@ -111,6 +111,7 @@
   .pill.ok { color: var(--ok); border-color: #2c4b3d; }
   .pill.warn { color: #ffcf8f; border-color: #5c4626; }
   .chip { padding: 0 7px; margin: 0 4px 4px 0; }
+  .chip.warn { color: #ffcf8f; border-color: #5c4626; }
   .hint { font-size: 12px; color: var(--muted); margin-top: 6px; }
   .hint.ok { color: var(--ok); }
   .hint.err { color: var(--danger); }
@@ -1140,6 +1141,7 @@ addI18n({
     'music.source.hint': '编辑类路由或「源音频用法」需要一段源音频；上传后按所选方式翻唱、重绘或续写。',
     'music.source_required': '所选路由需要源音频，请先上传。',
     'music.inpaint_required': '局部重绘需要填写重绘起点与终点（秒）。',
+    'music.noncommercial': '该模型许可仅限非商业用途，请确认使用场景。',
     'music.samples': '候选项',
     'music.samples_hint': '一次生成多个版本，逐一试听后再下载。',
     'music.first_load': '首次加载约需数十秒到数分钟。',
@@ -1165,6 +1167,7 @@ addI18n({
     'music.source.hint': 'Editing routes or "Source audio use" need a source clip; upload one, then cover, repaint or extend it.',
     'music.source_required': 'This route needs a source clip; upload one first.',
     'music.inpaint_required': 'Inpainting needs both the start and end times (seconds).',
+    'music.noncommercial': 'This model is licensed for non-commercial use only; check that your use fits.',
     'music.samples': 'Takes',
     'music.samples_hint': 'Generate several versions at once, audition them, then download your favourite.',
     'music.first_load': 'The first load can take tens of seconds to a few minutes.',
@@ -1380,6 +1383,7 @@ addI18n({
     'models.unloaded': '未加载', 'models.unload': '卸载', 'models.unload_all': '全部卸载',
     'models.unload_done': '模型已卸载',
     'models.show_details': '展开详情', 'models.hide_details': '收起详情',
+    'models.license': '许可证', 'models.noncommercial': '非商用',
   },
   en: {
     'models.title': 'Models',
@@ -1398,6 +1402,7 @@ addI18n({
     'models.unloaded': 'Not loaded', 'models.unload': 'Unload', 'models.unload_all': 'Unload all',
     'models.unload_done': 'Model unloaded',
     'models.show_details': 'Show details', 'models.hide_details': 'Hide details',
+    'models.license': 'License', 'models.noncommercial': 'Non-commercial',
   },
 });
 
@@ -3632,6 +3637,11 @@ async function loadEngines() {
   const synthList = engines.filter((e) => task(e) === 'tts');
   const musicList = engines.filter((e) => task(e) === 'music');
   const vcList = engines.filter((e) => task(e) === 'vc');
+  // Non-commercial weights are never the default while a commercial
+  // alternative is installed; the sort is stable, so catalog order holds
+  // within each group.
+  const commercial = (e) => !(e.license && e.license.noncommercial);
+  musicList.sort((a, b) => Number(commercial(b)) - Number(commercial(a)));
 
   // Rebuilding the lists also rebuilds the parameter controls, dropping
   // values the user tuned. When the set of engines did not change (the
@@ -3869,8 +3879,13 @@ function syncMusicEngine() {
     return;
   }
   const caps = (e.capabilities || []).map(capabilityLabel).join(t("ui.text"));
+  const license = e.license
+    ? ` · ${e.license.name}${e.license.noncommercial
+      ? ` (${t('models.noncommercial')})`
+      : ''}`
+    : '';
   $('musicEngineHint').textContent =
-    `${e.kind} · ${(e.languages || []).join(' / ')} · ${caps}`;
+    `${e.kind} · ${(e.languages || []).join(' / ')} · ${caps}${license}`;
   renderParamGrid($('musicParams'), e.parameters || [], 'music-param-', musicParamActions());
   syncMusicRoute();
 }
@@ -4281,6 +4296,7 @@ function engineAsModel(engine) {
     size: '',
     languages: engine.languages || [],
     capabilities: engine.capabilities || [],
+    license: engine.license || null,
     task: engine.task,
     note: null,
     unsupported: null,
@@ -4392,8 +4408,16 @@ function renderModelGroups(entries, readonly) {
   empty.hidden = shown > 0;
 }
 
-function progressBarHtml(job) {
-  const pct = typeof job.progress === 'number' ? Math.max(0, Math.min(100, job.progress)) : null;
+// Licence terms, with non-commercial weights called out in the warning
+// colour. The URL, when present, is the tooltip.
+function licenseChip(license) {
+  const suffix = license.noncommercial ? ` · ${t('models.noncommercial')}` : '';
+  const title = license.url ? ` title="${esc(license.url)}"` : '';
+  return `<span class="chip${license.noncommercial ? ' warn' : ''}"${title}>`
+    + `${esc(`${t('models.license')}: ${license.name}${suffix}`)}</span>`;
+}
+
+function progressBarHtml(job) {  const pct = typeof job.progress === 'number' ? Math.max(0, Math.min(100, job.progress)) : null;
   const fallback = pct === null
     ? (t("ui.preparing"))
     : (t("ui.downloading"));
@@ -4435,6 +4459,7 @@ function modelCard(model, installed, readonly) {
       ${(model.languages || []).length
         ? `<div class="chips">${(model.languages || []).map((l) => `<span class="chip">${esc(l)}</span>`).join('')}</div>`
         : ''}
+      ${model.license ? `<div class="chips">${licenseChip(model.license)}</div>` : ''}
       ${model.note ? `<div class="hint">${esc(model.note)}</div>` : ''}
       ${model.unsupported ? `<div class="hint err">${esc(model.unsupported)}</div>` : ''}
       ${stale ? `<div class="hint err">${esc(model.problem)}</div>` : ''}

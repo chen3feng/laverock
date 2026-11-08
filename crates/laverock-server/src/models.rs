@@ -13,7 +13,7 @@ use crate::{
     settings::{ProxyMode, SettingsStore, PROXY_VARS},
 };
 use laverock_core::i18n::{self, Key};
-use laverock_core::{CoreError, EngineInfo, EngineManager, Localized, Result, TaskKind};
+use laverock_core::{CoreError, EngineInfo, EngineManager, License, Localized, Result, TaskKind};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
@@ -47,6 +47,10 @@ struct CatalogEntry {
     env: BTreeMap<String, String>,
     #[serde(default)]
     note: Option<Localized>,
+    /// Terms the weights are distributed under. Music models declare
+    /// them so the picker can avoid defaulting to a non-commercial one.
+    #[serde(default)]
+    license: Option<License>,
     /// Operating systems where this model cannot be used, spelled as
     /// `std::env::consts::OS` (`windows`, `macos`, `linux`). The UI then
     /// hides the download and the API refuses to start it.
@@ -132,6 +136,9 @@ pub struct ModelView {
     pub size: String,
     pub languages: Vec<String>,
     pub capabilities: Vec<String>,
+    /// Terms the weights are distributed under, when the catalog declares
+    /// them.
+    pub license: Option<License>,
     /// What the model does; the Models page groups cards by it and offers
     /// a shortcut to the matching workspace.
     pub task: TaskKind,
@@ -279,6 +286,7 @@ impl ModelService {
                 size: entry.size.clone(),
                 languages: entry.languages.clone(),
                 capabilities: entry.capabilities.clone(),
+                license: entry.license.clone(),
                 task: entry.task(),
                 note: entry
                     .note
@@ -322,6 +330,7 @@ impl ModelService {
                 size: String::new(),
                 languages: engine.languages,
                 capabilities: engine.capabilities,
+                license: engine.license,
                 task: engine.task,
                 note: None,
                 unsupported: None,
@@ -1302,6 +1311,7 @@ mod tests {
             size: String::new(),
             languages: Vec::new(),
             capabilities: Vec::new(),
+            license: None,
             task: None,
             script: "fake.sh".to_string(),
             env: BTreeMap::new(),
@@ -1408,6 +1418,7 @@ mod tests {
             size: String::new(),
             languages: Vec::new(),
             capabilities: Vec::new(),
+            license: None,
             task: None,
             script: "x.sh".into(),
             env: BTreeMap::new(),
@@ -1546,6 +1557,7 @@ mod tests {
             size: String::new(),
             languages: Vec::new(),
             capabilities: Vec::new(),
+            license: None,
             task: None,
             script: "m.sh".into(),
             env: BTreeMap::new(),

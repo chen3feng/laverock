@@ -33,6 +33,7 @@ function engineAsModel(engine) {
     size: '',
     languages: engine.languages || [],
     capabilities: engine.capabilities || [],
+    license: engine.license || null,
     task: engine.task,
     note: null,
     unsupported: null,
@@ -144,8 +145,16 @@ function renderModelGroups(entries, readonly) {
   empty.hidden = shown > 0;
 }
 
-function progressBarHtml(job) {
-  const pct = typeof job.progress === 'number' ? Math.max(0, Math.min(100, job.progress)) : null;
+// Licence terms, with non-commercial weights called out in the warning
+// colour. The URL, when present, is the tooltip.
+function licenseChip(license) {
+  const suffix = license.noncommercial ? ` · ${t('models.noncommercial')}` : '';
+  const title = license.url ? ` title="${esc(license.url)}"` : '';
+  return `<span class="chip${license.noncommercial ? ' warn' : ''}"${title}>`
+    + `${esc(`${t('models.license')}: ${license.name}${suffix}`)}</span>`;
+}
+
+function progressBarHtml(job) {  const pct = typeof job.progress === 'number' ? Math.max(0, Math.min(100, job.progress)) : null;
   const fallback = pct === null
     ? (t("ui.preparing"))
     : (t("ui.downloading"));
@@ -187,6 +196,7 @@ function modelCard(model, installed, readonly) {
       ${(model.languages || []).length
         ? `<div class="chips">${(model.languages || []).map((l) => `<span class="chip">${esc(l)}</span>`).join('')}</div>`
         : ''}
+      ${model.license ? `<div class="chips">${licenseChip(model.license)}</div>` : ''}
       ${model.note ? `<div class="hint">${esc(model.note)}</div>` : ''}
       ${model.unsupported ? `<div class="hint err">${esc(model.unsupported)}</div>` : ''}
       ${stale ? `<div class="hint err">${esc(model.problem)}</div>` : ''}
