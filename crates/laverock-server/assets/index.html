@@ -144,6 +144,18 @@
     display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
     min-height: 38px;
   }
+  /* Timed cues of an automatically transcribed take. Scrolls past a few
+     lines so a long recording does not stretch the card. */
+  .voice-segments {
+    display: flex; flex-direction: column; gap: 2px;
+    max-height: 88px; overflow-y: auto;
+    font-size: 12px; color: #b9bfd2;
+  }
+  .voice-seg { display: flex; gap: 6px; }
+  .voice-seg time {
+    flex: none; color: var(--muted); font-size: 11.5px;
+    font-variant-numeric: tabular-nums;
+  }
   /* Four actions, some with long English labels: grow to fill the row,
      but wrap instead of spilling outside the card. */
   .voice-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: auto; }
@@ -880,6 +892,7 @@ addI18n({
     'captures.transcribing': '正在转写…',
     'captures.transcribed': '已重新转写',
     'captures.retranscribe': '转写',
+    'captures.subtitles': '导出字幕',
     'captures.rename': '编辑',
     'captures.deleted': '已删除素材',
     'captures.delete_confirm': '删除素材「{name}」？用到它的声音会少一段。',
@@ -962,6 +975,7 @@ addI18n({
     'captures.transcribing': 'Transcribing…',
     'captures.transcribed': 'Transcript updated',
     'captures.retranscribe': 'Transcribe',
+    'captures.subtitles': 'Export subtitles',
     'captures.rename': 'Edit',
     'captures.deleted': 'Take deleted',
     'captures.delete_confirm': 'Delete the take "{name}"? Voices using it will lose it.',
@@ -1702,6 +1716,12 @@ function fmtBytes(b) {
   return n.toFixed(1) + ' ' + units[i];
 }
 const fmtDur = (s) => (s ? s.toFixed(1) + 's' : '—');
+
+// Compact cue timestamp for transcript segments: `0:01.2`.
+function fmtStamp(seconds) {
+  const t = Math.max(0, seconds || 0);
+  return `${Math.floor(t / 60)}:${(t % 60).toFixed(1).padStart(4, '0')}`;
+}
 const fmtDate = (t) => (t ? new Date(t * 1000).toLocaleDateString(dateLocale()) : '—');
 
 function toast(message, isError) {
@@ -2197,11 +2217,17 @@ function renderCaptures() {
   for (const c of captureList) {
     const el = document.createElement('div');
     el.className = 'voice-card capture-card';
+    el.dataset.id = c.id;
     const name = c.name || t('captures.unnamed');
     const checked = selectedCaptures.has(c.id) ? ' checked' : '';
     const transcript = c.prompt_text
       ? esc(c.prompt_text)
       : `<span class="muted">${esc(t('captures.not_transcribed'))}</span>`;
+    const segments = c.transcript_segments || [];
+    const cues = segments.length
+      ? `<div class="voice-segments">${segments.map((s) =>
+        `<div class="voice-seg"><time>${fmtStamp(s.start)}</time><span>${esc(s.text)}</span></div>`).join('')}</div>`
+      : '';
     el.innerHTML = `
       <div class="voice-top">
         <label class="cap-check"><input type="checkbox" class="pick"${checked} /></label>
@@ -2212,9 +2238,14 @@ function renderCaptures() {
       <div class="voice-meta">${fmtDur(c.duration_secs)} · ${fmtBytes(c.bytes)} · ${fmtDate(c.created_at)}</div>
       ${c.issues.map((i) => `<div class="voice-warn">⚠ ${esc(captureIssueText(i))}</div>`).join('')}
       <div class="voice-text">${transcript}</div>
+      ${cues}
       <div class="voice-actions">
         <button class="ghost small play" type="button">${previewId === c.id ? t('stop') : t('preview')}</button>
         <button class="ghost small tr" type="button"${transcribeAvailable ? '' : ' disabled'}>${t('captures.retranscribe')}</button>
+        ${segments.length
+          ? `<button class="ghost small sub-srt" type="button" title="${esc(t('captures.subtitles'))}">SRT</button>
+             <button class="ghost small sub-vtt" type="button" title="${esc(t('captures.subtitles'))}">VTT</button>`
+          : ''}
         <button class="ghost small enh" type="button"${enhanceStatus.denoise || enhanceStatus.vocals ? '' : ' disabled'}>${t('captures.enhance.action')}</button>
         <button class="ghost small edit" type="button">${t('captures.rename')}</button>
         <button class="ghost small danger del" type="button">${t('ui.delete')}</button>
@@ -2226,12 +2257,33 @@ function renderCaptures() {
     };
     el.querySelector('.play').onclick = () => togglePreview(c.id, captureUrl(c.id));
     el.querySelector('.tr').onclick = () => transcribeCapture(c);
+    const srt = el.querySelector('.sub-srt');
+    if (srt) srt.onclick = () => downloadSubtitles(c, 'srt');
+    const vtt = el.querySelector('.sub-vtt');
+    if (vtt) vtt.onclick = () => downloadSubtitles(c, 'vtt');
     el.querySelector('.enh').onclick = () => enhanceCapture(c);
     el.querySelector('.edit').onclick = () => editCapture(c);
     el.querySelector('.del').onclick = () => deleteCapture(c);
     grid.appendChild(el);
   }
   syncCaptureBar();
+}
+
+// Download the timed cues stored with a take. The server renders both
+// formats from the same segments, so SRT and VTT always agree.
+async function downloadSubtitles(c, format) {
+  try {
+    const res = await apiFetch(
+      `/api/captures/${encodeURIComponent(c.id)}/subtitles?format=${format}`);
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.error || res.statusText || ('HTTP ' + res.status));
+    }
+    const name = (c.name || 'laverock').replace(/[\\/:*?"<>|]+/g, '_');
+    await saveBlob(await res.blob(), `${name}.${format}`);
+  } catch (e) {
+    toast(t('ui.download_failed') + e.message, true);
+  }
 }
 
 async function transcribeCapture(c) {

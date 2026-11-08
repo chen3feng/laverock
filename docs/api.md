@@ -42,6 +42,7 @@ describes the loopback listener.
 | POST | `/api/captures/:id/enhance` | JSON `{mode}` → re-run cleanup from the original upload, or revert with `off` |
 | GET | `/api/enhance` | which cleanup stages are installed → `{denoise, vocals}` |
 | POST | `/api/captures/:id/transcribe` | re-run speech recognition on the take |
+| GET | `/api/captures/:id/subtitles?format=srt\|vtt` | the take's stored timed cues as a downloadable file |
 | DELETE | `/api/captures/:id` | delete a take (it is removed from the voices using it) |
 | POST | `/api/captures/dedupe` | delete byte-identical takes, repointing voices → `{removed}` |
 | GET | `/api/history` | generated audio, newest first |
@@ -49,6 +50,8 @@ describes the loopback listener.
 | DELETE | `/api/history/:id` · `/api/history` | delete one or all generations |
 | POST | `/api/audio/mp3` | body: WAV → MP3 (built-in pure-Rust encoder, no ffmpeg needed) |
 | POST | `/api/transcribe` | multipart `audio` (WAV) → transcript (needs the SenseVoice model) |
+| POST | `/api/transcribe/details` | same input → `{text, segments: [{start, end, text}], language, duration}` |
+| POST | `/api/transcribe/subtitles?format=srt\|vtt` | same input → downloadable SRT or WebVTT (`vtt`; `srt` is the default) |
 | GET | `/api/session` | loopback/paired state (public) |
 | POST | `/api/pair/start` | desktop only: create a five-minute pairing code + QR |
 | POST | `/api/pair/claim` | exchange a pairing code for a device cookie (public) |
@@ -63,6 +66,13 @@ A voice can be built from one or more **takes** in the recording library.
 `POST /api/profiles` with a repeated `capture` field creates such a voice;
 `GET /api/engines` reports `reference_limit_secs`, the length at which the
 joined reference is cut, because each engine only conditions on that much.
+
+Timed transcripts come from the SenseVoice model, whose CTC decoder reports a
+timestamp per token; the server aggregates them into sentence-sized cues.
+Models without token timestamps fall back to splitting the clip on pauses.
+`POST /api/captures/:id/transcribe` stores both the text and the cues in the
+take, and a manual transcript edit clears the cues because they would no
+longer match. Cue times are seconds from the start of the clip.
 
 Engine parameters (`speed`, `num_steps`, `cfg`, `seed`, …) are declared per
 engine by its manifest and validated server-side against the same list the

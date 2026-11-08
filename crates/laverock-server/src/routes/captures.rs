@@ -8,8 +8,11 @@ use axum::{
     Json, Router,
 };
 
-use super::{ApiError, AppState};
-use crate::captures::{CaptureMeta, CaptureView};
+use super::{subtitle_response, ApiError, AppState};
+use crate::{
+    captures::{CaptureMeta, CaptureView},
+    subtitles,
+};
 
 pub(crate) fn router() -> Router<AppState> {
     Router::new()
@@ -23,6 +26,7 @@ pub(crate) fn router() -> Router<AppState> {
         .route("/api/captures/{id}/audio", get(capture_audio))
         .route("/api/captures/{id}/enhance", post(enhance_capture))
         .route("/api/captures/{id}/transcribe", post(transcribe_capture))
+        .route("/api/captures/{id}/subtitles", get(capture_subtitles))
 }
 
 async fn list_captures(State(state): State<AppState>) -> Result<Json<Vec<CaptureView>>, ApiError> {
@@ -233,16 +237,49 @@ async fn transcribe_capture(
 ) -> Result<Json<CaptureMeta>, ApiError> {
     let (_, wav) = state.profiles.captures().get(&id)?;
     let transcriber = state.transcriber.clone();
-    let text = tokio::task::spawn_blocking(move || transcriber.transcribe(&wav))
+    let transcript = tokio::task::spawn_blocking(move || transcriber.transcribe_detailed(&wav))
         .await
         .map_err(|e| ApiError {
             status: StatusCode::INTERNAL_SERVER_ERROR,
             message: format!("transcribe task panicked: {e}"),
         })??;
-    if text.trim().is_empty() {
+    if transcript.text.trim().is_empty() {
         return Err(ApiError::bad_request("no speech recognized"));
     }
-    Ok(Json(state.profiles.set_capture_transcript(&id, &text)?))
+    let text = transcript.text.clone();
+    Ok(Json(state.profiles.set_capture_transcript(
+        &id,
+        &text,
+        transcript.segments,
+    )?))
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct SubtitleQuery {
+    /// `srt` (default) or `vtt`.
+    format: Option<String>,
+}
+
+/// Download the timed cues stored with a take as an SRT/WebVTT file.
+async fn capture_subtitles(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Query(query): Query<SubtitleQuery>,
+) -> Result<Response, ApiError> {
+    let raw = query.format.as_deref().unwrap_or("");
+    let format = subtitles::Format::parse(raw)
+        .ok_or_else(|| ApiError::bad_request(format!("unknown subtitle format: {raw}")))?;
+    let (meta, _) = state.profiles.captures().get(&id)?;
+    if meta.transcript_segments.is_empty() {
+        return Err(ApiError::bad_request(
+            "this take has no timed transcript yet; transcribe it first",
+        ));
+    }
+    Ok(subtitle_response(
+        &meta.transcript_segments,
+        format,
+        "laverock",
+    ))
 }
 
 /// Delete takes whose audio is byte-identical to an older take, and

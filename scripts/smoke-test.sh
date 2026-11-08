@@ -339,6 +339,14 @@ code=$(curl -s -o /dev/null -w '%{http_code}' -X DELETE "$BASE/api/profiles/$pid
 [ "$code" = "204" ] && ok "delete profile" || bad "delete profile -> $code"
 curl -sf "$BASE/api/profiles" | grep -q "$pid" \
   && bad "deleted profile still listed" || ok "profile removed"
+# A saved voice's clip is also a library take, and takes outlive voices by
+# design. Clean it up so later groups (and the browser test) see a library
+# with only the takes they created.
+for cid in $(curl -s "$BASE/api/captures" | sed 's/},{/}\n{/g' \
+  | grep -F '"name":"smoke-test-voice"' \
+  | sed -n 's/.*"id":"\([^"]*\)".*/\1/p'); do
+  curl -s -o /dev/null -X DELETE "$BASE/api/captures/$cid"
+done
 fi
 
 if want captures; then
@@ -361,12 +369,12 @@ case "$captures_json" in
   *"{\"code\":\"no_transcript\"}"*) ok "untranscribed take flagged" ;;
   *) bad "take readiness check" ;;
 esac
-# Content de-duplication is checked in the unit tests; a global clean-up
-# here would touch takes that belong to a real library, so this only
-# verifies that the duplicate is reported.
-c3_line=$(printf '%s\n' "$captures_json" | sed 's/},{/}\n{/g' | grep "\"$c3\"")
+# Which of two byte-identical takes is canonical depends on their shared
+# creation second and the directory read order, so only require that the
+# pair reports the duplication at all.
+c3_line=$(printf '%s\n' "$captures_json" | sed 's/},{/}\n{/g' \
+  | grep -E "\"($c1|$c3)\"")
 case "$c3_line" in
-  *'"duplicate_of":null'*|'') bad "duplicate not flagged" ;;
   *'"duplicate_of":"c'*) ok "duplicate take flagged" ;;
   *) bad "duplicate not flagged" ;;
 esac
@@ -437,6 +445,61 @@ curl -s -o /dev/null -X DELETE "$BASE/api/captures/$c1"
 curl -s -o /dev/null -X DELETE "$BASE/api/captures/$c3"
 curl -s -o /dev/null -X DELETE "$BASE/api/profiles/$solo"
 ok "cleaned up takes"
+fi
+
+if want subtitles; then
+echo "subtitles"
+if curl -s "$BASE/api/health" | grep -q '"transcribe":true'; then
+  take_id() { sed -n 's/.*"id":"\([^"]*\)".*/\1/p'; }
+  details=$(curl -s -X POST "$BASE/api/transcribe/details" \
+    -F "audio=@$DIR/test_wavs/leijun-1.wav")
+  case "$details" in
+    *'"segments":[{'*) ok "detailed transcript segments" ;;
+    *) bad "details: $(printf '%s' "$details" | head -c 160)" ;;
+  esac
+  case "$details" in
+    *武汉*) ok "detailed transcript text" ;;
+    *) bad "detailed transcript text" ;;
+  esac
+  case "$details" in
+    *'"duration":'*) ok "detailed transcript duration" ;;
+    *) bad "details duration missing" ;;
+  esac
+
+  srt=$(curl -s -X POST "$BASE/api/transcribe/subtitles?format=srt" \
+    -F "audio=@$DIR/test_wavs/leijun-1.wav")
+  case "$srt" in
+    *' --> '*) ok "uploaded subtitle cues" ;;
+    *) bad "srt: $(printf '%s' "$srt" | head -c 120)" ;;
+  esac
+  vtt=$(curl -s -X POST "$BASE/api/transcribe/subtitles?format=vtt" \
+    -F "audio=@$DIR/test_wavs/leijun-1.wav")
+  case "$vtt" in
+    WEBVTT*) ok "vtt header" ;;
+    *) bad "vtt: $(printf '%s' "$vtt" | head -c 120)" ;;
+  esac
+  code=$(curl -s -o /dev/null -w '%{http_code}' -X POST \
+    "$BASE/api/transcribe/subtitles?format=ass" \
+    -F "audio=@$DIR/test_wavs/leijun-1.wav")
+  [ "$code" = "400" ] && ok "unknown subtitle format -> 400" \
+    || bad "unknown subtitle format -> $code"
+
+  sub=$(curl -s -X POST "$BASE/api/captures" -F 'name=smoke-subs' \
+    -F "audio=@$DIR/test_wavs/leijun-1.wav" | take_id)
+  heard=$(curl -s -X POST "$BASE/api/captures/$sub/transcribe")
+  case "$heard" in
+    *'"transcript_segments":[{'*) ok "take stores timed cues" ;;
+    *) bad "take cues missing: $(printf '%s' "$heard" | head -c 160)" ;;
+  esac
+  take_srt=$(curl -s "$BASE/api/captures/$sub/subtitles?format=srt")
+  case "$take_srt" in
+    *' --> '*) ok "take subtitle download" ;;
+    *) bad "take subtitles: $(printf '%s' "$take_srt" | head -c 120)" ;;
+  esac
+  curl -s -o /dev/null -X DELETE "$BASE/api/captures/$sub"
+else
+  echo "  skip (no speech-to-text model)"
+fi
 fi
 
 if want voxcpm2; then

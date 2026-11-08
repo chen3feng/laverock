@@ -65,6 +65,26 @@ pub(crate) fn request_lang() -> laverock_core::i18n::Lang {
         .unwrap_or(laverock_core::i18n::Lang::En)
 }
 
+/// Rendered subtitle file download (SRT or WebVTT).
+pub(crate) fn subtitle_response(
+    segments: &[laverock_core::TranscriptSegment],
+    format: crate::subtitles::Format,
+    stem: &str,
+) -> Response {
+    (
+        StatusCode::OK,
+        [
+            (header::CONTENT_TYPE, format.content_type().to_string()),
+            (
+                header::CONTENT_DISPOSITION,
+                format!("attachment; filename=\"{stem}.{}\"", format.extension()),
+            ),
+        ],
+        format.render(segments),
+    )
+        .into_response()
+}
+
 /// Make the request's language available to handlers and error mapping.
 async fn lang_middleware(req: Request<Body>, next: Next) -> Response {
     let lang = req

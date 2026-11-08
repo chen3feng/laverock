@@ -62,6 +62,12 @@ function fmtBytes(b) {
   return n.toFixed(1) + ' ' + units[i];
 }
 const fmtDur = (s) => (s ? s.toFixed(1) + 's' : '—');
+
+// Compact cue timestamp for transcript segments: `0:01.2`.
+function fmtStamp(seconds) {
+  const t = Math.max(0, seconds || 0);
+  return `${Math.floor(t / 60)}:${(t % 60).toFixed(1).padStart(4, '0')}`;
+}
 const fmtDate = (t) => (t ? new Date(t * 1000).toLocaleDateString(dateLocale()) : '—');
 
 function toast(message, isError) {

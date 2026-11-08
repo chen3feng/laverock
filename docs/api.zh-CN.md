@@ -40,6 +40,7 @@ Cookie）；以下均指回环监听。
 | POST | `/api/captures/:id/enhance` | JSON `{mode}` → 从原始录音重新处理，`off` 恢复原声 |
 | GET | `/api/enhance` | 已安装的增强阶段 → `{denoise, vocals}` |
 | POST | `/api/captures/:id/transcribe` | 对素材重新做语音识别 |
+| GET | `/api/captures/:id/subtitles?format=srt\|vtt` | 将该素材已存的分段导出为字幕文件 |
 | DELETE | `/api/captures/:id` | 删除素材（引用它的声音同步去掉这一段） |
 | POST | `/api/captures/dedupe` | 删除内容完全相同的素材并重指向声音 → `{removed}` |
 | GET | `/api/history` | 已生成音频，最新在前 |
@@ -47,6 +48,8 @@ Cookie）；以下均指回环监听。
 | DELETE | `/api/history/:id` · `/api/history` | 删除单条 / 全部生成记录 |
 | POST | `/api/audio/mp3` | 请求体：WAV → MP3（内置纯 Rust 编码器，无需 ffmpeg） |
 | POST | `/api/transcribe` | multipart：`audio`（WAV）→ 转写文字（需安装 SenseVoice 模型） |
+| POST | `/api/transcribe/details` | 同样的输入 → `{text, segments: [{start, end, text}], language, duration}` |
+| POST | `/api/transcribe/subtitles?format=srt\|vtt` | 同样的输入 → 可下载的 SRT 或 WebVTT（`format=vtt`；默认 `srt`） |
 | GET | `/api/session` | 回环/配对状态（公开） |
 | POST | `/api/pair/start` | 仅桌面：生成五分钟配对码 + 二维码 |
 | POST | `/api/pair/claim` | 用配对码换取设备 Cookie（公开） |
@@ -60,6 +63,11 @@ Cookie）；以下均指回环监听。
 一条声音可以由素材库中的一段或多段**素材**组成：`POST /api/profiles` 重复传
 `capture` 字段即可；`GET /api/engines` 返回的 `reference_limit_secs` 是拼接时的
 长度上限，因为每个引擎只在那段长度内取条件。
+
+带时间戳的转写来自 SenseVoice：它的 CTC 解码器会为每个 token 给出时间，服务端
+再聚合成句子级的分段。不提供 token 时间戳的模型则会按停顿切分音频兜底。
+`POST /api/captures/:id/transcribe` 会把文字和分段一起存入素材；手动修改转写
+文字会清空分段，因为它们已不再对应。分段时间是相对音频开头的秒数。
 
 引擎参数（`speed`、`num_steps`、`cfg`、`seed` 等）由各引擎的清单声明，服务端按
 同一份列表校验，界面也用同一份列表生成控件；`GET /api/engines` 可查看。每个引擎
