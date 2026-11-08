@@ -127,8 +127,8 @@ files under `web/`, run the script, then rebuild the server; CI runs
 A model of an already supported kind needs no code: create
 `<models>/<id>/engine.json` and point its paths at the files in that
 directory. Supported kinds are `zipvoice`, `voxcpm2`, `qwen3tts`, `longcat`,
-`dots`, `cosyvoice`, `kokoro`, `ming3tts`, `chatterbox`, `indextts2`, `mosstts`
-and `stt`.
+`dots`, `cosyvoice`, `kokoro`, `ming3tts`, `chatterbox`, `indextts2`, `mosstts`,
+`stt` and the generic `audio_cpp`.
 
 ```json
 {
@@ -175,6 +175,16 @@ and `stt`.
   hand-written manifests.
 - `Manifest::problem()` flags structural problems (for example an install
   from a retired runner) before the user hits a synthesis error.
+- `kind: "audio_cpp"` is the escape hatch for any audio.cpp family the app
+  does not special-case. Its `audio_cpp` section names the `binary`,
+  `model`, `backend`, `family` and `task`, and may point `spec` at an
+  audio.cpp `model_spec.json`. Laverock parses that spec, turns
+  `options.request` into controls, validates submitted values, and passes
+  the resolved options to audio.cpp as `--request-option` (CLI) or
+  `request.options` (resident server). `input` picks the field that carries
+  the source clip (default `audio` for `vc`/`svc`), and `voice_ref: false`
+  skips the target reference. No Rust change is needed to add such a model;
+  see `scripts/download-seedvc.sh` for a complete example.
 
 To make a model installable from the UI, add an entry to
 `crates/laverock-server/assets/catalog.json` with its `id`, `task`, `dir`,

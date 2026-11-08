@@ -337,6 +337,9 @@ impl EngineManager {
             }
             EngineKind::MossTts => Arc::new(MossTtsEngine::build(&dir, &manifest)?),
             EngineKind::Music => Arc::new(AudioCppEngine::build(&dir, &manifest, Family::AceStep)?),
+            EngineKind::AudioCpp => {
+                Arc::new(AudioCppEngine::build(&dir, &manifest, Family::Generic)?)
+            }
             // STT models are discovered by the transcriber, not built as
             // synthesis engines.
             EngineKind::Stt => {
@@ -513,7 +516,10 @@ fn scan(root: &Path) -> Result<Vec<(PathBuf, Manifest)>> {
                         // are not synthesis engines; the transcriber finds them.
                         tracing::debug!(model = %m.id, "skipping STT model in engine scan");
                     }
-                    Ok(m) => {
+                    Ok(mut m) => {
+                        // A generic audio.cpp install keeps its option
+                        // contract beside the weights.
+                        m.load_model_spec(&entry.path());
                         tracing::info!(engine = %m.id, kind = ?m.kind, "registered engine");
                         manifests.push((entry.path(), m));
                     }
@@ -797,6 +803,86 @@ mod music_tests {
         // The model path is a directory (a GGUF package), not a file.
         let engine = manager.engine("ace-step").expect("engine builds");
         assert_eq!(engine.id(), "ace-step");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// A generic audio.cpp install is registered by its manifest, and its
+    /// `model_spec.json` becomes the parameter list — no Rust changes.
+    #[test]
+    fn audio_cpp_manifests_load_their_model_spec() {
+        let root = std::env::temp_dir().join(format!(
+            "laverock-audio-cpp-manager-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.subsec_nanos())
+                .unwrap_or(0)
+        ));
+        let _ = fs::remove_dir_all(&root);
+        let dir = root.join("seed-vc");
+        fs::create_dir_all(&dir).unwrap();
+        let cli = dir.join("fake_cli.sh");
+        fs::write(&cli, "#!/bin/sh\nexit 0\n").unwrap();
+        let mut perms = fs::metadata(&cli).unwrap().permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(&cli, perms).unwrap();
+        fs::write(dir.join("fake.gguf"), b"x").unwrap();
+        fs::write(
+            dir.join("model_spec.json"),
+            r#"{
+              "family": "seed_vc",
+              "tasks": ["vc", "svc"],
+              "capabilities": { "vc": ["speaker_reference"] },
+              "options": {
+                "request": [
+                  { "name": "route", "type": "enum",
+                    "values": ["v2_vc", "v1_svc"], "default": "v2_vc" },
+                  { "name": "num_inference_steps", "type": "int",
+                    "min": 1, "default": 30 }
+                ]
+              }
+            }"#,
+        )
+        .unwrap();
+        fs::write(
+            dir.join("engine.json"),
+            format!(
+                r#"{{
+                  "id": "seed-vc",
+                  "kind": "audio_cpp",
+                  "name": "Seed-VC",
+                  "capabilities": ["vc"],
+                  "audio_cpp": {{
+                    "binary": "{}",
+                    "model": "fake.gguf",
+                    "backend": "cpu",
+                    "family": "seed_vc",
+                    "task": "vc",
+                    "spec": "model_spec.json"
+                  }},
+                  "defaults": {{ "speed": 1.0, "num_steps": 30 }}
+                }}"#,
+                cli.display()
+            ),
+        )
+        .unwrap();
+
+        let manager = EngineManager::open(&root).expect("manager");
+        let info = manager
+            .list()
+            .into_iter()
+            .find(|e| e.id == "seed-vc")
+            .expect("registered");
+        assert_eq!(info.kind, "audio_cpp");
+        assert_eq!(info.task, crate::TaskKind::Vc);
+        assert_eq!(info.backend, "audiocpp");
+        assert_eq!(info.capabilities, ["vc"]);
+        let params = manager.parameters("seed-vc").unwrap();
+        assert!(params.iter().any(|p| p.name == "route"));
+        assert!(params.iter().any(|p| p.name == "num_inference_steps"));
+
+        let engine = manager.engine("seed-vc").expect("engine builds");
+        assert_eq!(engine.id(), "seed-vc");
         let _ = fs::remove_dir_all(&root);
     }
 }

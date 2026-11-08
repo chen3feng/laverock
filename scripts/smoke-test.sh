@@ -922,6 +922,58 @@ else
 fi
 fi
 
+if want convert; then
+echo "convert"
+index_html=$(curl -sf "$BASE/")
+case "$index_html" in
+  *'id="page-convert"'*) ok "convert page" ;;
+  *) bad "convert page" ;;
+esac
+
+# A speech engine has no conversion task; the endpoint must say so.
+code=$(curl -s -o /dev/null -w '%{http_code}' -X POST \
+  "$BASE/api/engines/$MODEL/convert" \
+  -F "audio=@$DIR/test_wavs/leijun-1.wav" \
+  -F "prompt=@$DIR/test_wavs/news-female.wav")
+[ "$code" = "400" ] && ok "speech engine rejects conversion" \
+  || bad "speech engine rejects conversion (HTTP $code)"
+
+# Run a real conversion when a vc engine is installed.
+vc_id=$(printf '%s' "$engines_json" | sed 's/},{/}\n{/g' \
+  | grep '"task":"vc"' | sed -n 's/.*"id":"\([^"]*\)".*/\1/p' | head -1 || true)
+if [ -n "$vc_id" ]; then
+  code=$(curl -s -o "$OUT/converted.wav" -w '%{http_code}' -X POST \
+    "$BASE/api/engines/$vc_id/convert" \
+    -F "audio=@$DIR/test_wavs/leijun-1.wav" \
+    -F "prompt=@$DIR/test_wavs/news-female.wav")
+  [ "$code" = "200" ] && head -c 4 "$OUT/converted.wav" | grep -q RIFF \
+    && ok "convert with $vc_id" || bad "convert with $vc_id (HTTP $code)"
+
+  conv_json=$(curl -s -X POST "$BASE/api/engines/$vc_id/convert" \
+    -H 'x-laverock-job: 1' \
+    -F "audio=@$DIR/test_wavs/leijun-1.wav" \
+    -F "prompt=@$DIR/test_wavs/news-female.wav")
+  conv_id=$(printf '%s' "$conv_json" | sed -n 's/.*"job_id":"\([^"]*\)".*/\1/p')
+  [ -n "$conv_id" ] && ok "start convert job ($conv_id)" \
+    || bad "start convert job: $conv_json"
+  status=""
+  for _ in $(seq 1 600); do
+    status=$(curl -s "$BASE/api/jobs/$conv_id" \
+      | sed -n 's/.*"status":"\([^"]*\)".*/\1/p')
+    case "$status" in done|error|cancelled) break ;; esac
+    sleep 1
+  done
+  [ "$status" = "done" ] && ok "convert job finished" \
+    || bad "convert job status: $status"
+  code=$(curl -s -o "$OUT/job-converted.wav" -w '%{http_code}' \
+    "$BASE/api/jobs/$conv_id/files/converted.wav")
+  [ "$code" = "200" ] && head -c 4 "$OUT/job-converted.wav" | grep -q RIFF \
+    && ok "convert job artifact" || bad "convert job artifact (HTTP $code)"
+else
+  echo "  skip real conversion (no vc engine installed)"
+fi
+fi
+
 if want remote; then
 echo "remote access"
 PORT=$(echo "$BASE" | sed -n 's|.*:\([0-9][0-9]*\).*|\1|p')

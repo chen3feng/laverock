@@ -1,0 +1,36 @@
+    <!-- ================= 变声 ================= -->
+    <section id="page-convert" class="page">
+      <div class="page-head"><h1 data-i18n="convert.title">变声</h1><p class="sub" data-i18n="convert.sub">把一段现成语音换成声音库里的目标音色，保留内容与韵律。</p></div>
+
+      <div class="card">
+        <label for="convertEngine" data-i18n="convert.engine">变声引擎</label>
+        <select id="convertEngine"></select>
+        <div class="hint" id="convertEngineHint"></div>
+      </div>
+
+      <div class="card">
+        <label data-i18n="convert.source">源音频（单人、干净、少混响）</label>
+        <div id="convertSource"></div>
+        <div class="hint" data-i18n="convert.source.hint">上传或录制要转换的语音，至少 0.5 秒；浏览器录音会转成 24kHz 单声道 WAV。源音频越长，转换越慢。</div>
+      </div>
+
+      <div class="card">
+        <label for="convertProfile" data-i18n="convert.voice">目标音色</label>
+        <div class="prompt-box">
+          <select id="convertProfile" style="flex:1"></select>
+          <button class="ghost" id="convertPreview" type="button" data-i18n="preview" disabled>试听</button>
+        </div>
+        <div class="hint" data-i18n="convert.voice.hint">从声音库选择目标音色；没有合适的声音时，先到「声音」页保存一段 3–10 秒的参考录音。</div>
+      </div>
+
+      <!-- Options come from the engine's model spec. -->
+      <div class="card" id="convertParams" hidden></div>
+
+      <div class="actions">
+        <button id="convertGo" type="button" data-i18n="convert.go">开始变声</button>
+        <span id="convertStatus"></span>
+      </div>
+      <div id="convertProgress" class="pbar" hidden><div class="pbar-fill indeterminate"></div></div>
+      <div id="convertProgressLabel" class="pbar-label" hidden><span></span><b></b></div>
+      <div id="convertResults" hidden></div>
+    </section>

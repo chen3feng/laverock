@@ -114,6 +114,7 @@ async function loadProfiles() {
   }
   if (profiles.some((p) => p.id === current)) sel.value = current;
   syncProfileUI();
+  fillConvertProfiles();
   renderVoices();
 }
 

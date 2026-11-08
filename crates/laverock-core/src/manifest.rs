@@ -39,6 +39,11 @@ pub enum EngineKind {
     /// requests carry a caption, optional lyrics and a duration.
     #[serde(rename = "music")]
     Music,
+    /// Any audio.cpp family driven by a `model_spec.json` instead of a
+    /// hand-written Rust mapping. Voice conversion (Seed-VC) is the first
+    /// user; the `[audio_cpp]` section names the family and task.
+    #[serde(rename = "audio_cpp")]
+    AudioCpp,
     /// Speech-to-text models (SenseVoice via sherpa-onnx). Not a
     /// synthesis engine; discovered by the transcriber instead.
     #[serde(rename = "stt")]
@@ -88,6 +93,7 @@ impl EngineKind {
             EngineKind::IndexTts2 => "indextts2",
             EngineKind::MossTts => "mosstts",
             EngineKind::Music => "music",
+            EngineKind::AudioCpp => "audio_cpp",
             EngineKind::Stt => "stt",
         }
     }
@@ -99,7 +105,8 @@ impl EngineKind {
             | EngineKind::Dots
             | EngineKind::CosyVoice
             | EngineKind::IndexTts2
-            | EngineKind::Music => "audiocpp",
+            | EngineKind::Music
+            | EngineKind::AudioCpp => "audiocpp",
             EngineKind::MossTts => "llama.cpp",
             EngineKind::Ming3Tts | EngineKind::Chatterbox => "python",
             _ => "onnx",
@@ -153,6 +160,9 @@ pub struct Manifest {
     /// Music-generation configuration when `kind == "music"`.
     #[serde(default)]
     pub music: Option<MusicManifest>,
+    /// Generic audio.cpp configuration when `kind == "audio_cpp"`.
+    #[serde(default)]
+    pub audio_cpp: Option<AudioCppTaskManifest>,
     /// STT configuration when `kind == "stt"`.
     #[serde(default)]
     pub stt: Option<SttManifest>,
@@ -162,6 +172,10 @@ pub struct Manifest {
     /// [`Manifest::default_parameters`] supplies the built-in set per kind.
     #[serde(default)]
     pub parameters: Vec<ParamSpec>,
+    /// Parsed `model_spec.json`, filled in by the scanner for
+    /// `kind: "audio_cpp"` installs. Not part of `engine.json`.
+    #[serde(skip)]
+    pub resolved_spec: Option<crate::modelspec::ModelSpec>,
 }
 
 impl Manifest {
@@ -171,8 +185,45 @@ impl Manifest {
         self.task.unwrap_or(match self.kind {
             EngineKind::Music => TaskKind::Music,
             EngineKind::Stt => TaskKind::Asr,
+            // A generic audio.cpp install declares its task in the
+            // section (`vc`, `svc`, `tts`, `clon`, `gen`, …).
+            EngineKind::AudioCpp => self
+                .audio_cpp
+                .as_ref()
+                .and_then(|cfg| TaskKind::parse(&cfg.task))
+                .unwrap_or(TaskKind::Tts),
             _ => TaskKind::Tts,
         })
+    }
+
+    /// Load the `model_spec.json` of a generic audio.cpp install. A missing
+    /// optional file is not an error: the manifest's own `parameters` list
+    /// then drives the UI, and the engine still runs with no extra options.
+    pub fn load_model_spec(&mut self, dir: &std::path::Path) {
+        if self.kind != EngineKind::AudioCpp {
+            return;
+        }
+        let Some(cfg) = &self.audio_cpp else {
+            return;
+        };
+        if let Some(spec) = &cfg.model_spec {
+            self.resolved_spec = Some(spec.clone());
+            return;
+        }
+        let path = dir.join(cfg.spec.as_deref().unwrap_or("model_spec.json"));
+        match std::fs::read_to_string(&path) {
+            Ok(raw) => match crate::modelspec::ModelSpec::parse(&raw) {
+                Ok(spec) => self.resolved_spec = Some(spec),
+                Err(e) => tracing::warn!(spec = %path.display(), "invalid model spec: {e}"),
+            },
+            Err(e) => {
+                // Only an explicitly named spec is worth a warning; the
+                // default name is optional.
+                if cfg.spec.is_some() {
+                    tracing::warn!(spec = %path.display(), "cannot read model spec: {e}");
+                }
+            }
+        }
     }
 
     /// Structural problems that make this install unusable, e.g. a
@@ -253,6 +304,16 @@ impl Manifest {
                 }
                 Some(_) => None,
             },
+            EngineKind::AudioCpp => match &self.audio_cpp {
+                None => missing("audio_cpp"),
+                Some(c) if c.binary.trim().is_empty() && c.model.trim().is_empty() => Some(
+                    Localized::Text("missing [audio_cpp] binary/model".to_string()),
+                ),
+                Some(c) if c.family.trim().is_empty() || c.task.trim().is_empty() => Some(
+                    Localized::Text("missing [audio_cpp] family/task".to_string()),
+                ),
+                Some(_) => None,
+            },
             EngineKind::Stt => self.stt.is_none().then(|| missing("stt")).flatten(),
         };
         if structural.is_some() {
@@ -278,6 +339,14 @@ impl Manifest {
     /// their English text filled in on the way out; see `legacy_i18n`.
     pub fn parameters_or_defaults(&self) -> Vec<ParamSpec> {
         if self.parameters.is_empty() {
+            // A generic audio.cpp install describes its controls in
+            // `model_spec.json`; they become ordinary manifest parameters.
+            if let Some(spec) = &self.resolved_spec {
+                let params = spec.parameters();
+                if !params.is_empty() {
+                    return params;
+                }
+            }
             Self::default_parameters(self.kind)
         } else {
             let mut params = self.parameters.clone();
@@ -317,6 +386,9 @@ impl Manifest {
         match kind {
             // STT is not a synthesis engine; it has no per-request params.
             EngineKind::Stt => Vec::new(),
+            // Generic audio.cpp installs declare their controls in the
+            // model spec (or the manifest's own `parameters` list).
+            EngineKind::AudioCpp => Vec::new(),
             EngineKind::ZipVoice => vec![
                 ParamSpec::slider(
                     "speed",
@@ -1352,6 +1424,57 @@ fn default_dots_backend() -> String {
 }
 fn default_dots_seed() -> i64 {
     42
+}
+
+/// Generic audio.cpp configuration (`kind: "audio_cpp"`).
+///
+/// The family and task name the audio.cpp operation (`seed_vc` / `vc`,
+/// `ace_step` / `gen`, …); `model_spec.json` describes the request options
+/// so a new family needs no Rust change. `input` and `voice_ref` say which
+/// audio the task consumes: a voice-conversion model needs both, a
+/// text-to-speech model only the reference clip.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AudioCppTaskManifest {
+    /// `audiocpp_cli` path, absolute or relative to the model directory.
+    #[serde(default)]
+    pub binary: String,
+    /// GGUF file or a package directory, absolute or relative to the
+    /// model directory.
+    #[serde(default)]
+    pub model: String,
+    /// audio.cpp backend: `best`, `metal`, `cuda`, `vulkan`, `cpu`…
+    #[serde(default = "default_dots_backend")]
+    pub backend: String,
+    /// audio.cpp family, e.g. `seed_vc`.
+    #[serde(default)]
+    pub family: String,
+    /// audio.cpp task, e.g. `vc`, `svc`, `tts`, `clon`, `gen`.
+    #[serde(default)]
+    pub task: String,
+    /// `model_spec.json` path relative to the model directory.
+    #[serde(default)]
+    pub spec: Option<String>,
+    /// Inline spec, for hand-written manifests; wins over `spec`.
+    #[serde(default)]
+    pub model_spec: Option<crate::modelspec::ModelSpec>,
+    /// Request field carrying the source audio (`audio` by default).
+    #[serde(default)]
+    pub input: Option<String>,
+    /// Whether the task needs a target voice reference.
+    #[serde(default = "default_true")]
+    pub voice_ref: bool,
+    #[serde(default)]
+    pub language: Option<String>,
+    #[serde(default = "default_dots_seed")]
+    pub seed: i64,
+    /// Passed as `--load-option k=v` and in the resident server config.
+    #[serde(default)]
+    pub load_options: std::collections::BTreeMap<String, String>,
+    /// Passed as `--session-option k=v` and in the resident server config.
+    #[serde(default)]
+    pub session_options: std::collections::BTreeMap<String, String>,
+    #[serde(default)]
+    pub env: std::collections::BTreeMap<String, String>,
 }
 
 /// Music-generation configuration (audio.cpp `--task gen`).

@@ -406,6 +406,10 @@
       <svg viewBox="0 0 24 24"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
       <span data-i18n="nav.music">音乐</span>
     </a>
+    <a href="#/convert" data-page="convert">
+      <svg viewBox="0 0 24 24"><path d="M4 12v-2a8 8 0 0 1 16 0v2"/><path d="M4 14v4"/><path d="M20 14v4"/><path d="M8 16v4"/><path d="M16 16v4"/><path d="M8 12h.01"/><path d="M16 12h.01"/></svg>
+      <span data-i18n="nav.convert">变声</span>
+    </a>
     <a href="#/captures" data-page="captures">
       <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="4" rx="1"/><rect x="3" y="10" width="18" height="4" rx="1"/><rect x="3" y="16" width="18" height="4" rx="1"/></svg>
       <span data-i18n="nav.captures">素材库</span>
@@ -564,6 +568,43 @@
       <div id="musicProgress" class="pbar" hidden><div class="pbar-fill indeterminate"></div></div>
       <div id="musicProgressLabel" class="pbar-label" hidden><span></span><b></b></div>
       <div id="musicResults" hidden></div>
+    </section>
+
+    <!-- ================= 变声 ================= -->
+    <section id="page-convert" class="page">
+      <div class="page-head"><h1 data-i18n="convert.title">变声</h1><p class="sub" data-i18n="convert.sub">把一段现成语音换成声音库里的目标音色，保留内容与韵律。</p></div>
+
+      <div class="card">
+        <label for="convertEngine" data-i18n="convert.engine">变声引擎</label>
+        <select id="convertEngine"></select>
+        <div class="hint" id="convertEngineHint"></div>
+      </div>
+
+      <div class="card">
+        <label data-i18n="convert.source">源音频（单人、干净、少混响）</label>
+        <div id="convertSource"></div>
+        <div class="hint" data-i18n="convert.source.hint">上传或录制要转换的语音，至少 0.5 秒；浏览器录音会转成 24kHz 单声道 WAV。源音频越长，转换越慢。</div>
+      </div>
+
+      <div class="card">
+        <label for="convertProfile" data-i18n="convert.voice">目标音色</label>
+        <div class="prompt-box">
+          <select id="convertProfile" style="flex:1"></select>
+          <button class="ghost" id="convertPreview" type="button" data-i18n="preview" disabled>试听</button>
+        </div>
+        <div class="hint" data-i18n="convert.voice.hint">从声音库选择目标音色；没有合适的声音时，先到「声音」页保存一段 3–10 秒的参考录音。</div>
+      </div>
+
+      <!-- Options come from the engine's model spec. -->
+      <div class="card" id="convertParams" hidden></div>
+
+      <div class="actions">
+        <button id="convertGo" type="button" data-i18n="convert.go">开始变声</button>
+        <span id="convertStatus"></span>
+      </div>
+      <div id="convertProgress" class="pbar" hidden><div class="pbar-fill indeterminate"></div></div>
+      <div id="convertProgressLabel" class="pbar-label" hidden><span></span><b></b></div>
+      <div id="convertResults" hidden></div>
     </section>
 
     <!-- ================= 素材库 ================= -->
@@ -1650,6 +1691,49 @@ addI18n({
 
 addI18n({
   zh: {
+    'nav.convert': '变声',
+    'convert.title': '变声',
+    'convert.sub': '把一段现成语音换成声音库里的目标音色，保留内容与韵律。',
+    'convert.engine': '变声引擎',
+    'convert.engine.hint': '选择一个已安装的声音转换模型；首次转换需要先加载数 GB 权重。',
+    'convert.source': '源音频（单人、干净、少混响）',
+    'convert.source.hint': '上传或录制要转换的语音，至少 0.5 秒；浏览器录音会转成 24kHz 单声道 WAV。源音频越长，转换越慢。',
+    'convert.voice': '目标音色',
+    'convert.voice.hint': '从声音库选择目标音色；没有合适的声音时，先到「声音」页保存一段 3–10 秒的参考录音。',
+    'convert.choose_voice': '选择声音库中的音色',
+    'convert.go': '开始变声',
+    'convert.no_engine': '还没有安装变声模型；请到「模型」页安装 Seed-VC。',
+    'convert.no_source': '请先上传或录制一段源音频。',
+    'convert.no_voice': '请先选择目标音色。',
+    'convert.running': '正在转换…',
+    'convert.first_load': '正在加载模型并转换（首次加载约数秒）…',
+    'convert.done': '转换完成，已保存到历史',
+    'convert.failed': '变声失败：',
+  },
+  en: {
+    'nav.convert': 'Convert',
+    'convert.title': 'Voice conversion',
+    'convert.sub': 'Turn an existing recording into a voice from your library while keeping its content and rhythm.',
+    'convert.engine': 'Conversion engine',
+    'convert.engine.hint': 'Pick an installed voice-conversion model; the first run loads several GB of weights.',
+    'convert.source': 'Source audio (one speaker, clean, little reverb)',
+    'convert.source.hint': 'Upload or record the speech to convert, at least 0.5 s; browser recordings become 24 kHz mono WAV. Longer sources take longer.',
+    'convert.voice': 'Target voice',
+    'convert.voice.hint': 'Pick a voice from the library. If none fits, save a 3–10 s reference on the Voices page first.',
+    'convert.choose_voice': 'Choose a voice from the library',
+    'convert.go': 'Convert',
+    'convert.no_engine': 'No voice-conversion model installed; install Seed-VC from the Models page.',
+    'convert.no_source': 'Upload or record a source clip first.',
+    'convert.no_voice': 'Choose a target voice first.',
+    'convert.running': 'Converting…',
+    'convert.first_load': 'Loading the model and converting (the first load takes a few seconds)…',
+    'convert.done': 'Converted and saved to history',
+    'convert.failed': 'Conversion failed: ',
+  },
+});
+
+addI18n({
+  zh: {
     'cap.file': '选择文件', 'cap.record': '● 录音', 'cap.stop': '■ 停止', 'cap.none': '未选择',
     'cap.transcribe': '✎ 转写', 'transcribe.busy': '转写中…',
     'preset.official.hf': '官方（huggingface.co）', 'preset.cn': 'hf-mirror.com（国内加速）',
@@ -2019,7 +2103,7 @@ async function jobSnapshot(id) {
 }
 
 const $ = (id) => document.getElementById(id);
-const PAGES = ["synthesize", "music", "captures", "tools", "projects", "voices", "models", "history", "settings"];
+const PAGES = ["synthesize", "music", "convert", "captures", "tools", "projects", "voices", "models", "history", "settings"];
 const HF_PRESETS = [
   { value: '', labelKey: 'preset.official.hf' },
   { value: 'https://hf-mirror.com', labelKey: 'preset.cn' },
@@ -2381,7 +2465,7 @@ async function api(path, opts) {
 // ---------------------------------------------------------------- capture
 
 class Capture {
-  constructor(host) {
+  constructor(host, { autoTranscribe = true, transcribe = true } = {}) {
     host.innerHTML = '';
     host.appendChild($('captureTpl').content.cloneNode(true));
     applyI18n(host);
@@ -2395,6 +2479,10 @@ class Capture {
     this.filename = null;
     this.recording = false;
     this.transcribing = false;
+    // Voice conversion records source audio, not a reference clip: there
+    // is nothing to transcribe.
+    this.autoTranscribe = autoTranscribe;
+    this.showTranscribe = transcribe;
     this.onChange = () => {};
     this.onTranscribed = () => {};
 
@@ -2414,7 +2502,7 @@ class Capture {
   }
 
   syncTranscribeButton() {
-    this.transBtn.hidden = !(transcribeAvailable && this.blob && !this.transcribing);
+    this.transBtn.hidden = !(this.showTranscribe && transcribeAvailable && this.blob && !this.transcribing);
   }
 
   setTranscribing(on) {
@@ -2537,7 +2625,7 @@ class Capture {
     this.rec.textContent = t('cap.record');
     this.syncTranscribeButton();
     this.onChange();
-    if (autoTranscribe && transcribeAvailable) this.transcribe();
+    if (autoTranscribe && this.autoTranscribe && transcribeAvailable) this.transcribe();
   }
 }
 
@@ -3127,6 +3215,7 @@ async function loadProfiles() {
   }
   if (profiles.some((p) => p.id === current)) sel.value = current;
   syncProfileUI();
+  fillConvertProfiles();
   renderVoices();
 }
 
@@ -3526,6 +3615,7 @@ async function loadEngines() {
   const task = (e) => e.task || (e.kind === 'music' ? 'music' : 'tts');
   const synthList = engines.filter((e) => task(e) === 'tts');
   const musicList = engines.filter((e) => task(e) === 'music');
+  const vcList = engines.filter((e) => task(e) === 'vc');
 
   // Rebuilding the lists also rebuilds the parameter controls, dropping
   // values the user tuned. When the set of engines did not change (the
@@ -3540,12 +3630,17 @@ async function loadEngines() {
 
   fillEngineSelect($('engine'), synthList);
   fillEngineSelect($('musicEngine'), musicList);
+  fillEngineSelect($('convertEngine'), vcList);
   $('go').disabled = synthList.length === 0;
   $('musicGo').disabled = musicList.length === 0;
+  $('convertGo').disabled = vcList.length === 0;
   if (!musicList.length) $('musicStatus').textContent = t('music.no_engine');
   else $('musicStatus').textContent = '';
+  if (!vcList.length) $('convertStatus').textContent = t('convert.no_engine');
+  else $('convertStatus').textContent = '';
   syncEngine();
   syncMusicEngine();
+  syncConvertEngine();
   if (currentPage() === 'models') {
     if (modelsData) renderModels();
     else if (!session.loopback) renderInstalledEngines();
@@ -5138,6 +5233,171 @@ $('saveSettings').onclick = async () => {
   }
 };
 
+// ---------------------------------------------------------------- convert
+//
+// Voice conversion: a source clip plus a target voice from the library.
+// The request is a background job, so a long conversion keeps its progress
+// across a page reload and the result is also a downloadable artifact.
+
+const convertCapture = new Capture($('convertSource'), {
+  autoTranscribe: false,
+  transcribe: false,
+});
+
+let convertPreviewAudio = null;
+let convertPreviewId = null;
+
+function fillConvertProfiles() {
+  const sel = $('convertProfile');
+  if (!sel) return;
+  const current = sel.value;
+  sel.innerHTML = '';
+  const empty = document.createElement('option');
+  empty.value = '';
+  empty.textContent = `— ${t('convert.choose_voice')} —`;
+  sel.appendChild(empty);
+  for (const p of profiles) {
+    const o = document.createElement('option');
+    o.value = p.id;
+    o.textContent = p.name;
+    sel.appendChild(o);
+  }
+  if (profiles.some((p) => p.id === current)) sel.value = current;
+  syncConvertProfileUI();
+}
+
+function syncConvertProfileUI() {
+  const id = $('convertProfile').value;
+  const playing = !!id && convertPreviewId === id;
+  $('convertPreview').disabled = !id;
+  $('convertPreview').textContent = playing ? t('stop') : t('preview');
+}
+
+function stopConvertPreview() {
+  if (convertPreviewAudio) {
+    convertPreviewAudio.pause();
+    convertPreviewAudio = null;
+  }
+  convertPreviewId = null;
+  syncConvertProfileUI();
+}
+
+$('convertProfile').onchange = () => {
+  stopConvertPreview();
+  syncConvertProfileUI();
+};
+
+$('convertPreview').onclick = () => {
+  const id = $('convertProfile').value;
+  if (!id) return;
+  if (convertPreviewId === id) {
+    stopConvertPreview();
+    return;
+  }
+  stopConvertPreview();
+  const engine = engines.find((x) => x.id === $('convertEngine').value);
+  const url = engine
+    ? `/api/profiles/${encodeURIComponent(id)}/audio?engine=${encodeURIComponent(engine.id)}`
+    : `/api/profiles/${encodeURIComponent(id)}/audio`;
+  convertPreviewId = id;
+  convertPreviewAudio = new Audio(url);
+  convertPreviewAudio.addEventListener('ended', stopConvertPreview);
+  pauseOtherAudio(convertPreviewAudio);
+  convertPreviewAudio.play().catch(() => stopConvertPreview());
+  syncConvertProfileUI();
+};
+
+function syncConvertEngine() {
+  const e = engines.find((x) => x.id === $('convertEngine').value);
+  if (!e) {
+    $('convertEngineHint').textContent = t('convert.engine.hint');
+    renderParamGrid($('convertParams'), [], 'convert-param-');
+    return;
+  }
+  const caps = (e.capabilities || []).map(capabilityLabel).join(t('ui.text'));
+  $('convertEngineHint').textContent = `${e.kind} · ${caps}`;
+  renderParamGrid($('convertParams'), e.parameters || [], 'convert-param-');
+}
+$('convertEngine').onchange = syncConvertEngine;
+
+function convertBlobFromEvent(p) {
+  const bytes = Uint8Array.from(atob(p.wav), (c) => c.charCodeAt(0));
+  return new Blob([bytes], { type: 'audio/wav' });
+}
+
+$('convertGo').onclick = async () => {
+  const status = $('convertStatus');
+  const engine = engines.find((x) => x.id === $('convertEngine').value);
+  if (!engine) {
+    status.className = 'err';
+    status.textContent = t('convert.no_engine');
+    return;
+  }
+  if (!convertCapture.blob) {
+    status.className = 'err';
+    status.textContent = t('convert.no_source');
+    return;
+  }
+  const profileId = $('convertProfile').value;
+  if (!profileId) {
+    status.className = 'err';
+    status.textContent = t('convert.no_voice');
+    return;
+  }
+
+  const fd = new FormData();
+  fd.append('audio', convertCapture.blob, convertCapture.filename || 'source.wav');
+  fd.append('profile_id', profileId);
+  for (const [name, value] of Object.entries(collectParams('convertParams'))) {
+    fd.append(name, value);
+  }
+
+  $('convertGo').disabled = true;
+  status.className = '';
+  const labelEl = $('convertProgressLabel');
+  const pbar = $('convertProgress');
+  pbar.hidden = false;
+  labelEl.hidden = false;
+  const startedAt = Date.now();
+  const fmtElapsed = () => {
+    const s = (Date.now() - startedAt) / 1000;
+    return `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
+  };
+  const setStage = (text) => {
+    labelEl.querySelector('span').textContent = text;
+    labelEl.querySelector('b').textContent = fmtElapsed();
+    status.textContent = text;
+  };
+  setStage(engine.loaded ? t('convert.running') : t('convert.first_load'));
+  const timer = setInterval(() => {
+    labelEl.querySelector('b').textContent = fmtElapsed();
+  }, 250);
+
+  let result = null;
+  try {
+    await runJob(`/api/engines/${encodeURIComponent(engine.id)}/convert`, fd, {
+      stage: (e) => setStage(e.message || t('convert.running')),
+      audio: (e) => {
+        result = { blob: convertBlobFromEvent(e), index: 0, total: 1 };
+      },
+    });
+    if (!result) throw new Error(t('ui.no_audio_data_received'));
+    renderSynthResults([result], engine, 'convertResults');
+    lastSynthBlob = result.blob;
+    engine.loaded = true;
+    status.className = 'ok';
+    status.textContent = t('convert.done');
+  } catch (e) {
+    status.className = 'err';
+    status.textContent = t('convert.failed') + e.message;
+  } finally {
+    clearInterval(timer);
+    pbar.hidden = true;
+    labelEl.hidden = true;
+    $('convertGo').disabled = false;
+  }
+};
+
 // ---------------------------------------------------------------- subtitle projects
 
 // A project owns one source clip and its timed cues. This stage covers the
@@ -6169,6 +6429,7 @@ function showPage(page) {
   if (page === 'captures') { loadCaptures(); loadEnhanceStatus(); }
   if (page === 'tools') loadToolsPage();
   if (page === 'projects') loadProjects();
+  if (page === 'convert') { loadProfiles(); syncConvertEngine(); }
   if (page === 'voices') loadProfiles();
   if (page === 'history') loadHistory();
   // Installs run on the server and can finish while another page is open,

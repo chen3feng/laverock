@@ -2371,6 +2371,7 @@ dependencies = [
 name = "laverock-core"
 version = "0.2.0-alpha"
 dependencies = [
+ "base64 0.22.1",
  "hound",
  "serde",
  "serde_json",

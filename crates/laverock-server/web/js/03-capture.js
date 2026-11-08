@@ -1,7 +1,7 @@
 // ---------------------------------------------------------------- capture
 
 class Capture {
-  constructor(host) {
+  constructor(host, { autoTranscribe = true, transcribe = true } = {}) {
     host.innerHTML = '';
     host.appendChild($('captureTpl').content.cloneNode(true));
     applyI18n(host);
@@ -15,6 +15,10 @@ class Capture {
     this.filename = null;
     this.recording = false;
     this.transcribing = false;
+    // Voice conversion records source audio, not a reference clip: there
+    // is nothing to transcribe.
+    this.autoTranscribe = autoTranscribe;
+    this.showTranscribe = transcribe;
     this.onChange = () => {};
     this.onTranscribed = () => {};
 
@@ -34,7 +38,7 @@ class Capture {
   }
 
   syncTranscribeButton() {
-    this.transBtn.hidden = !(transcribeAvailable && this.blob && !this.transcribing);
+    this.transBtn.hidden = !(this.showTranscribe && transcribeAvailable && this.blob && !this.transcribing);
   }
 
   setTranscribing(on) {
@@ -157,7 +161,7 @@ class Capture {
     this.rec.textContent = t('cap.record');
     this.syncTranscribeButton();
     this.onChange();
-    if (autoTranscribe && transcribeAvailable) this.transcribe();
+    if (autoTranscribe && this.autoTranscribe && transcribeAvailable) this.transcribe();
   }
 }
 

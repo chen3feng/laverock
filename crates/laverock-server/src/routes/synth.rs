@@ -2,7 +2,7 @@
 
 use axum::{
     body::{Body, Bytes},
-    extract::{Multipart, Path, State},
+    extract::{DefaultBodyLimit, Multipart, Path, State},
     http::{header, StatusCode},
     response::{IntoResponse, Response},
     routing::post,
@@ -10,8 +10,8 @@ use axum::{
 };
 use base64::Engine as _;
 use laverock_core::{
-    decode_wav, encode_wav_channels, trim_silence, Audio, AudioSink, CoreError, EngineManager,
-    SynthRequest, TaskKind,
+    decode_wav, encode_wav_channels, trim_silence, Audio, AudioSink, ConvertRequest, CoreError,
+    EngineManager, SynthRequest, TaskKind,
 };
 use std::sync::Arc;
 
@@ -21,8 +21,17 @@ use super::{ApiError, AppState};
 /// for. Kept small because each take is a full inference run.
 const MAX_SAMPLES: u32 = 4;
 
+/// Voice-conversion uploads are a single clip, but it can be minutes long;
+/// 200 MB matches the WAV import limit used by projects.
+const MAX_CONVERT_BYTES: usize = 200 * 1024 * 1024;
+
 pub(crate) fn router() -> Router<AppState> {
-    Router::new().route("/api/engines/{id}/synthesize", post(synthesize))
+    Router::new()
+        .route("/api/engines/{id}/synthesize", post(synthesize))
+        .route(
+            "/api/engines/{id}/convert",
+            post(convert).layer(DefaultBodyLimit::max(MAX_CONVERT_BYTES)),
+        )
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -454,6 +463,296 @@ async fn synthesize(
             status: StatusCode::INTERNAL_SERVER_ERROR,
             message: e.to_string(),
         })
+}
+
+/// Voice conversion: a source clip plus a target voice from the library
+/// (or an uploaded reference), run through a `vc` engine.
+///
+/// Returns the WAV directly, or a background job when the client sends
+/// `x-laverock-job: 1` (the UI's path, so progress survives a reload).
+async fn convert(
+    Path(engine_id): Path<String>,
+    State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
+    mut multipart: Multipart,
+) -> Result<Response, ApiError> {
+    let mut audio_bytes: Option<Vec<u8>> = None;
+    let mut source_name: Option<String> = None;
+    let mut prompt_bytes: Option<Vec<u8>> = None;
+    let mut profile_id: Option<String> = None;
+    let mut raw_params: std::collections::BTreeMap<String, String> =
+        std::collections::BTreeMap::new();
+
+    while let Some(field) = multipart
+        .next_field()
+        .await
+        .map_err(|e| ApiError::bad_request(format!("malformed multipart: {e}")))?
+    {
+        let name = field.name().map(str::to_string);
+        match name.as_deref() {
+            Some("audio") => {
+                source_name = field.file_name().map(str::to_string);
+                audio_bytes = Some(
+                    field
+                        .bytes()
+                        .await
+                        .map(|v| v.to_vec())
+                        .map_err(|e| ApiError::bad_request(format!("bad audio upload: {e}")))?,
+                );
+            }
+            Some("prompt") => {
+                prompt_bytes =
+                    Some(
+                        field.bytes().await.map(|v| v.to_vec()).map_err(|e| {
+                            ApiError::bad_request(format!("bad prompt upload: {e}"))
+                        })?,
+                    );
+            }
+            Some("profile_id") => {
+                let raw = field
+                    .text()
+                    .await
+                    .map_err(|e| ApiError::bad_request(format!("bad profile_id: {e}")))?;
+                if !raw.trim().is_empty() {
+                    profile_id = Some(raw.trim().to_string());
+                }
+            }
+            // The target transcript is not part of a VC request; accept
+            // and ignore it so a client can reuse the synthesis form.
+            Some("prompt_text") => {
+                let _ = field.text().await;
+            }
+            Some(other) => {
+                let raw = field
+                    .text()
+                    .await
+                    .map_err(|e| ApiError::bad_request(format!("bad {other} field: {e}")))?;
+                raw_params.insert(other.to_string(), raw);
+            }
+            None => {}
+        }
+    }
+
+    let audio_bytes = audio_bytes
+        .filter(|b| !b.is_empty())
+        .ok_or_else(|| ApiError::bad_request("missing required field: audio"))?;
+    let (input_samples, input_sr) = decode_wav(&audio_bytes)?;
+    if input_samples.is_empty() {
+        return Err(ApiError::bad_request("the source audio is empty"));
+    }
+
+    // A saved voice takes precedence over an ad-hoc reference, exactly as
+    // on the synthesis endpoint.
+    let (prompt_samples, prompt_sr) = if let Some(id) = profile_id {
+        let limit = state
+            .manager
+            .reference_limit_secs(&engine_id)
+            .unwrap_or(15.0);
+        let combined = state.profiles.reference(&id, limit)?;
+        decode_wav(&combined.wav)?
+    } else {
+        match prompt_bytes.filter(|b| !b.is_empty()) {
+            Some(bytes) => {
+                let (samples, rate) = decode_wav(&bytes)?;
+                let trimmed = trim_silence(&samples, rate.max(1) as u32, 0.10);
+                if trimmed.is_empty() {
+                    return Err(CoreError::UserError(laverock_core::i18n::Message::new(
+                        laverock_core::i18n::Key::ReferenceSilent,
+                    ))
+                    .into());
+                }
+                (trimmed.into_owned(), rate)
+            }
+            None => (Vec::new(), 0),
+        }
+    };
+
+    let param_specs = state.manager.parameters(&engine_id)?;
+    let params = resolve_params(&param_specs, &raw_params)?;
+
+    let info = state.manager.list().into_iter().find(|e| e.id == engine_id);
+    let engine_name = info
+        .as_ref()
+        .map(|e| e.name.clone())
+        .unwrap_or_else(|| engine_id.clone());
+    let engine_kind = info
+        .as_ref()
+        .map(|e| e.kind.clone())
+        .unwrap_or_else(|| "audio_cpp".to_string());
+    let history_text = source_name.unwrap_or_default();
+
+    let wants_job = headers.get("x-laverock-job").and_then(|v| v.to_str().ok()) == Some("1");
+    if wants_job {
+        return start_convert_job(
+            &state,
+            engine_id,
+            engine_name,
+            engine_kind,
+            history_text,
+            ConvertRequest {
+                input_samples,
+                input_sr,
+                prompt_samples,
+                prompt_sr,
+                params,
+                progress: None,
+            },
+        );
+    }
+
+    let manager = state.manager.clone();
+    let id = engine_id.clone();
+    let request = ConvertRequest {
+        input_samples,
+        input_sr,
+        prompt_samples,
+        prompt_sr,
+        params,
+        progress: None,
+    };
+    let Audio {
+        samples,
+        sample_rate,
+        channels,
+    } = tokio::task::spawn_blocking(move || manager.convert(&id, &request))
+        .await
+        .map_err(|e| ApiError {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            message: format!("engine task panicked: {e}"),
+        })??;
+    let wav = encode_wav_channels(&samples, sample_rate, channels)?;
+    if let Err(e) = state.history.add_typed(
+        &engine_id,
+        &engine_name,
+        TaskKind::Vc,
+        &engine_kind,
+        &history_text,
+        &wav,
+        sample_rate,
+        channels,
+        None,
+    ) {
+        tracing::warn!("history add failed: {e}");
+    }
+    Ok((
+        StatusCode::OK,
+        [
+            (header::CONTENT_TYPE, "audio/wav".to_string()),
+            (
+                header::CONTENT_DISPOSITION,
+                "attachment; filename=\"converted.wav\"".to_string(),
+            ),
+        ],
+        wav,
+    )
+        .into_response())
+}
+
+/// Run a voice conversion as a background job. The result is recorded in
+/// history and exposed both as an `audio` event and a job artifact.
+fn start_convert_job(
+    state: &AppState,
+    engine_id: String,
+    engine_name: String,
+    engine_kind: String,
+    history_text: String,
+    request: ConvertRequest,
+) -> Result<Response, ApiError> {
+    use laverock_core::ProgressEvent;
+
+    let job = state.jobs.create("convert")?;
+    let manager = state.manager.clone();
+    let history = state.history.clone();
+    let worker = job.clone();
+    let supervisor = job.clone();
+
+    let handle = tokio::task::spawn_blocking(move || {
+        worker.start();
+        if worker.is_cancelled() {
+            worker.finish_cancelled(0);
+            return;
+        }
+        let sink_job = worker.clone();
+        let sink: laverock_core::ProgressSink = Arc::new(move |event| {
+            if let ProgressEvent::Stage(label) = event {
+                sink_job.emit("stage", serde_json::json!({ "message": label }));
+            }
+        });
+        let request = ConvertRequest {
+            progress: Some(sink),
+            ..request
+        };
+        let audio = match manager.convert(&engine_id, &request) {
+            Ok(audio) => audio,
+            Err(e) => {
+                worker.fail(&e.to_string());
+                return;
+            }
+        };
+        let Audio {
+            samples,
+            sample_rate,
+            channels,
+        } = audio;
+        let wav = match encode_wav_channels(&samples, sample_rate, channels) {
+            Ok(wav) => wav,
+            Err(e) => {
+                worker.fail(&e.to_string());
+                return;
+            }
+        };
+        if let Err(e) = history.add_typed(
+            &engine_id,
+            &engine_name,
+            TaskKind::Vc,
+            &engine_kind,
+            &history_text,
+            &wav,
+            sample_rate,
+            channels,
+            None,
+        ) {
+            tracing::warn!("history add failed: {e}");
+        }
+
+        let name = "converted.wav";
+        let url = match worker.artifact(name, &wav) {
+            Ok(view) => view.url,
+            Err(e) => {
+                worker.log(&format!("artifact {name}: {e}"));
+                format!("/api/jobs/{}/files/{name}", worker.id())
+            }
+        };
+        let b64 = base64::engine::general_purpose::STANDARD.encode(&wav);
+        worker.emit(
+            "audio",
+            serde_json::json!({
+                "i": 0,
+                "n": 1,
+                "sr": sample_rate,
+                "ch": channels,
+                "wav": b64,
+                "url": url,
+            }),
+        );
+        if worker.is_cancelled() {
+            worker.finish_cancelled(1);
+        } else {
+            worker.finish(1);
+        }
+    });
+
+    tokio::spawn(async move {
+        if let Err(e) = handle.await {
+            supervisor.fail(&format!("conversion task failed: {e}"));
+        }
+    });
+
+    Ok((
+        StatusCode::ACCEPTED,
+        axum::Json(serde_json::json!({ "job_id": job.id() })),
+    )
+        .into_response())
 }
 
 /// Start a synthesis run as a background job and return its id.

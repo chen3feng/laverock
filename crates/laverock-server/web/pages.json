@@ -12,6 +12,12 @@
     "icon": "<path d=\"M9 18V5l12-2v13\"/><circle cx=\"6\" cy=\"18\" r=\"3\"/><circle cx=\"18\" cy=\"16\" r=\"3\"/>"
   },
   {
+    "id": "convert",
+    "i18n": "nav.convert",
+    "label": "变声",
+    "icon": "<path d=\"M4 12v-2a8 8 0 0 1 16 0v2\"/><path d=\"M4 14v4\"/><path d=\"M20 14v4\"/><path d=\"M8 16v4\"/><path d=\"M16 16v4\"/><path d=\"M8 12h.01\"/><path d=\"M16 12h.01\"/>"
+  },
+  {
     "id": "captures",
     "i18n": "nav.captures",
     "label": "素材库",

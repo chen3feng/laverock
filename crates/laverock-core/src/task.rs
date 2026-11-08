@@ -55,6 +55,7 @@ impl TaskKind {
         match kind {
             "music" => TaskKind::Music,
             "transcript" | "stt" | "text" => TaskKind::Asr,
+            "vc" => TaskKind::Vc,
             _ => TaskKind::Tts,
         }
     }

@@ -15,9 +15,13 @@ generation history and a phone remote that joins over your local network.
 - **Music generation** — describe a style and optionally add lyrics; ACE-Step
   renders a complete 48 kHz stereo song locally, with the same history and
   downloads as speech.
-- **17 models behind one interface** — from a 135 MB ONNX model that runs in
-  real time on CPU to 2B diffusion and LLM systems, plus text-to-music.
-  Install, update and remove them from the app, with live download progress.
+- **Voice conversion** — turn an existing recording into a saved voice while
+  keeping its words and timing. Seed-VC runs on the same local runtime, and
+  long conversions continue as background jobs.
+- **18 models behind one interface** — from a 135 MB ONNX model that runs in
+  real time on CPU to 2B diffusion and LLM systems, plus text-to-music and
+  voice conversion. Install, update and remove them from the app, with live
+  download progress.
 - **Recording library and voices** — every recording becomes a take,
   transcribed automatically with on-device speech recognition. A take can
   have room noise or background music removed before it conditions a voice;
@@ -70,6 +74,7 @@ configure.
 | IndexTTS-2 | clone | zh, en | ~3.6 GB |
 | MOSS-TTS-Delay | clone | 20 | ~10 GB |
 | ACE-Step 1.5 Turbo | text-to-music, lyrics | 50+ | ~10 GB (BF16) |
+| Seed-VC | voice conversion | any | ~3.1 GB (Q8_0) |
 | SenseVoice Small (optional) | speech recognition | 5 | ~234 MB |
 
 Requirements, per-engine notes and manual install scripts are in
