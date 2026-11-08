@@ -83,6 +83,7 @@ cat > "$DEST/engine.json" <<EOF
   "name": "$NAME",
   "languages": ["en"],
   "capabilities": ["music"],
+  "license": { "name": "Stability AI Community License", "url": "https://huggingface.co/stabilityai/stable-audio-3-small-music", "noncommercial": false },
   "music": {
     "binary": "$BIN",
     "model": "$(basename "$GGUF")",

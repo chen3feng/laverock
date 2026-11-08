@@ -155,6 +155,9 @@ pub struct EngineInfo {
     pub description: Localized,
     pub languages: Vec<String>,
     pub capabilities: Vec<String>,
+    /// Terms the weights are distributed under, when the installer wrote
+    /// them. The music picker prefers commercial licences.
+    pub license: Option<crate::License>,
     pub loaded: bool,
     /// Whether the engine keeps a long-lived child process between
     /// requests (the audio.cpp resident server).
@@ -270,6 +273,7 @@ impl EngineManager {
                     description: m.description.clone(),
                     languages: m.languages.clone(),
                     capabilities: m.capabilities.clone(),
+                    license: m.license.clone(),
                     loaded: handle.is_some(),
                     resident: pid.is_some(),
                     pid,

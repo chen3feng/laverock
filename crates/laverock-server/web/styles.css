@@ -102,6 +102,7 @@
   .pill.ok { color: var(--ok); border-color: #2c4b3d; }
   .pill.warn { color: #ffcf8f; border-color: #5c4626; }
   .chip { padding: 0 7px; margin: 0 4px 4px 0; }
+  .chip.warn { color: #ffcf8f; border-color: #5c4626; }
   .hint { font-size: 12px; color: var(--muted); margin-top: 6px; }
   .hint.ok { color: var(--ok); }
   .hint.err { color: var(--danger); }

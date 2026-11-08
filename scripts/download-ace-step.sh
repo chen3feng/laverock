@@ -9,6 +9,8 @@
 #   ACE_STEP_QUANT=q8_0    smaller ~6.2 GB export. The planner occasionally
 #                          fails to sample from the Q8_0 build; BF16 is the
 #                          reliable default.
+#   ACE_STEP_LORA=<path>   optional LoRA / style adapter for the DiT
+#   ACE_STEP_LORA_SCALE=1  adapter strength
 #   ACE_STEP_VERSION=...   pin a different audio.cpp release
 #
 # Disk: BF16 GGUF ~10 GB (Q8_0 ~6.2 GB), plus the shared ~40 MB runtime.
@@ -46,7 +48,18 @@ BACKEND="$(lv_audiocpp_backend)"
 lv_hf_download_file audio-cpp/audio.cpp-gguf "$PACKAGE" "$GGUF" 8 \
   "Downloading ACE-Step weights ($SIZE)"
 
-# 3. Manifest.
+# 3. Optional LoRA / style adapter. audio.cpp merges the adapter while
+# loading the DiT; the path is relative to the model directory (or
+# absolute). It is a session option, so it applies when the engine starts.
+SESSION='{}'
+if [ -n "${ACE_STEP_LORA:-}" ]; then
+  LORA_PATH=$(printf '%s' "$ACE_STEP_LORA" | sed 's/\\/\\\\/g; s/"/\\"/g')
+  LORA_SCALE="${ACE_STEP_LORA_SCALE:-1.0}"
+  SESSION=$(printf '{"ace_step.lora": "%s", "ace_step.lora_scale": "%s"}' \
+    "$LORA_PATH" "$LORA_SCALE")
+fi
+
+# 4. Manifest.
 cat > "$DEST/engine.json" <<EOF
 {
   "id": "ace-step",
@@ -54,6 +67,7 @@ cat > "$DEST/engine.json" <<EOF
   "name": "$NAME",
   "languages": ["zh", "en", "+ 50 languages"],
   "capabilities": ["music"],
+  "license": { "name": "MIT", "url": "https://huggingface.co/ACE-Step/Ace-Step1.5", "noncommercial": false },
   "music": {
     "binary": "$BIN",
     "model": "turbo",
@@ -62,7 +76,7 @@ cat > "$DEST/engine.json" <<EOF
     "task": "gen",
     "seed": 42,
     "load_options": { "ace_step.dit_model_path": "acestep-v15-turbo" },
-    "session_options": {}
+    "session_options": $SESSION
   },
   "defaults": { "speed": 1.0, "num_steps": 8 }
 }

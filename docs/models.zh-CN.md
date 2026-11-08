@@ -195,6 +195,23 @@ M4 Pro 上 Q8_0 检查点实测 RTF 1.47，加载后内存约 4.1 GB（见「速
 `ACE_STEP_QUANT=q8_0` 可把下载减半，但量化后的 planner 偶尔会采样失败，
 BF16 是更稳妥的默认值。
 
+**许可证与默认音乐模型** —— 每个音乐模型都会把自己的许可证带到「模型」页与
+音乐页的引擎提示中。ACE-Step 1.5 为 MIT；Stable Audio 3 使用 Stability AI
+Community License（营收门槛与署名要求见模型卡）。音乐页会把商用许可排在前面，
+因此安装了非商用模型时，只要还有商用模型，它就不会成为默认选项。
+
+**ACE-Step 风格模型（LoRA）** —— audio.cpp 在加载 ACE-Step 时可以合并 DiT
+LoRA 或 PEFT 适配器。安装时传入：
+
+```bash
+ACE_STEP_LORA=/path/to/style.safetensors ACE_STEP_LORA_SCALE=0.8 \
+  ./scripts/download-ace-step.sh
+```
+
+安装脚本会把 `ace_step.lora` 与 `ace_step.lora_scale` 写入清单的
+`session_options`。session option 在引擎启动时固定，因此适配器会作用于之后的
+每次请求，直到模型被卸载；更换时重新安装（或直接编辑 `engine.json`）。
+
 **Stable Audio 3** —— 运行在同一 audio.cpp 运行时上的文字生成音乐与音效模型，
 有三个安装项：`stable-audio-music`（Small Music）、`stable-audio-sfx`（Small SFX）
 和 `stable-audio-medium`。三者都使用音乐页；风格描述作为 `text`，`duration_sec`、

@@ -16,6 +16,7 @@ addI18n({
     'models.unloaded': '未加载', 'models.unload': '卸载', 'models.unload_all': '全部卸载',
     'models.unload_done': '模型已卸载',
     'models.show_details': '展开详情', 'models.hide_details': '收起详情',
+    'models.license': '许可证', 'models.noncommercial': '非商用',
   },
   en: {
     'models.title': 'Models',
@@ -34,5 +35,6 @@ addI18n({
     'models.unloaded': 'Not loaded', 'models.unload': 'Unload', 'models.unload_all': 'Unload all',
     'models.unload_done': 'Model unloaded',
     'models.show_details': 'Show details', 'models.hide_details': 'Hide details',
+    'models.license': 'License', 'models.noncommercial': 'Non-commercial',
   },
 });

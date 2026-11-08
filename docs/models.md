@@ -243,6 +243,27 @@ offload; installing with `ACE_STEP_QUANT=q8_0` halves the download, though
 the quantized planner occasionally fails to sample. The BF16 build is the
 reliable default.
 
+**Licences and the default music model** — each music entry carries its
+licence into the Models page and the Music page's engine hint. ACE-Step 1.5
+is MIT. Stable Audio 3 ships under the Stability AI Community License
+(check the model card for the revenue threshold and attribution terms).
+The Music page sorts commercial licences first, so installing a
+non-commercial model never silently makes it the default while a
+commercial one is present.
+
+**ACE-Step style adapters (LoRA)** — audio.cpp can merge a DiT LoRA or PEFT
+adapter while loading ACE-Step. Pass it at install time:
+
+```bash
+ACE_STEP_LORA=/path/to/style.safetensors ACE_STEP_LORA_SCALE=0.8 \
+  ./scripts/download-ace-step.sh
+```
+
+The installer writes `ace_step.lora` and `ace_step.lora_scale` into the
+manifest's `session_options`. Session options are fixed when the engine
+starts, so the adapter applies to every request until the model is
+unloaded; reinstall (or edit `engine.json`) to change it.
+
 **Stable Audio 3** — text-to-music and sound effects on the same audio.cpp
 runtime, with three installs: `stable-audio-music` (Small Music),
 `stable-audio-sfx` (Small SFX) and `stable-audio-medium`. All three use the

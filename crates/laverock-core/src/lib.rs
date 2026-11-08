@@ -38,8 +38,8 @@ pub use manager::{
 };
 pub use manifest::{
     AudioCppManifest, AudioCppTaskManifest, ChatterboxManifest, EngineKind, KokoroManifest,
-    Localized, LongCatManifest, Manifest, Ming3TtsManifest, MossTtsManifest, MusicManifest,
-    ParamKind, ParamOption, ParamSpec, Qwen3TtsManifest, SttManifest, SynthDefaults,
+    License, Localized, LongCatManifest, Manifest, Ming3TtsManifest, MossTtsManifest,
+    MusicManifest, ParamKind, ParamOption, ParamSpec, Qwen3TtsManifest, SttManifest, SynthDefaults,
     ZipVoiceManifest,
 };
 pub use modelspec::ModelSpec;
