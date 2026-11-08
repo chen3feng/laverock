@@ -200,6 +200,84 @@
     }
   },
   {
+    "id": "stable-audio-music",
+    "task": "music",
+    "dir": "stable-audio-music",
+    "name": "Stable Audio 3 Small Music",
+    "description": {
+      "en": "Text-to-music background tracks, plus audio-conditioned generation: start from an uploaded song or inpaint a masked region. Short prompts, 44.1 kHz stereo, on audio.cpp's native Metal/CUDA runtime.",
+      "zh": "文字生成背景音乐，并支持音频条件生成：从上传的歌曲出发，或对掩码区间做局部重绘。支持简短提示词，44.1kHz 立体声，经 audio.cpp 原生 Metal/CUDA 运行时推理。"
+    },
+    "size": "~1.7 GB (Q8_0) / ~2.4 GB (F16)",
+    "languages": [
+      "en"
+    ],
+    "capabilities": [
+      "music",
+      "audio-conditioning"
+    ],
+    "script": "download-stable-audio.sh",
+    "env": {
+      "STABLE_AUDIO_VARIANT": "music"
+    },
+    "note": {
+      "en": "The small model is tuned for loops and short cues rather than full songs; Medium is better for complete arrangements. Set STABLE_AUDIO_QUANT=f16 when installing for higher precision. Check the model card before commercial use.",
+      "zh": "小模型更适合循环与短配乐，不适合完整编曲；完整歌曲建议用 Medium。安装时设置 STABLE_AUDIO_QUANT=f16 可获得更高精度。商用前请查看模型卡许可。"
+    }
+  },
+  {
+    "id": "stable-audio-sfx",
+    "task": "music",
+    "dir": "stable-audio-sfx",
+    "name": "Stable Audio 3 Small SFX",
+    "description": {
+      "en": "Short sound effects from a text prompt: footsteps, impacts, ambience and UI sounds, generated locally on audio.cpp's native Metal/CUDA runtime.",
+      "zh": "用文字提示生成短音效：脚步、撞击、环境声与界面音效，经 audio.cpp 原生 Metal/CUDA 运行时在本机生成。"
+    },
+    "size": "~1.7 GB (Q8_0) / ~2.4 GB (F16)",
+    "languages": [
+      "en"
+    ],
+    "capabilities": [
+      "music",
+      "sfx"
+    ],
+    "script": "download-stable-audio.sh",
+    "env": {
+      "STABLE_AUDIO_VARIANT": "sfx"
+    },
+    "note": {
+      "en": "Tuned for clips of a few seconds; the duration default is 8 s. Shares the music page and controls with the other Stable Audio builds. Check the model card before commercial use.",
+      "zh": "针对数秒的短音频调优，时长默认 8 秒。与其它 Stable Audio 构建共用音乐页面与控件。商用前请查看模型卡许可。"
+    }
+  },
+  {
+    "id": "stable-audio-medium",
+    "task": "music",
+    "dir": "stable-audio-medium",
+    "name": "Stable Audio 3 Medium",
+    "description": {
+      "en": "The larger Stable Audio 3 music model: fuller arrangements and better prompt adherence, with the same init-audio and inpainting modes.",
+      "zh": "更大的 Stable Audio 3 音乐模型：编曲更完整、提示词跟随更好，并支持相同的初始音频与局部重绘模式。"
+    },
+    "size": "~3.6 GB (Q8_0) / ~5.8 GB (F16)",
+    "languages": [
+      "en"
+    ],
+    "capabilities": [
+      "music",
+      "audio-conditioning"
+    ],
+    "script": "download-stable-audio.sh",
+    "env": {
+      "STABLE_AUDIO_VARIANT": "medium"
+    },
+    "note": {
+      "en": "Needs roughly twice the memory and time of the Small builds. Do not install alongside them unless you have the disk and RAM to spare. Check the model card before commercial use.",
+      "zh": "显存与耗时约为小模型的两倍；磁盘和内存不宽裕时不必与小模型同时安装。商用前请查看模型卡许可。"
+    }
+  },
+  {
     "id": "seed-vc",
     "task": "vc",
     "dir": "seed-vc",

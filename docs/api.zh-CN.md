@@ -16,7 +16,7 @@ Cookie）；以下均指回环监听。
 | --- | --- | --- |
 | GET | `/api/health` | 服务状态，含是否找到 `ffmpeg` |
 | GET | `/api/engines` | 已注册引擎及其默认参数 |
-| POST | `/api/engines/:id/synthesize` | multipart：`text` 加 `profile_id` 或（`prompt` WAV + `prompt_text`），可附引擎参数 → WAV；音乐编辑路由另可附 `audio` 源音乐。加 `x-laverock-job: 1` 则作为后台任务运行，或加 `x-laverock-stream: 1` + `stream_audio=1` 逐句流式下发 |
+| POST | `/api/engines/:id/synthesize` | multipart：`text` 加 `profile_id` 或（`prompt` WAV + `prompt_text`），可附引擎参数 → WAV；音乐编辑路由与 Stable Audio 的 `init_audio`/`inpaint_audio` 模式另可附 `audio` 源音乐。加 `x-laverock-job: 1` 则作为后台任务运行，或加 `x-laverock-stream: 1` + `stream_audio=1` 逐句流式下发 |
 | POST | `/api/engines/:id/convert` | multipart：`audio`（源音频 WAV）加 `profile_id` 或 `prompt` WAV，可附引擎参数 → 转换后的 WAV；加 `x-laverock-job: 1` 则作为后台任务运行 |
 | POST | `/api/engines/:id/unload` | 释放该模型占用的内存（仍保持安装）→ `204` |
 | POST | `/api/engines/unload` | 释放所有已加载模型 → `204` |

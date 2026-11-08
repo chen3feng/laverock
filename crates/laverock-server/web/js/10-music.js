@@ -25,6 +25,9 @@ const musicSourceCapture = new Capture($('musicSource'), {
 const MUSIC_SOURCE_ROUTES = new Set([
   'cover', 'cover-nofsq', 'repaint', 'complete', 'lego', 'extract',
 ]);
+// Stable Audio conditions on a source song through `audio_input_kind`
+// rather than a route name.
+const MUSIC_AUDIO_KINDS = new Set(['init_audio', 'inpaint_audio']);
 // Controls that only matter for some routes. The engine still receives
 // every parameter; the manifest defaults keep the unused ones harmless.
 const MUSIC_PARAM_ROUTES = {
@@ -36,25 +39,46 @@ const MUSIC_PARAM_ROUTES = {
   audio_cover_strength: ['cover', 'cover-nofsq'],
   cover_noise_strength: ['cover', 'cover-nofsq'],
 };
+// Stable Audio's audio-conditioned controls, shown by input kind.
+const MUSIC_PARAM_AUDIO_KINDS = {
+  init_noise_level: ['init_audio', 'inpaint_audio'],
+  inpaint_mask_start_sec: ['inpaint_audio'],
+  inpaint_mask_end_sec: ['inpaint_audio'],
+};
 
 function musicRoute() {
   return $('music-param-task_route')?.value || 'text2music';
 }
 
+function musicAudioKind() {
+  return $('music-param-audio_input_kind')?.value || 'none';
+}
+
 function syncMusicRoute() {
   const route = musicRoute();
-  const editing = MUSIC_SOURCE_ROUTES.has(route);
+  const kind = musicAudioKind();
+  const editing =
+    MUSIC_SOURCE_ROUTES.has(route) || MUSIC_AUDIO_KINDS.has(kind);
   $('musicSourceCard').hidden = !editing;
   for (const [name, routes] of Object.entries(MUSIC_PARAM_ROUTES)) {
     const wrap = document.querySelector(`#musicParams [data-param="${name}"]`);
     if (wrap) wrap.hidden = !routes.includes(route);
+  }
+  for (const [name, kinds] of Object.entries(MUSIC_PARAM_AUDIO_KINDS)) {
+    const wrap = document.querySelector(`#musicParams [data-param="${name}"]`);
+    if (wrap) wrap.hidden = !kinds.includes(kind);
   }
   const go = $('musicGo');
   go.textContent = editing ? t('music.edit') : t('music.go');
 }
 
 $('musicParams').addEventListener('change', (e) => {
-  if (e.target.id === 'music-param-task_route') syncMusicRoute();
+  if (
+    e.target.id === 'music-param-task_route' ||
+    e.target.id === 'music-param-audio_input_kind'
+  ) {
+    syncMusicRoute();
+  }
 });
 
 // Extra buttons for the music page's parameter grid.
@@ -114,10 +138,20 @@ $('musicGo').onclick = async () => {
 
   const params = collectParams('musicParams');
   const route = params.task_route || 'text2music';
-  const editing = MUSIC_SOURCE_ROUTES.has(route);
+  const audioKind = params.audio_input_kind || 'none';
+  const editing =
+    MUSIC_SOURCE_ROUTES.has(route) || MUSIC_AUDIO_KINDS.has(audioKind);
   if (editing && !musicSourceCapture.blob) {
     status.className = 'err';
     status.textContent = t('music.source_required');
+    return;
+  }
+  if (
+    audioKind === 'inpaint_audio' &&
+    (!params.inpaint_mask_start_sec || !params.inpaint_mask_end_sec)
+  ) {
+    status.className = 'err';
+    status.textContent = t('music.inpaint_required');
     return;
   }
   const fd = new FormData();

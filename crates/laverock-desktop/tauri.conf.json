@@ -37,7 +37,8 @@
       "../../scripts/chatterbox_runner.py": "scripts/chatterbox_runner.py",
       "../../scripts/download-indextts2.sh": "scripts/download-indextts2.sh",
       "../../scripts/download-mosstts.sh": "scripts/download-mosstts.sh",
-      "../../scripts/download-seedvc.sh": "scripts/download-seedvc.sh"
+      "../../scripts/download-seedvc.sh": "scripts/download-seedvc.sh",
+      "../../scripts/download-stable-audio.sh": "scripts/download-stable-audio.sh"
     },
     "macOS": {
       "signingIdentity": "-",
