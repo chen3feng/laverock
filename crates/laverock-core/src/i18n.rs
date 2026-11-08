@@ -155,6 +155,9 @@ messages! {
           zh: "请先选择合成引擎再生成配音。" },
     ProjectSynthProgress = "project_synth_progress"
         { en: "Synthesizing cue {i}/{n}…", zh: "正在生成第 {i}/{n} 段配音…" },
+    ProjectMixNoAudio = "project_mix_no_audio"
+        { en: "No cue has a dub yet; generate the dub before mixing.",
+          zh: "还没有任何分段生成配音；请先生成配音再混音。" },
     ReferenceSilent = "reference_silent"
         { en: "The reference audio is silent; record or upload a clip with speech.",
           zh: "参考音频几乎全是静音，请重新录制或上传一段有人声的音频。" },

@@ -23,6 +23,8 @@ const PROJECT_FILE: &str = "project.json";
 const SOURCE_FILE: &str = "source.wav";
 /// Generated per-cue audio, relative to the project directory.
 const SEGMENT_DIR: &str = "segments";
+/// Finished mixes and other exports, relative to the project directory.
+const EXPORT_DIR: &str = "exports";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Source {
@@ -241,6 +243,7 @@ impl ProjectStore {
         target_language: Option<&str>,
         engine_id: Option<&str>,
         voice_id: Option<&str>,
+        mix: Option<Mix>,
         segments: Option<Vec<Segment>>,
     ) -> Result<Project> {
         let mut project = self.load(id)?;
@@ -258,6 +261,9 @@ impl ProjectStore {
         }
         if let Some(voice) = voice_id {
             project.voice_id = clean_id(voice);
+        }
+        if let Some(mix) = mix {
+            project.mix = clean_mix(&mix)?;
         }
         if let Some(mut segments) = segments {
             normalize_segments(&mut segments, project.source.duration)?;
@@ -346,6 +352,45 @@ impl ProjectStore {
         Ok(fs::read(self.segment_file(project_id, segment_id)?)?)
     }
 
+    /// Store a finished export (the mix for now) and record it on the project.
+    pub fn write_export(
+        &self,
+        project_id: &str,
+        name: &str,
+        kind: &str,
+        bytes: &[u8],
+    ) -> Result<Project> {
+        let mut project = self.load(project_id)?;
+        let dir = self.dir(project_id)?;
+        let path = format!("{EXPORT_DIR}/{name}");
+        let target = dir.join(&path);
+        if let Some(parent) = target.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        write_atomic(&target, bytes)?;
+        project.exports.retain(|export| export.name != name);
+        project.exports.push(Export {
+            name: name.to_string(),
+            path,
+            kind: kind.to_string(),
+        });
+        project.updated_at = now_secs();
+        self.save(&project)?;
+        Ok(project)
+    }
+
+    /// Read an export by the name recorded on the project; the path itself
+    /// never comes from the request.
+    pub fn export_file(&self, project_id: &str, name: &str) -> Result<Vec<u8>> {
+        let project = self.load(project_id)?;
+        let export = project
+            .exports
+            .iter()
+            .find(|export| export.name == name)
+            .ok_or_else(|| CoreError::NotFound(name.to_string()))?;
+        Ok(fs::read(self.dir(project_id)?.join(&export.path))?)
+    }
+
     fn load(&self, id: &str) -> Result<Project> {
         let path = self.dir(id)?.join(PROJECT_FILE);
         let bytes = match fs::read(&path) {
@@ -424,6 +469,24 @@ fn clean_language(raw: &str) -> String {
 fn clean_id(raw: &str) -> String {
     let id = raw.trim();
     id.chars().take(64).collect()
+}
+
+/// Mix levels are linear gains; reject nonsense rather than clamp it, so a
+/// bad client value is visible instead of silently becoming a different mix.
+fn clean_mix(raw: &Mix) -> Result<Mix> {
+    let level = |value: f32, name: &str| -> Result<f32> {
+        if !value.is_finite() || !(0.0..=4.0).contains(&value) {
+            return Err(CoreError::BadRequest(format!(
+                "{name} must be between 0 and 4"
+            )));
+        }
+        Ok(value)
+    };
+    Ok(Mix {
+        background_volume: level(raw.background_volume, "background volume")?,
+        voice_volume: level(raw.voice_volume, "voice volume")?,
+        ducking: raw.ducking,
+    })
 }
 
 fn segment_file_in(dir: &Path, segment_id: &str) -> PathBuf {
@@ -565,6 +628,7 @@ mod tests {
                 Some("EN"),
                 Some("zipvoice"),
                 Some("voice-1"),
+                None,
                 Some(vec![Segment {
                     start: 0.1,
                     end: 0.8,
@@ -622,6 +686,7 @@ mod tests {
                 None,
                 None,
                 None,
+                None,
                 Some(vec![Segment {
                     id: "s1".into(),
                     start: 0.0,
@@ -641,6 +706,7 @@ mod tests {
         let edited = store
             .update(
                 &project.id,
+                None,
                 None,
                 None,
                 None,

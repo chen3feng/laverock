@@ -58,6 +58,8 @@ Cookie）；以下均指回环监听。
 | POST | `/api/projects/:id/transcribe` | 对源音频重新语音识别并替换全部分段 → 项目 |
 | POST | `/api/projects/:id/synthesize` | 配音后台任务：multipart，可重复 `segment` 只重跑指定分段 → `202`；为每段写出 `segments/<id>.wav` |
 | GET | `/api/projects/:id/segments/:segment/audio` | 某一段已生成的配音 |
+| POST | `/api/projects/:id/mix` | multipart：可选 `background_volume`、`voice_volume`（0–4）与 `ducking` → `202`；写出并记录 `mix.wav` |
+| GET | `/api/projects/:id/files/:name` | 已记录的导出文件（`mix.wav`） |
 | GET | `/api/projects/:id/subtitles?format=srt\|vtt` | 项目的分段 → 可下载的 SRT 或 WebVTT |
 | POST | `/api/transcribe` | multipart：`audio`（WAV）→ 转写文字（需安装 SenseVoice 模型） |
 | POST | `/api/transcribe/details` | 同样的输入 → `{text, segments: [{start, end, text}], language, duration}` |
@@ -100,6 +102,12 @@ Cookie）；以下均指回环监听。
 WAV。重复传 `segment` 字段可只重跑指定分段。`tts_path`、`tts_duration` 与
 `status` 由服务端维护，客户端不能设置；修改某段原文或译文会删除过期的配音并把
 该段重置为 `pending`。
+
+`POST /api/projects/:id/mix` 把已生成的配音按起始时间铺到源音频上：源音频作为
+背景，按 `background_volume` 缩放；开启 `ducking` 时，人声期间背景会降到 35%，
+两端各有 100 ms 过渡。输出为源采样率的单声道，长度至少覆盖最后一段配音（即使
+超出源音频），因此较长的配音不会被截断。文件保存为项目导出 `mix.wav`（同时也是
+任务文件），由 files 接口提供下载；`PATCH` 也接受同样的 `mix` 对象。
 
 引擎参数（`speed`、`num_steps`、`cfg`、`seed` 等）由各引擎的清单声明，服务端按
 同一份列表校验，界面也用同一份列表生成控件；`GET /api/engines` 可查看。每个引擎

@@ -710,6 +710,29 @@ if curl -s "$BASE/api/health" | grep -q '"transcribe":true'; then
   [ "$status" = "done" ] && ok "single-cue dubbing" \
     || bad "single-cue dubbing: $status"
 
+  # Mix: the dubbed cue over the source, with ducking.
+  jid=$(curl -s -X POST "$BASE/api/projects/$pj/mix" \
+    -F 'background_volume=0.4' -F 'voice_volume=1.0' -F 'ducking=1' \
+    | sed -n 's/.*"job_id":"\([^"]*\)".*/\1/p')
+  [ -n "$jid" ] && ok "start mix job ($jid)" || bad "start mix job"
+  status=$(dub_wait "$jid")
+  [ "$status" = "done" ] && ok "mix finished" || bad "mix status: $status"
+  code=$(curl -s -o "$OUT/mix.wav" -w '%{http_code}' \
+    "$BASE/api/projects/$pj/files/mix.wav")
+  [ "$code" = "200" ] && head -c 4 "$OUT/mix.wav" | grep -q RIFF \
+    && ok "mix download" || bad "mix download (HTTP $code)"
+  case "$(curl -s "$BASE/api/projects/$pj")" in
+    *'"name":"mix.wav"'*) ok "mix recorded as an export" ;;
+    *) bad "mix export missing" ;;
+  esac
+  code=$(curl -s -o /dev/null -w '%{http_code}' \
+    "$BASE/api/projects/$pj/files/nope.wav")
+  [ "$code" = "404" ] && ok "unknown project file -> 404" \
+    || bad "unknown project file -> $code"
+  code=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/projects/$pj/mix" \
+    -F 'background_volume=9' -F 'voice_volume=1' -F 'ducking=1')
+  [ "$code" = "400" ] && ok "bad mix level -> 400" || bad "bad mix level -> $code"
+
   curl -s -o /dev/null -X DELETE "$BASE/api/profiles/$pv"
   for cid in $(curl -s "$BASE/api/captures" | sed 's/},{/}\n{/g' \
     | grep -F '"name":"smoke-dub-voice"' \
@@ -732,6 +755,10 @@ code=$(curl -s -o /dev/null -w '%{http_code}' -X POST \
   "$BASE/api/projects/$empty/synthesize" -F 'all=1')
 [ "$code" = "400" ] && ok "dubbing needs an engine" \
   || bad "dubbing without an engine -> $code"
+code=$(curl -s -o /dev/null -w '%{http_code}' -X POST \
+  "$BASE/api/projects/$empty/mix" -F 'ducking=1')
+[ "$code" = "400" ] && ok "mixing needs a dub" \
+  || bad "mixing without a dub -> $code"
 printf 'not a wav\n' >"$OUT/not-a-wav-project.txt"
 code=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/projects" \
   -F 'name=bad' -F "audio=@$OUT/not-a-wav-project.txt;filename=note.wav")

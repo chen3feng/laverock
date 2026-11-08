@@ -10,7 +10,8 @@ use crate::{
     projects::{self, Project, ProjectStore, Segment},
 };
 use laverock_core::{
-    decode_wav, encode_wav, trim_silence, Audio, CoreError, EngineManager, Result, SynthRequest,
+    decode_wav, encode_wav, resample_mono, trim_silence, Audio, CoreError, EngineManager, Result,
+    SynthRequest,
 };
 
 /// The reference clip handed to the engine, prepared the same way the
@@ -144,9 +145,138 @@ pub fn synthesize(
     Ok(done)
 }
 
+/// Lay the dubbed cues over the source clip.
+///
+/// The source becomes the background at `background_volume`; each cue's WAV
+/// is placed at its start time and mixed in at `voice_volume`. With ducking
+/// on, the background dips under the voice with 100 ms ramps. The result is
+/// long enough for the last cue even if it runs past the source, so a long
+/// dub is never cut off.
+pub fn mix(store: &ProjectStore, project: &Project) -> Result<Audio> {
+    let (_, source_bytes) = store.source(&project.id)?;
+    let (source, rate) = decode_wav(&source_bytes)?;
+    let rate = rate.max(1);
+    let sample_rate = rate as u32;
+
+    let mut voices: Vec<(usize, Vec<f32>)> = Vec::new();
+    for segment in &project.segments {
+        if segment.tts_path.is_empty() {
+            continue;
+        }
+        let bytes = store.segment_audio(&project.id, &segment.id)?;
+        let (samples, segment_rate) = decode_wav(&bytes)?;
+        let samples = if segment_rate.max(1) as u32 != sample_rate {
+            resample_mono(&samples, segment_rate.max(1) as u32, sample_rate)
+        } else {
+            samples
+        };
+        if samples.is_empty() {
+            continue;
+        }
+        let start = (segment.start.max(0.0) * rate as f32).round() as usize;
+        voices.push((start, samples));
+    }
+    if voices.is_empty() {
+        return Err(CoreError::UserError(laverock_core::i18n::Message::new(
+            laverock_core::i18n::Key::ProjectMixNoAudio,
+        )));
+    }
+
+    let source_len = source
+        .len()
+        .max((project.source.duration * rate as f32).round() as usize);
+    let voice_end = voices
+        .iter()
+        .map(|(start, samples)| start + samples.len())
+        .max()
+        .unwrap_or(0);
+    let len = source_len.max(voice_end);
+    let mut output = vec![0.0f32; len];
+    let copy = source.len().min(len);
+    output[..copy].copy_from_slice(&source[..copy]);
+
+    let mut duck = vec![1.0f32; len];
+    if project.mix.ducking {
+        let ramp = ((rate as f32 * 0.1).round() as usize).max(1);
+        let level = 0.35f32;
+        for (start, samples) in &voices {
+            let end = (start + samples.len()).min(len);
+            let from = start.saturating_sub(ramp);
+            let to = end.saturating_add(ramp).min(len);
+            for (i, gain) in duck.iter_mut().enumerate().take(to).skip(from) {
+                let value = if i < *start {
+                    let progress = (i - from) as f32 / ramp as f32;
+                    1.0 - (1.0 - level) * progress
+                } else if i >= end {
+                    let progress = (i - end) as f32 / ramp as f32;
+                    level + (1.0 - level) * progress
+                } else {
+                    level
+                };
+                *gain = gain.min(value);
+            }
+        }
+    }
+
+    let background = project.mix.background_volume.clamp(0.0, 4.0);
+    let voice = project.mix.voice_volume.clamp(0.0, 4.0);
+    for (i, sample) in output.iter_mut().enumerate() {
+        *sample *= background * duck[i];
+    }
+    for (start, samples) in &voices {
+        for (i, sample) in samples.iter().enumerate() {
+            let index = start + i;
+            if index >= len {
+                break;
+            }
+            output[index] += sample * voice;
+        }
+    }
+    for sample in &mut output {
+        *sample = sample.clamp(-1.0, 1.0);
+    }
+    Ok(Audio::mono(output, rate))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::{fs, path::PathBuf};
+
+    fn temp_store(name: &str) -> (ProjectStore, PathBuf) {
+        let dir = std::env::temp_dir().join(format!("laverock-mix-{name}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        (ProjectStore::open(&dir).unwrap(), dir)
+    }
+
+    fn dubbed_project(store: &ProjectStore) -> Project {
+        let source = encode_wav(&vec![0.5f32; 8_000], 8_000).unwrap();
+        let project = store
+            .create(
+                "Mix",
+                &source,
+                1.0,
+                vec![Segment {
+                    id: "s1".into(),
+                    start: 0.1,
+                    end: 0.6,
+                    text: "x".into(),
+                    ..Segment::default()
+                }],
+            )
+            .unwrap();
+        let cue = encode_wav(&vec![0.2f32; 4_000], 8_000).unwrap();
+        store.write_segment_audio(&project.id, "s1", &cue).unwrap();
+        let mut project = store.get(&project.id).unwrap();
+        project.segments[0].tts_path = projects::segment_rel_path("s1");
+        project.segments[0].status = "done".into();
+        project.mix.background_volume = 0.4;
+        project.mix.voice_volume = 1.0;
+        project.mix.ducking = false;
+        store.save(&project).unwrap();
+        project
+    }
 
     #[test]
     fn dubs_the_translation_when_present() {
@@ -176,5 +306,51 @@ mod tests {
             ..Segment::default()
         };
         assert_eq!(speech_text(&segment), "");
+    }
+
+    #[test]
+    fn mix_places_voice_over_the_background() {
+        let (store, dir) = temp_store("levels");
+        let project = dubbed_project(&store);
+        let mixed = mix(&store, &project).unwrap();
+        assert_eq!(mixed.sample_rate, 8_000);
+        // Outside the cue the background is scaled to 0.5 * 0.4.
+        assert!((mixed.samples[0] - 0.2).abs() < 0.01);
+        // 0.35 s is inside the cue: 0.2 background + 0.2 voice.
+        assert!((mixed.samples[2_800] - 0.4).abs() < 0.01);
+
+        // Ducking lowers the background under the voice only.
+        let mut ducked = project.clone();
+        ducked.mix.ducking = true;
+        let mixed = mix(&store, &ducked).unwrap();
+        assert!((mixed.samples[0] - 0.2).abs() < 0.01);
+        assert!((mixed.samples[2_800] - 0.27).abs() < 0.01);
+
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn mix_extends_past_the_source_for_a_long_cue() {
+        let (store, dir) = temp_store("overflow");
+        let mut project = dubbed_project(&store);
+        project.segments[0].start = 0.9;
+        let cue = encode_wav(&vec![0.2f32; 4_000], 8_000).unwrap();
+        store.write_segment_audio(&project.id, "s1", &cue).unwrap();
+        store.save(&project).unwrap();
+        let mixed = mix(&store, &project).unwrap();
+        assert!(mixed.samples.len() >= 11_200);
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn mix_needs_at_least_one_dub() {
+        let (store, dir) = temp_store("empty");
+        let source = encode_wav(&vec![0.5f32; 8_000], 8_000).unwrap();
+        let project = store.create("Mix", &source, 1.0, Vec::new()).unwrap();
+        assert!(matches!(
+            mix(&store, &project),
+            Err(CoreError::UserError(_))
+        ));
+        let _ = fs::remove_dir_all(dir);
     }
 }

@@ -228,6 +228,26 @@
     .seg-texts { grid-column: 1 / -1; }
     .seg-actions { flex-direction: row; }
   }
+  .project-mix {
+    display: flex; align-items: flex-end; gap: 14px; flex-wrap: wrap;
+    margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--line);
+  }
+  .project-mix > div { flex: 1 1 180px; min-width: 150px; }
+  .project-mix label { margin-bottom: 6px; }
+  .project-mix .switch { margin-bottom: 8px; }
+  .project-mix button { margin-left: auto; }
+  #projectMixProgress {
+    width: 100%; height: 6px; margin-top: 12px;
+    accent-color: var(--accent);
+  }
+  #projectMixStatus { min-height: 18px; }
+  .project-mix-result {
+    display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+    margin-top: 12px; padding: 12px 14px;
+    background: var(--panel2); border: 1px solid var(--line); border-radius: 12px;
+  }
+  .project-mix-result b { font-size: 12.5px; color: var(--muted); font-weight: 600; }
+  .project-mix-result audio { flex: 1; min-width: 220px; margin: 0; }
   .empty {
     border: 1px dashed var(--line); border-radius: 14px; padding: 34px 20px;
     text-align: center; color: var(--muted); font-size: 13.5px;

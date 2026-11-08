@@ -59,6 +59,14 @@ function openProject(project) {
   fillProjectPickers(project);
   $('projectSynthStatus').textContent = '';
   $('projectSynthProgress').hidden = true;
+  $('projectBg').value = project.mix.background_volume;
+  $('projectVoiceVol').value = project.mix.voice_volume;
+  $('projectDucking').checked = project.mix.ducking;
+  $('projectMixStatus').textContent = '';
+  $('projectMixProgress').hidden = true;
+  const hasMix = (project.exports || []).some((e) => e.name === 'mix.wav');
+  $('projectMixResult').hidden = !hasMix;
+  if (hasMix) $('projectMixAudio').src = projectFileUrl(project.id, 'mix.wav');
   $('projectAudio').src = `/api/projects/${encodeURIComponent(project.id)}/source`;
   renderSegments(project.segments || []);
   $('projectEditor').scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -113,8 +121,13 @@ function closeProjectEditor() {
   $('projectAudio').removeAttribute('src');
   $('projectSegAudio').pause();
   $('projectSegAudio').removeAttribute('src');
+  $('projectMixAudio').pause();
+  $('projectMixAudio').removeAttribute('src');
   $('projectSynthStatus').textContent = '';
   $('projectSynthProgress').hidden = true;
+  $('projectMixStatus').textContent = '';
+  $('projectMixProgress').hidden = true;
+  $('projectMixResult').hidden = true;
 }
 
 function renderSegments(segments) {
@@ -306,6 +319,62 @@ function playSegment(segmentId) {
   player.play().catch(() => toast(t('ui.failed'), true));
 }
 
+function projectFileUrl(projectId, name) {
+  return `/api/projects/${encodeURIComponent(projectId)}/files/${encodeURIComponent(name)}`;
+}
+
+async function mixProject() {
+  if (!currentProject) return;
+  const id = currentProject.id;
+  const fd = new FormData();
+  fd.append('background_volume', $('projectBg').value);
+  fd.append('voice_volume', $('projectVoiceVol').value);
+  fd.append('ducking', $('projectDucking').checked ? '1' : '0');
+  const progress = $('projectMixProgress');
+  const status = $('projectMixStatus');
+  progress.hidden = false;
+  progress.value = 0;
+  status.textContent = t('projects.mix.starting');
+  $('projectMix').disabled = true;
+  try {
+    const result = await runJob(
+      `/api/projects/${encodeURIComponent(id)}/mix`,
+      fd,
+      {
+        stage: (e) => { status.textContent = e.message; },
+        progress: (e) => { progress.value = e.value; },
+      },
+    );
+    status.textContent = result.cancelled
+      ? t('projects.synth.cancelled')
+      : t('projects.mix.done');
+    currentProject = await api(`/api/projects/${encodeURIComponent(id)}`);
+    $('projectMixResult').hidden = false;
+    // The export file is replaced in place; bust the player's cache.
+    $('projectMixAudio').src = `${projectFileUrl(id, 'mix.wav')}?v=${Date.now()}`;
+    await loadProjects();
+  } catch (e) {
+    status.textContent = t('projects.mix.failed') + e.message;
+  } finally {
+    $('projectMix').disabled = false;
+  }
+}
+
+async function downloadMix() {
+  if (!currentProject) return;
+  try {
+    const res = await apiFetch(projectFileUrl(currentProject.id, 'mix.wav'));
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.error || res.statusText || ('HTTP ' + res.status));
+    }
+    const name = (currentProject.name || 'laverock').replace(/[\\/:*?"<>|]+/g, '_');
+    await saveBlob(await res.blob(), `${name}-mix.wav`);
+  } catch (e) {
+    toast(t('ui.download_failed') + e.message, true);
+  }
+}
+
 async function deleteProject(project) {
   if (!(await confirmAction(t('projects.delete_confirm').replace('{name}', project.name)))) return;
   try {
@@ -422,3 +491,5 @@ $('projectClose').onclick = closeProjectEditor;
 $('projectAddSegment').onclick = addSegment;
 $('projectSynthesize').onclick = () => synthesizeProject();
 $('projectSynthCancel').onclick = cancelSynthesize;
+$('projectMix').onclick = mixProject;
+$('projectMixDownload').onclick = downloadMix;

@@ -237,6 +237,26 @@
     .seg-texts { grid-column: 1 / -1; }
     .seg-actions { flex-direction: row; }
   }
+  .project-mix {
+    display: flex; align-items: flex-end; gap: 14px; flex-wrap: wrap;
+    margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--line);
+  }
+  .project-mix > div { flex: 1 1 180px; min-width: 150px; }
+  .project-mix label { margin-bottom: 6px; }
+  .project-mix .switch { margin-bottom: 8px; }
+  .project-mix button { margin-left: auto; }
+  #projectMixProgress {
+    width: 100%; height: 6px; margin-top: 12px;
+    accent-color: var(--accent);
+  }
+  #projectMixStatus { min-height: 18px; }
+  .project-mix-result {
+    display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+    margin-top: 12px; padding: 12px 14px;
+    background: var(--panel2); border: 1px solid var(--line); border-radius: 12px;
+  }
+  .project-mix-result b { font-size: 12.5px; color: var(--muted); font-weight: 600; }
+  .project-mix-result audio { flex: 1; min-width: 220px; margin: 0; }
   .empty {
     border: 1px dashed var(--line); border-radius: 14px; padding: 34px 20px;
     text-align: center; color: var(--muted); font-size: 13.5px;
@@ -672,6 +692,28 @@
         <div class="hint" id="projectSynthStatus"></div>
         <div class="seg-list" id="projectSegments"></div>
         <button class="ghost small" id="projectAddSegment" type="button" data-i18n="projects.add_segment">＋ 添加分段</button>
+        <div class="project-mix">
+          <div>
+            <label for="projectBg" data-i18n="projects.mix.background">背景音量</label>
+            <input id="projectBg" type="range" min="0" max="2" step="0.05" />
+          </div>
+          <div>
+            <label for="projectVoiceVol" data-i18n="projects.mix.voice">配音音量</label>
+            <input id="projectVoiceVol" type="range" min="0" max="2" step="0.05" />
+          </div>
+          <label class="switch">
+            <input id="projectDucking" type="checkbox" />
+            <span data-i18n="projects.mix.ducking">人声时压低背景</span>
+          </label>
+          <button id="projectMix" type="button" data-i18n="projects.mix.run">混音导出</button>
+        </div>
+        <progress id="projectMixProgress" max="1" value="0" hidden></progress>
+        <div class="hint" id="projectMixStatus"></div>
+        <div class="project-mix-result" id="projectMixResult" hidden>
+          <b data-i18n="projects.mix.result">混音结果</b>
+          <audio id="projectMixAudio" controls></audio>
+          <button class="ghost small" id="projectMixDownload" type="button" data-i18n="projects.mix.download">下载 WAV</button>
+        </div>
         <audio id="projectSegAudio" hidden></audio>
       </div>
     </section>
@@ -1460,6 +1502,15 @@ addI18n({
     'projects.translation.ph': '译文（可选；配音时优先使用）',
     'projects.play': '播放这一段配音',
     'projects.rerun': '只重新生成这一段',
+    'projects.mix.background': '背景音量',
+    'projects.mix.voice': '配音音量',
+    'projects.mix.ducking': '人声时压低背景',
+    'projects.mix.run': '混音导出',
+    'projects.mix.starting': '正在混音…',
+    'projects.mix.done': '混音完成',
+    'projects.mix.failed': '混音失败：',
+    'projects.mix.result': '混音结果',
+    'projects.mix.download': '下载 WAV',
   },
   en: {
     'nav.projects': 'Subtitles',
@@ -1501,6 +1552,15 @@ addI18n({
     'projects.translation.ph': 'Translation (optional; used for dubbing)',
     'projects.play': 'Play this cue',
     'projects.rerun': 'Re-generate this cue only',
+    'projects.mix.background': 'Background',
+    'projects.mix.voice': 'Voice',
+    'projects.mix.ducking': 'Duck the background under the voice',
+    'projects.mix.run': 'Mix and export',
+    'projects.mix.starting': 'Mixing…',
+    'projects.mix.done': 'Mix complete',
+    'projects.mix.failed': 'Mixing failed: ',
+    'projects.mix.result': 'Mix',
+    'projects.mix.download': 'Download WAV',
   },
 });
 
@@ -5039,6 +5099,14 @@ function openProject(project) {
   fillProjectPickers(project);
   $('projectSynthStatus').textContent = '';
   $('projectSynthProgress').hidden = true;
+  $('projectBg').value = project.mix.background_volume;
+  $('projectVoiceVol').value = project.mix.voice_volume;
+  $('projectDucking').checked = project.mix.ducking;
+  $('projectMixStatus').textContent = '';
+  $('projectMixProgress').hidden = true;
+  const hasMix = (project.exports || []).some((e) => e.name === 'mix.wav');
+  $('projectMixResult').hidden = !hasMix;
+  if (hasMix) $('projectMixAudio').src = projectFileUrl(project.id, 'mix.wav');
   $('projectAudio').src = `/api/projects/${encodeURIComponent(project.id)}/source`;
   renderSegments(project.segments || []);
   $('projectEditor').scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -5093,8 +5161,13 @@ function closeProjectEditor() {
   $('projectAudio').removeAttribute('src');
   $('projectSegAudio').pause();
   $('projectSegAudio').removeAttribute('src');
+  $('projectMixAudio').pause();
+  $('projectMixAudio').removeAttribute('src');
   $('projectSynthStatus').textContent = '';
   $('projectSynthProgress').hidden = true;
+  $('projectMixStatus').textContent = '';
+  $('projectMixProgress').hidden = true;
+  $('projectMixResult').hidden = true;
 }
 
 function renderSegments(segments) {
@@ -5286,6 +5359,62 @@ function playSegment(segmentId) {
   player.play().catch(() => toast(t('ui.failed'), true));
 }
 
+function projectFileUrl(projectId, name) {
+  return `/api/projects/${encodeURIComponent(projectId)}/files/${encodeURIComponent(name)}`;
+}
+
+async function mixProject() {
+  if (!currentProject) return;
+  const id = currentProject.id;
+  const fd = new FormData();
+  fd.append('background_volume', $('projectBg').value);
+  fd.append('voice_volume', $('projectVoiceVol').value);
+  fd.append('ducking', $('projectDucking').checked ? '1' : '0');
+  const progress = $('projectMixProgress');
+  const status = $('projectMixStatus');
+  progress.hidden = false;
+  progress.value = 0;
+  status.textContent = t('projects.mix.starting');
+  $('projectMix').disabled = true;
+  try {
+    const result = await runJob(
+      `/api/projects/${encodeURIComponent(id)}/mix`,
+      fd,
+      {
+        stage: (e) => { status.textContent = e.message; },
+        progress: (e) => { progress.value = e.value; },
+      },
+    );
+    status.textContent = result.cancelled
+      ? t('projects.synth.cancelled')
+      : t('projects.mix.done');
+    currentProject = await api(`/api/projects/${encodeURIComponent(id)}`);
+    $('projectMixResult').hidden = false;
+    // The export file is replaced in place; bust the player's cache.
+    $('projectMixAudio').src = `${projectFileUrl(id, 'mix.wav')}?v=${Date.now()}`;
+    await loadProjects();
+  } catch (e) {
+    status.textContent = t('projects.mix.failed') + e.message;
+  } finally {
+    $('projectMix').disabled = false;
+  }
+}
+
+async function downloadMix() {
+  if (!currentProject) return;
+  try {
+    const res = await apiFetch(projectFileUrl(currentProject.id, 'mix.wav'));
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.error || res.statusText || ('HTTP ' + res.status));
+    }
+    const name = (currentProject.name || 'laverock').replace(/[\\/:*?"<>|]+/g, '_');
+    await saveBlob(await res.blob(), `${name}-mix.wav`);
+  } catch (e) {
+    toast(t('ui.download_failed') + e.message, true);
+  }
+}
+
 async function deleteProject(project) {
   if (!(await confirmAction(t('projects.delete_confirm').replace('{name}', project.name)))) return;
   try {
@@ -5402,6 +5531,8 @@ $('projectClose').onclick = closeProjectEditor;
 $('projectAddSegment').onclick = addSegment;
 $('projectSynthesize').onclick = () => synthesizeProject();
 $('projectSynthCancel').onclick = cancelSynthesize;
+$('projectMix').onclick = mixProject;
+$('projectMixDownload').onclick = downloadMix;
 
 // ---------------------------------------------------------------- remote / pairing
 
