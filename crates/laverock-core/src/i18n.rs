@@ -156,6 +156,16 @@ messages! {
         { en: "The media file is too large (1 GB max).", zh: "媒体文件过大（最大 1 GB）。" },
     ProjectAudioTooLarge = "project_audio_too_large"
         { en: "The audio file exceeds 200 MB.", zh: "音频文件超过 200 MB。" },
+    ProjectExportNoMix = "project_export_no_mix"
+        { en: "Mix the dub first, or export the video with its original audio.",
+          zh: "请先混音导出配音，或选择使用原音轨导出视频。" },
+    ProjectExportNoSoftSubs = "project_export_no_soft_subs"
+        { en: "This video container cannot hold soft subtitles; export without them.",
+          zh: "这种视频容器不支持内嵌软字幕；请取消字幕后导出。" },
+    ProjectExportStage = "project_export_stage"
+        { en: "Muxing the video…", zh: "正在封装视频…" },
+    ProjectExportFailed = "project_export_failed"
+        { en: "Video export failed: {detail}", zh: "视频导出失败：{detail}" },
     ProjectNoCues = "project_no_cues"
         { en: "This project has no subtitle cues yet; transcribe it first.",
           zh: "这个项目还没有字幕分段；请先转写。" },

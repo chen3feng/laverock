@@ -482,6 +482,22 @@ async function main() {
         'video audio extracted as WAV',
       );
       pass('video project imported');
+
+      // Without a dub the export defaults to the original audio; the cues
+      // are attached as soft subtitles.
+      assert.equal(await page.locator('#projectExportAudio').inputValue(), 'original');
+      await page.click('#projectExport');
+      await page.waitForSelector('#projectExportResult:not([hidden])', { timeout: 120_000 });
+      const exportedVideo = await saveDownload(
+        page, page.locator('#projectExportDownload'), artifacts,
+      );
+      assert.equal(
+        fs.readFileSync(exportedVideo).subarray(4, 8).toString(),
+        'ftyp',
+        'exported file is an MP4',
+      );
+      pass(`video export downloaded (${path.basename(exportedVideo)})`);
+
       await context.request.delete(`${base}/api/projects/${videoProject.id}`);
     } else {
       console.log('  skip video project (ffmpeg not installed)');

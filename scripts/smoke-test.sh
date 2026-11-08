@@ -771,8 +771,9 @@ if command -v ffmpeg >/dev/null 2>&1 && command -v ffprobe >/dev/null 2>&1 \
   ffmpeg -y -v error -f lavfi -i testsrc=size=160x120:rate=10:duration=1 \
     -f lavfi -i sine=frequency=440:duration=1 -shortest \
     -c:v mpeg4 -c:a aac "$OUT/clip.mp4"
+  printf '1\n00:00:00,000 --> 00:00:00,900\nvideo cue\n\n' >"$OUT/video.srt"
   vp=$(curl -s -X POST "$BASE/api/projects" -F 'name=smoke-video' \
-    -F "media=@$OUT/clip.mp4" | project_id)
+    -F "media=@$OUT/clip.mp4" -F "subtitles=<$OUT/video.srt" | project_id)
   [ -n "$vp" ] && ok "create video project ($vp)" || bad "create video project"
   vjson=$(curl -s "$BASE/api/projects/$vp")
   case "$vjson" in
@@ -789,6 +790,38 @@ if command -v ffmpeg >/dev/null 2>&1 && command -v ffprobe >/dev/null 2>&1 \
   curl -sf "$BASE/api/projects/$vp/media" -o "$OUT/video-copy.mp4" \
     && [ -s "$OUT/video-copy.mp4" ] && ok "original media served" \
     || bad "original media served"
+
+  # Packaging: copy the picture, keep the original audio and attach the
+  # cues as soft subtitles (no dub needed for this path).
+  vj=$(curl -s -X POST "$BASE/api/projects/$vp/export?format=video" \
+    -F 'audio=original' -F 'subtitles=soft' \
+    | sed -n 's/.*"job_id":"\([^"]*\)".*/\1/p')
+  [ -n "$vj" ] && ok "start video export ($vj)" || bad "start video export"
+  vstatus=""
+  for _ in $(seq 1 60); do
+    vstatus=$(curl -s "$BASE/api/jobs/$vj" \
+      | sed -n 's/.*"status":"\([^"]*\)".*/\1/p')
+    case "$vstatus" in done|error|cancelled) break ;; esac
+    sleep 1
+  done
+  [ "$vstatus" = "done" ] && ok "video export finished" \
+    || bad "video export status: $vstatus"
+  code=$(curl -s -o "$OUT/export.mp4" -w '%{http_code}' \
+    "$BASE/api/projects/$vp/files/export.mp4")
+  [ "$code" = "200" ] && head -c 8 "$OUT/export.mp4" | grep -q ftyp \
+    && ok "video export download" || bad "video export download (HTTP $code)"
+  case "$(curl -s "$BASE/api/projects/$vp")" in
+    *'"name":"export.mp4","path":"exports/export.mp4","kind":"video"'*)
+      ok "video export recorded" ;;
+    *) bad "video export not recorded" ;;
+  esac
+  code=$(curl -s -o /dev/null -w '%{http_code}' -X POST \
+    "$BASE/api/projects/$vp/export?format=video" -F 'audio=mix' -F 'subtitles=soft')
+  [ "$code" = "400" ] && ok "video export needs a mix" \
+    || bad "video export without a mix -> $code"
+  curl -s "$BASE/api/projects/$vp/export?format=srt" | grep -q 'video cue' \
+    && ok "video export subtitles" || bad "video export subtitles"
+
   code=$(curl -s -o /dev/null -w '%{http_code}' -X DELETE "$BASE/api/projects/$vp")
   [ "$code" = "204" ] && ok "delete video project" \
     || bad "delete video project -> $code"

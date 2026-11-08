@@ -154,10 +154,126 @@ impl Ffmpeg {
         }
         Ok(())
     }
+
+    /// Mux the finished audio (and optional soft subtitles) back into the
+    /// source video. The picture is copied, never re-encoded.
+    pub fn mux_video(&self, opts: &MuxOptions) -> Result<()> {
+        let mut cmd = Command::new(&self.ffmpeg);
+        cmd.args(["-y", "-v", "error", "-i"]).arg(opts.video);
+        let mut next_input = 1;
+        let audio_index = opts.audio.map(|audio| {
+            let index = next_input;
+            cmd.arg("-i").arg(audio);
+            next_input += 1;
+            index
+        });
+        let subtitle_index = opts.subtitles.map(|subs| {
+            let index = next_input;
+            cmd.arg("-i").arg(subs);
+            index
+        });
+
+        cmd.args(["-map", "0:v:0"]);
+        match audio_index {
+            Some(index) => {
+                cmd.arg("-map").arg(format!("{index}:a:0"));
+            }
+            // `?` keeps a source without audio playable.
+            None => {
+                cmd.args(["-map", "0:a:0?"]);
+            }
+        }
+        if let Some(index) = subtitle_index {
+            cmd.arg("-map").arg(format!("{index}:0"));
+        }
+        cmd.args(["-c:v", "copy"]);
+        match audio_index {
+            Some(_) => {
+                cmd.args(["-c:a", opts.audio_codec, "-b:a", "192k"]);
+            }
+            None => {
+                cmd.args(["-c:a", "copy"]);
+            }
+        }
+        if let Some(codec) = opts.subtitle_codec {
+            cmd.args(["-c:s", codec]);
+            if let Some(language) = opts.subtitle_language.filter(|l| !l.is_empty()) {
+                cmd.arg("-metadata:s:s:0")
+                    .arg(format!("language={language}"));
+            }
+        }
+        // End the audio and the picture together, even when the mix runs
+        // past the video.
+        if opts.duration > 0.0 {
+            cmd.arg("-t").arg(format!("{:.3}", opts.duration));
+        }
+        cmd.arg(opts.output);
+
+        let result = cmd
+            .output()
+            .map_err(|e| CoreError::UserError(export_failed(format!("ffmpeg: {e}"))))?;
+        if !result.status.success() {
+            return Err(CoreError::UserError(export_failed(stderr_detail(
+                &result.stderr,
+            ))));
+        }
+        Ok(())
+    }
+}
+
+/// Inputs for [`Ffmpeg::mux_video`].
+pub struct MuxOptions<'a> {
+    pub video: &'a Path,
+    /// `None` keeps the source's own audio track.
+    pub audio: Option<&'a Path>,
+    pub subtitles: Option<&'a Path>,
+    /// Codec the output container accepts, from [`subtitle_codec`].
+    pub subtitle_codec: Option<&'a str>,
+    pub subtitle_language: Option<&'a str>,
+    /// Audio codec for a replaced track, from [`audio_codec`].
+    pub audio_codec: &'a str,
+    /// Output length in seconds; 0 leaves the streams alone.
+    pub duration: f32,
+    pub output: &'a Path,
+}
+
+/// The output container for a source extension: the same one when we can
+/// write it, Matroska otherwise (it holds almost any codec).
+pub fn export_container(ext: &str) -> &'static str {
+    match ext.to_ascii_lowercase().as_str() {
+        "mp4" | "m4v" => "mp4",
+        "mov" => "mov",
+        "webm" => "webm",
+        "mkv" => "mkv",
+        _ => "mkv",
+    }
+}
+
+/// Soft-subtitle codec for a container, or `None` when it cannot hold one.
+pub fn subtitle_codec(container: &str) -> Option<&'static str> {
+    match container {
+        "mp4" | "mov" => Some("mov_text"),
+        "mkv" => Some("srt"),
+        "webm" => Some("webvtt"),
+        _ => None,
+    }
+}
+
+/// Audio codec accepted by the output container.
+pub fn audio_codec(container: &str) -> &'static str {
+    if container == "webm" {
+        "libopus"
+    } else {
+        "aac"
+    }
 }
 
 fn media_failed(detail: String) -> i18n::Message {
     i18n::Message::new(i18n::Key::ProjectMediaFailed).arg("detail", detail)
+}
+
+fn export_failed(detail: String) -> i18n::Message {
+    i18n::Message::new(i18n::Key::ProjectExportFailed).arg("detail", detail)
 }
 
 fn stderr_detail(stderr: &[u8]) -> String {
@@ -271,5 +387,32 @@ mod tests {
         // A path that cannot exist must not resolve to something else.
         let fake = std::env::temp_dir().join("laverock-no-such-ffmpeg-dir");
         assert!(Ffmpeg::discover(&fake.to_string_lossy()).is_none());
+    }
+
+    #[test]
+    fn picks_a_container_that_matches_the_source() {
+        for (ext, container) in [
+            ("mp4", "mp4"),
+            ("M4V", "mp4"),
+            ("mov", "mov"),
+            ("mkv", "mkv"),
+            ("webm", "webm"),
+            ("avi", "mkv"),
+            ("", "mkv"),
+        ] {
+            assert_eq!(export_container(ext), container, "{ext}");
+        }
+    }
+
+    #[test]
+    fn only_some_containers_hold_soft_subtitles() {
+        assert_eq!(subtitle_codec("mp4"), Some("mov_text"));
+        assert_eq!(subtitle_codec("mov"), Some("mov_text"));
+        assert_eq!(subtitle_codec("mkv"), Some("srt"));
+        assert_eq!(subtitle_codec("webm"), Some("webvtt"));
+        assert_eq!(subtitle_codec("mkv"), Some("srt"));
+        assert_eq!(subtitle_codec("avi"), None);
+        assert_eq!(audio_codec("webm"), "libopus");
+        assert_eq!(audio_codec("mp4"), "aac");
     }
 }

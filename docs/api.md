@@ -62,7 +62,9 @@ describes the loopback listener.
 | POST | `/api/projects/:id/synthesize` | dubbing job: multipart, optional repeated `segment` ids to re-run only those cues → `202`; writes `segments/<id>.wav` per cue |
 | GET | `/api/projects/:id/segments/:segment/audio` | the generated audio for one cue |
 | POST | `/api/projects/:id/mix` | multipart optional `background_volume`, `voice_volume` (0–4) and `ducking` → `202`; writes and records `mix.wav` |
-| GET | `/api/projects/:id/files/:name` | a recorded export (`mix.wav`) |
+| POST | `/api/projects/:id/export?format=video\|audio` | `202` job; `video` muxes the chosen audio track and optional soft subtitles into the source video, `audio` re-runs the mix |
+| GET | `/api/projects/:id/export?format=srt\|vtt` | the project's cues as a downloadable subtitle file |
+| GET | `/api/projects/:id/files/:name` | a recorded export (`mix.wav`, `export.mp4`) |
 | GET | `/api/projects/:id/subtitles?format=srt\|vtt` | the project's cues as a downloadable file |
 | POST | `/api/transcribe` | multipart `audio` (WAV) → transcript (needs the SenseVoice model) |
 | POST | `/api/transcribe/details` | same input → `{text, segments: [{start, end, text}], language, duration}` |
@@ -133,6 +135,19 @@ result is mono at the source's sample rate and runs to the end of the last
 cue even when it passes the source, so a long dub is not cut off. The file
 is stored as the project export `mix.wav` (also a job artifact) and served
 by the files endpoint; `PATCH` accepts the same `mix` object.
+
+`POST /api/projects/:id/export?format=video` packages a video project: the
+picture is copied (`-c:v copy`), the audio is either the recorded mix
+(multipart `audio=mix`, the default; the mix must exist) or the source's own
+track (`audio=original`), and the cues are attached as soft subtitles
+(`subtitles=soft`, the default) or left out (`subtitles=none`). Soft
+subtitles use `mov_text` in MP4/MOV, SRT in Matroska and WebVTT in WebM;
+containers that cannot hold them return an error unless subtitles are turned
+off. The output is cut to the project duration so picture and sound end
+together, stored as `exports/export.<container>`, recorded with `kind:
+"video"`, and served by the files endpoint with its media type. The job
+reports a `stage` event and finishes with the export in place. `format=audio`
+re-runs the mix; `GET` with `format=srt|vtt` downloads the subtitle file.
 
 Engine parameters (`speed`, `num_steps`, `cfg`, `seed`, …) are declared per
 engine by its manifest and validated server-side against the same list the

@@ -13,7 +13,7 @@ use std::{fs, path::PathBuf};
 use super::{request_lang, subtitle_response, ApiError, AppState};
 use crate::{
     dubbing,
-    media::Ffmpeg,
+    media::{Ffmpeg, MuxOptions},
     projects::{self, Mix, Project, Segment},
     reference::new_id,
     subtitles,
@@ -48,6 +48,10 @@ pub(crate) fn router() -> Router<AppState> {
         .route("/api/projects/{id}/subtitles", get(download_subtitles))
         .route("/api/projects/{id}/synthesize", post(synthesize_project))
         .route("/api/projects/{id}/mix", post(mix_project))
+        .route(
+            "/api/projects/{id}/export",
+            get(export_subtitles).post(export_media),
+        )
         .route(
             "/api/projects/{id}/segments/{segment}/audio",
             get(segment_audio),
@@ -578,6 +582,12 @@ async fn mix_project(
             _ => {}
         }
     }
+    spawn_mix_job(&state, id, mix)
+}
+
+/// Persist the mix levels and start the mix job. Shared by `/mix` and
+/// `POST /export?format=audio`.
+fn spawn_mix_job(state: &AppState, id: String, mix: Mix) -> Result<Response, ApiError> {
     let project = state
         .projects
         .update(&id, None, None, None, None, None, Some(mix), None)?;
@@ -640,6 +650,228 @@ async fn mix_project(
         .into_response())
 }
 
+#[derive(Debug, serde::Deserialize)]
+struct ExportQuery {
+    format: Option<String>,
+}
+
+/// `GET /api/projects/{id}/export?format=srt|vtt` — the cues as a
+/// downloadable subtitle file, aligned with the project's timeline.
+async fn export_subtitles(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Query(query): Query<ExportQuery>,
+) -> Result<Response, ApiError> {
+    let raw = query.format.as_deref().unwrap_or("");
+    let format = subtitles::Format::parse(raw)
+        .ok_or_else(|| ApiError::bad_request(format!("unknown subtitle format: {raw}")))?;
+    let project = state.projects.get(&id)?;
+    let cues = projects::cues(&project);
+    if cues.is_empty() {
+        return Err(user_error(i18n::Key::ProjectNoCues));
+    }
+    Ok(subtitle_response(&cues, format, "laverock"))
+}
+
+/// `POST /api/projects/{id}/export?format=video|audio` — the packaged
+/// deliverables. `audio` re-runs the mix (same as `/mix`); `video` muxes the
+/// finished audio and optional soft subtitles into the source video.
+async fn export_media(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Query(query): Query<ExportQuery>,
+    mut multipart: Multipart,
+) -> Result<Response, ApiError> {
+    let format = query
+        .format
+        .as_deref()
+        .unwrap_or("video")
+        .trim()
+        .to_ascii_lowercase();
+    match format.as_str() {
+        "audio" => {
+            let mix = state.projects.get(&id)?.mix;
+            spawn_mix_job(&state, id, mix)
+        }
+        "video" => export_video(&state, id, &mut multipart).await,
+        other => Err(ApiError::bad_request(format!(
+            "unsupported export format: {other}; use GET for srt/vtt"
+        ))),
+    }
+}
+
+/// Mux the finished audio and soft subtitles into the source video. The
+/// picture is copied, so a long video exports in seconds.
+async fn export_video(
+    state: &AppState,
+    id: String,
+    multipart: &mut Multipart,
+) -> Result<Response, ApiError> {
+    let project = state.projects.get(&id)?;
+    if project.source.kind != "video" {
+        return Err(ApiError::bad_request("this project has no video to export"));
+    }
+
+    let mut soft_subtitles = true;
+    let mut mix_audio = true;
+    while let Some(field) = multipart
+        .next_field()
+        .await
+        .map_err(|e| ApiError::bad_request(format!("malformed multipart: {e}")))?
+    {
+        let name = field.name().map(str::to_string);
+        let raw = field
+            .text()
+            .await
+            .map_err(|e| ApiError::bad_request(format!("bad export field: {e}")))?;
+        match name.as_deref() {
+            Some("subtitles") => soft_subtitles = parse_on_off(&raw)?,
+            Some("audio") => {
+                mix_audio = match raw.trim().to_ascii_lowercase().as_str() {
+                    "" | "mix" => true,
+                    "original" | "source" => false,
+                    other => {
+                        return Err(ApiError::bad_request(format!(
+                            "unknown audio track: {other}"
+                        )))
+                    }
+                };
+            }
+            _ => {}
+        }
+    }
+
+    let ffmpeg = Ffmpeg::discover(&state.settings.get().ffmpeg_path)
+        .ok_or_else(|| user_error(i18n::Key::ProjectFfmpegMissing))?;
+    let ext = std::path::Path::new(&project.source.file)
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .unwrap_or("");
+    let container = crate::media::export_container(ext);
+    let codec = if soft_subtitles {
+        crate::media::subtitle_codec(container)
+    } else {
+        None
+    };
+    if soft_subtitles && codec.is_none() {
+        return Err(user_error(i18n::Key::ProjectExportNoSoftSubs));
+    }
+    if mix_audio
+        && !project
+            .exports
+            .iter()
+            .any(|export| export.name == "mix.wav")
+    {
+        return Err(user_error(i18n::Key::ProjectExportNoMix));
+    }
+
+    let output_name = format!("export.{container}");
+    let audio_codec = crate::media::audio_codec(container);
+    let language = project.target_language.trim().to_string();
+    let job = state.jobs.create("export")?;
+    let worker = job.clone();
+    let supervisor = job.clone();
+    let store = state.projects.clone();
+    let scratch = state.projects.scratch()?;
+    let lang = request_lang();
+
+    let handle = tokio::task::spawn_blocking(move || {
+        worker.start();
+        if worker.is_cancelled() {
+            worker.finish_cancelled(0);
+            return;
+        }
+        let stage = i18n::Message::new(i18n::Key::ProjectExportStage).render(lang);
+        worker.emit("stage", serde_json::json!({ "message": stage }));
+        worker.set_progress(0.1, None);
+
+        let cues = projects::cues(&project);
+        let subtitle_path = if soft_subtitles && !cues.is_empty() {
+            let path = scratch.join(format!("{}.srt", new_id('u')));
+            match fs::write(&path, subtitles::Format::Srt.render(&cues)) {
+                Ok(()) => Some(path),
+                Err(e) => {
+                    worker.fail(&format!("cannot write the subtitle track: {e}"));
+                    return;
+                }
+            }
+        } else {
+            None
+        };
+
+        let outcome = (|| {
+            let video = store.media_path(&id)?;
+            let audio = if mix_audio {
+                Some(store.export_path(&id, "mix.wav")?)
+            } else {
+                None
+            };
+            let output = store.export_target(&id, &output_name)?;
+            let subtitle_language = if language.is_empty() {
+                None
+            } else {
+                Some(language.as_str())
+            };
+            ffmpeg.mux_video(&MuxOptions {
+                video: &video,
+                audio: audio.as_deref(),
+                subtitles: subtitle_path.as_deref(),
+                subtitle_codec: codec,
+                subtitle_language,
+                audio_codec,
+                duration: project.source.duration,
+                output: &output,
+            })
+        })();
+        if let Some(path) = &subtitle_path {
+            let _ = fs::remove_file(path);
+        }
+        match outcome {
+            Ok(()) => {}
+            Err(e) if worker.is_cancelled() => {
+                worker.log(&render_error(&e, lang));
+                worker.finish_cancelled(0);
+                return;
+            }
+            Err(e) => {
+                worker.fail(&render_error(&e, lang));
+                return;
+            }
+        }
+        if worker.is_cancelled() {
+            worker.finish_cancelled(0);
+            return;
+        }
+        worker.set_progress(0.9, None);
+        if let Err(e) = store.record_export(&id, &output_name, "video") {
+            worker.fail(&render_error(&e, lang));
+            return;
+        }
+        worker.finish(1);
+    });
+    tokio::spawn(async move {
+        if let Err(e) = handle.await {
+            supervisor.fail(&format!("export task failed: {e}"));
+        }
+    });
+
+    Ok((
+        StatusCode::ACCEPTED,
+        Json(serde_json::json!({ "job_id": job.id() })),
+    )
+        .into_response())
+}
+
+fn parse_on_off(raw: &str) -> Result<bool, ApiError> {
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "" | "1" | "true" | "on" | "yes" | "soft" => Ok(true),
+        "0" | "false" | "off" | "no" | "none" => Ok(false),
+        other => Err(ApiError::bad_request(format!(
+            "expected on or off, got: {other}"
+        ))),
+    }
+}
+
 fn parse_level(raw: &str) -> Result<f32, ApiError> {
     raw.trim()
         .parse::<f32>()
@@ -648,21 +880,16 @@ fn parse_level(raw: &str) -> Result<f32, ApiError> {
         .ok_or_else(|| ApiError::bad_request(format!("invalid mix level: {raw}")))
 }
 
-/// A recorded export (currently `mix.wav`), for the editor's player and
-/// download button.
+/// A recorded export (`mix.wav` or an exported video), for the editor's
+/// player and download button.
 async fn project_file(
     State(state): State<AppState>,
     Path((id, name)): Path<(String, String)>,
 ) -> Result<Response, ApiError> {
     let bytes = state.projects.export_file(&id, &name)?;
-    let content_type = if name.ends_with(".wav") {
-        "audio/wav"
-    } else {
-        "application/octet-stream"
-    };
     Ok((
         StatusCode::OK,
-        [(header::CONTENT_TYPE, content_type.to_string())],
+        [(header::CONTENT_TYPE, media_content_type(&name).to_string())],
         bytes,
     )
         .into_response())
