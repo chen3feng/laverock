@@ -13,6 +13,7 @@ async function loadEngines() {
   const task = (e) => e.task || (e.kind === 'music' ? 'music' : 'tts');
   const synthList = engines.filter((e) => task(e) === 'tts');
   const musicList = engines.filter((e) => task(e) === 'music');
+  const vcList = engines.filter((e) => task(e) === 'vc');
 
   // Rebuilding the lists also rebuilds the parameter controls, dropping
   // values the user tuned. When the set of engines did not change (the
@@ -27,12 +28,17 @@ async function loadEngines() {
 
   fillEngineSelect($('engine'), synthList);
   fillEngineSelect($('musicEngine'), musicList);
+  fillEngineSelect($('convertEngine'), vcList);
   $('go').disabled = synthList.length === 0;
   $('musicGo').disabled = musicList.length === 0;
+  $('convertGo').disabled = vcList.length === 0;
   if (!musicList.length) $('musicStatus').textContent = t('music.no_engine');
   else $('musicStatus').textContent = '';
+  if (!vcList.length) $('convertStatus').textContent = t('convert.no_engine');
+  else $('convertStatus').textContent = '';
   syncEngine();
   syncMusicEngine();
+  syncConvertEngine();
   if (currentPage() === 'models') {
     if (modelsData) renderModels();
     else if (!session.loopback) renderInstalledEngines();

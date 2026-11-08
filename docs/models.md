@@ -30,6 +30,7 @@ installs and CI use them directly:
 ./scripts/download-indextts2.sh    # IndexTTS-2, 3.6 GB Q8_0 GGUF (shares the runtime)
 ./scripts/download-mosstts.sh      # MOSS-TTS-Delay, macOS/Linux only, ~10 GB weights
 ./scripts/download-ace-step.sh     # ACE-Step 1.5 Turbo music, ~10 GB BF16 (shares the runtime)
+./scripts/download-seedvc.sh       # Seed-VC voice conversion, ~3.1 GB Q8_0 (shares the runtime)
 
 # Variants
 QWEN3TTS_VARIANT=custom ./scripts/download-qwen3tts.sh    # 9 preset speakers
@@ -40,6 +41,7 @@ MING3TTS_VARIANT=ip ./scripts/download-ming3tts.sh        # built-in Ming voices
 LONGCAT_MODEL=meituan-longcat/LongCat-AudioDiT-3.5B ./scripts/download-longcat.sh
 DOTS_MODEL=dots.tts-mf ./scripts/download-dots.sh         # 4-step MeanFlow export
 ACE_STEP_QUANT=q8_0 ./scripts/download-ace-step.sh        # ~6.2 GB music export
+SEEDVC_QUANT=f16 ./scripts/download-seedvc.sh             # ~3.6 GB conversion export
 ```
 
 Scripts honour the proxy and mirror settings from **Settings → Download
@@ -77,6 +79,7 @@ endpoint call the model.
 | `indextts2` | IndexTTS-2 Q8_0 | clone | zh, en | ~3.6 GB |
 | `mosstts` | MOSS-TTS-Delay | clone, multilingual | 20 languages | ~10 GB (peak ~16 GB) |
 | `ace-step` | ACE-Step 1.5 Turbo | text-to-music, lyrics | 50+ languages | ~10 GB (BF16) / ~6.2 GB (Q8_0) |
+| `seed-vc` | Seed-VC | voice conversion (`vc`) | language-agnostic | ~3.1 GB (Q8_0) / ~3.6 GB (F16) |
 | `enhance` | Voice cleanup (GTCRN + BS-RoFormer) | recording cleanup | — | ~165 MB |
 
 The four Ming entries share one checkpoint, one venv and one runtime, so
@@ -225,6 +228,21 @@ offload; installing with `ACE_STEP_QUANT=q8_0` halves the download, though
 the quantized planner occasionally fails to sample. The BF16 build is the
 reliable default.
 
+**Seed-VC** — zero-shot voice conversion on the shared audio.cpp runtime.
+It turns an existing recording into a target voice from the library while
+keeping the words and timing; the **Convert** page takes a source clip and a
+saved voice. Only the source audio and a 3–10 s target reference are needed,
+so any language the model has heard works. Conversion runs as a background
+job, so a long clip can finish after the page is reloaded.
+
+The controls on the page (`route`, `num_inference_steps`,
+`intelligibility_guidance_scale`, `similarity_guidance_scale`, `seed`) come
+from the model's own `model_spec.json`; the manifest names that file under
+`audio_cpp.spec`. `v2_vc` is the recommended speech route, the `v1_*` routes
+trade quality for different vocoders, and `v1_svc` is for singing. Q8_0 is
+the default download; `SEEDVC_QUANT=f16` keeps a little more detail at
+~3.6 GB.
+
 **SenseVoice** — optional on-device speech recognition covering zh/en/ja/
 ko/yue. Once installed, a recorded or uploaded reference clip is transcribed
 automatically into the transcript field; the Transcribe button re-runs it.
@@ -364,7 +382,7 @@ with a negative slope.
 | Feature | Requirement |
 | --- | --- |
 | ONNX engines (ZipVoice, Kokoro, SenseVoice) | none beyond the app |
-| audio.cpp engines (dots, CosyVoice, VoxCPM2, IndexTTS-2, ACE-Step) | prebuilt CLI and resident server are downloaded |
+| audio.cpp engines (dots, CosyVoice, VoxCPM2, IndexTTS-2, ACE-Step, Seed-VC) | prebuilt CLI and resident server are downloaded |
 | ACE-Step music | 12 GB+ VRAM recommended; 8 GB cards use CPU/offload |
 | Python engines (Qwen3-TTS, LongCat, Ming, Chatterbox) | Python 3.10–3.12; the scripts create an isolated venv |
 | MOSS-TTS | macOS/Linux only (not offered on Windows); prebuilt runtime is downloaded; Python 3 for the one-time tokenizer conversion |

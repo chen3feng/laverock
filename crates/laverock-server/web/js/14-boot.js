@@ -12,6 +12,7 @@ function showPage(page) {
   if (page === 'captures') { loadCaptures(); loadEnhanceStatus(); }
   if (page === 'tools') loadToolsPage();
   if (page === 'projects') loadProjects();
+  if (page === 'convert') { loadProfiles(); syncConvertEngine(); }
   if (page === 'voices') loadProfiles();
   if (page === 'history') loadHistory();
   // Installs run on the server and can finish while another page is open,

@@ -200,6 +200,29 @@
     }
   },
   {
+    "id": "seed-vc",
+    "task": "vc",
+    "dir": "seed-vc",
+    "name": "Seed-VC (Q8_0)",
+    "description": {
+      "en": "Zero-shot voice conversion and singing voice conversion: turn any recording into a voice from your library while keeping its words and timing. Language-agnostic, on audio.cpp's native Metal/CUDA runtime.",
+      "zh": "零样本声音转换 / 歌声转换：把任意录音换成声音库里的目标音色，保留内容与韵律。不限定语种，经 audio.cpp 原生 Metal/CUDA 运行时推理。"
+    },
+    "size": "~3.1 GB",
+    "languages": [
+      "language-agnostic"
+    ],
+    "capabilities": [
+      "vc"
+    ],
+    "script": "download-seedvc.sh",
+    "env": {},
+    "note": {
+      "en": "A clean, single-speaker source works best. Seed-VC keeps the source duration; the first conversion also loads about 3 GB of weights. Conversion is slower than real time on CPU and roughly real time on Metal/CUDA.",
+      "zh": "源音频以干净、单人、少混响为佳。Seed-VC 保持源音频时长；首次转换同样需要加载约 3GB 权重。CPU 上慢于实时，Metal/CUDA 上接近实时。"
+    }
+  },
+  {
     "id": "cosyvoice",
     "task": "tts",
     "dir": "cosyvoice",

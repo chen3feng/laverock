@@ -15,6 +15,7 @@ mod longcat;
 mod manager;
 mod manifest;
 mod ming3tts;
+mod modelspec;
 mod mosstts;
 mod onnx;
 mod qwen3tts;
@@ -36,10 +37,12 @@ pub use manager::{
     SpeechEngine, SynthRequest,
 };
 pub use manifest::{
-    AudioCppManifest, ChatterboxManifest, EngineKind, KokoroManifest, Localized, LongCatManifest,
-    Manifest, Ming3TtsManifest, MossTtsManifest, MusicManifest, ParamKind, ParamOption, ParamSpec,
-    Qwen3TtsManifest, SttManifest, SynthDefaults, ZipVoiceManifest,
+    AudioCppManifest, AudioCppTaskManifest, ChatterboxManifest, EngineKind, KokoroManifest,
+    Localized, LongCatManifest, Manifest, Ming3TtsManifest, MossTtsManifest, MusicManifest,
+    ParamKind, ParamOption, ParamSpec, Qwen3TtsManifest, SttManifest, SynthDefaults,
+    ZipVoiceManifest,
 };
+pub use modelspec::ModelSpec;
 pub use onnx::model_variant;
 pub use task::TaskKind;
 pub use transcribe::{Transcriber, Transcript, TranscriptSegment};

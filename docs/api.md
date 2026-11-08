@@ -19,6 +19,7 @@ describes the loopback listener.
 | GET | `/api/health` | service status, including whether `ffmpeg` was found |
 | GET | `/api/engines` | registered engines and their defaults |
 | POST | `/api/engines/:id/synthesize` | multipart `text` plus either `profile_id` or (`prompt` WAV + `prompt_text`); optional engine parameters → WAV. Add `x-laverock-job: 1` to run it as a background job, or `x-laverock-stream: 1` + `stream_audio=1` to stream sentences |
+| POST | `/api/engines/:id/convert` | multipart `audio` (source WAV) plus either `profile_id` or `prompt` WAV, and optional engine parameters → converted WAV. Add `x-laverock-job: 1` to run it as a background job |
 | POST | `/api/engines/:id/unload` | release the model's memory (it stays installed) → `204` |
 | POST | `/api/engines/unload` | release every loaded model → `204` |
 | GET | `/api/system` | server RSS, resident child processes and runtimes of loaded engines |
@@ -183,6 +184,33 @@ curl -X POST http://127.0.0.1:8787/api/engines/voxcpm2/synthesize \
   -F profile_id=p1793075127-c66c \
   -o out.wav
 ```
+
+## Voice conversion
+
+`POST /api/engines/:id/convert` turns an existing recording into a target
+voice while keeping its words and timing. It takes multipart `audio` (the
+source WAV) plus either `profile_id` or `prompt` (a reference WAV), and any
+engine parameters the model declares, and answers with the converted WAV:
+
+```sh
+curl -X POST http://127.0.0.1:8787/api/engines/seed-vc/convert \
+  -F audio=@source.wav \
+  -F profile_id=p1793075127-c66c \
+  -F route=v2_vc \
+  -o converted.wav
+```
+
+Only engines whose task is `vc` or `svc` accept this route; a speech engine
+answers `400`. Source audio is capped at 200 MB. With `x-laverock-job: 1`
+the run becomes a background job whose artifact is `converted.wav`, so the
+usual `stage`/`progress`/`audio` events apply.
+
+The parameters of a generic audio.cpp model come from the model's own
+`model_spec.json` rather than from app code: `options.request` is rendered
+in the UI and validated server-side (unknown names and out-of-range values
+are rejected), and the resolved values are passed to audio.cpp as
+`--request-option` or the equivalent `request.options` field. This is what
+lets a new audio.cpp model be installed with a manifest and a spec alone.
 
 ## Streaming audio
 

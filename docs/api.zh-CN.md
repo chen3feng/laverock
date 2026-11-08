@@ -17,6 +17,7 @@ Cookie）；以下均指回环监听。
 | GET | `/api/health` | 服务状态，含是否找到 `ffmpeg` |
 | GET | `/api/engines` | 已注册引擎及其默认参数 |
 | POST | `/api/engines/:id/synthesize` | multipart：`text` 加 `profile_id` 或（`prompt` WAV + `prompt_text`），可附引擎参数 → WAV；加 `x-laverock-job: 1` 则作为后台任务运行，或加 `x-laverock-stream: 1` + `stream_audio=1` 逐句流式下发 |
+| POST | `/api/engines/:id/convert` | multipart：`audio`（源音频 WAV）加 `profile_id` 或 `prompt` WAV，可附引擎参数 → 转换后的 WAV；加 `x-laverock-job: 1` 则作为后台任务运行 |
 | POST | `/api/engines/:id/unload` | 释放该模型占用的内存（仍保持安装）→ `204` |
 | POST | `/api/engines/unload` | 释放所有已加载模型 → `204` |
 | GET | `/api/system` | 服务进程内存、常驻子进程与已加载引擎的推理后端 |
@@ -161,6 +162,29 @@ curl -X POST http://127.0.0.1:8787/api/engines/voxcpm2/synthesize \
   -F profile_id=p1793075127-c66c \
   -o out.wav
 ```
+
+## 变声
+
+`POST /api/engines/:id/convert` 把一段现成录音换成目标音色，保留原本的说话内容与
+节奏。请求为 multipart：`audio`（源音频 WAV）加 `profile_id` 或 `prompt`（参考
+音频 WAV），可附模型声明的引擎参数，返回转换后的 WAV：
+
+```sh
+curl -X POST http://127.0.0.1:8787/api/engines/seed-vc/convert \
+  -F audio=@source.wav \
+  -F profile_id=p1793075127-c66c \
+  -F route=v2_vc \
+  -o converted.wav
+```
+
+只有任务类型为 `vc` 或 `svc` 的引擎接受此接口，语音引擎会返回 `400`。源音频上限
+为 200 MB。加 `x-laverock-job: 1` 后请求变为后台任务，产物为 `converted.wav`，
+同样适用 `stage`/`progress`/`audio` 事件。
+
+通用 audio.cpp 模型的参数来自模型自带的 `model_spec.json`，而不是应用代码：
+`options.request` 会渲染成界面控件并在服务端校验（未知参数名、越界值会被拒绝），
+解析后的值以 `--request-option` 或等价的 `request.options` 传给 audio.cpp。因此
+新增一个 audio.cpp 模型只需安装清单和规格文件，不必改动代码。
 
 ## 流式音频
 

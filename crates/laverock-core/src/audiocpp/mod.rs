@@ -20,9 +20,10 @@
 use crate::i18n::{self, Key};
 use crate::{
     decode_wav, decode_wav_channels, encode_wav, trim_reference, Audio, AudioCppManifest,
-    CoreError, Manifest, MusicManifest, ProgressEvent, Result, SpeechEngine, SynthRequest,
-    VOXCPM2_MAX_REFERENCE_SECS,
+    AudioCppTaskManifest, ConvertRequest, CoreError, Manifest, ModelSpec, MusicManifest,
+    ProgressEvent, ProgressSink, Result, SpeechEngine, SynthRequest, VOXCPM2_MAX_REFERENCE_SECS,
 };
+use base64::Engine as _;
 use serde_json::{json, Map, Value};
 use std::{
     borrow::Cow,
@@ -54,6 +55,9 @@ pub enum Family {
     IndexTts2,
     /// Music generation (`--task gen`), currently ACE-Step 1.5.
     AceStep,
+    /// Any family driven by a `model_spec.json`; the manifest supplies
+    /// the family and task names.
+    Generic,
 }
 
 impl Family {
@@ -65,6 +69,7 @@ impl Family {
             Family::VoxCpm2 => "voxcpm2",
             Family::IndexTts2 => "index_tts2",
             Family::AceStep => "ace_step",
+            Family::Generic => "audio_cpp",
         }
     }
 
@@ -75,6 +80,7 @@ impl Family {
             Family::VoxCpm2 => "VoxCPM2",
             Family::IndexTts2 => "IndexTTS-2",
             Family::AceStep => "ACE-Step",
+            Family::Generic => "audio.cpp",
         }
     }
 }
@@ -83,6 +89,14 @@ pub struct AudioCppEngine {
     id: String,
     name: String,
     family: Family,
+    /// The audio.cpp `--family` value; a generic install names its own.
+    family_name: String,
+    /// Request contract of a generic install (`kind: "audio_cpp"`).
+    spec: Option<ModelSpec>,
+    /// Request field that carries source audio, when the task consumes one.
+    input_field: Option<String>,
+    /// Whether the task needs a target voice reference.
+    voice_ref: bool,
     binary: PathBuf,
     model: PathBuf,
     backend: String,
@@ -105,6 +119,10 @@ pub struct AudioCppEngine {
 
 /// The manifest section a family reads, normalized across speech and music.
 struct Section {
+    family_name: String,
+    spec: Option<ModelSpec>,
+    input_field: Option<String>,
+    voice_ref: bool,
     binary: String,
     model: String,
     backend: String,
@@ -122,8 +140,12 @@ struct Section {
 }
 
 impl Section {
-    fn speech(cfg: &AudioCppManifest) -> Self {
+    fn speech(cfg: &AudioCppManifest, family: Family) -> Self {
         Self {
+            family_name: family.cli_name().to_string(),
+            spec: None,
+            input_field: None,
+            voice_ref: true,
             binary: cfg.binary.clone(),
             model: cfg.model.clone(),
             backend: cfg.backend.clone(),
@@ -141,11 +163,41 @@ impl Section {
 
     fn music(cfg: &MusicManifest) -> Self {
         Self {
+            family_name: Family::AceStep.cli_name().to_string(),
+            spec: None,
+            input_field: None,
+            voice_ref: false,
             binary: cfg.binary.clone(),
             model: cfg.model.clone(),
             backend: cfg.backend.clone(),
             language: cfg.language.clone(),
             guidance: cfg.guidance,
+            seed: cfg.seed,
+            reference_duration: None,
+            task: cfg.task.clone(),
+            load_options: cfg.load_options.clone(),
+            session_options: cfg.session_options.clone(),
+            env: cfg.env.clone(),
+            model_is_file: false,
+        }
+    }
+
+    fn generic(cfg: &AudioCppTaskManifest, spec: Option<ModelSpec>) -> Self {
+        // A voice-conversion task always consumes source audio, even when
+        // the manifest forgets to say so.
+        let input_field = cfg.input.clone().or_else(|| {
+            matches!(cfg.task.as_str(), "vc" | "svc" | "s2s").then(|| "audio".to_string())
+        });
+        Self {
+            family_name: cfg.family.clone(),
+            spec,
+            input_field,
+            voice_ref: cfg.voice_ref,
+            binary: cfg.binary.clone(),
+            model: cfg.model.clone(),
+            backend: cfg.backend.clone(),
+            language: cfg.language.clone(),
+            guidance: None,
             seed: cfg.seed,
             reference_duration: None,
             task: cfg.task.clone(),
@@ -189,11 +241,28 @@ impl Drop for AudioCppEngine {
 impl AudioCppEngine {
     pub fn build(dir: &Path, manifest: &Manifest, family: Family) -> Result<Self> {
         let section = match family {
-            Family::Dots => manifest.dots.as_ref().map(Section::speech),
-            Family::CosyVoice => manifest.cosyvoice.as_ref().map(Section::speech),
-            Family::VoxCpm2 => manifest.voxcpm2.as_ref().map(Section::speech),
-            Family::IndexTts2 => manifest.indextts2.as_ref().map(Section::speech),
+            Family::Dots => manifest.dots.as_ref().map(|c| Section::speech(c, family)),
+            Family::CosyVoice => manifest
+                .cosyvoice
+                .as_ref()
+                .map(|c| Section::speech(c, family)),
+            Family::VoxCpm2 => manifest
+                .voxcpm2
+                .as_ref()
+                .map(|c| Section::speech(c, family)),
+            Family::IndexTts2 => manifest
+                .indextts2
+                .as_ref()
+                .map(|c| Section::speech(c, family)),
             Family::AceStep => manifest.music.as_ref().map(Section::music),
+            Family::Generic => manifest.audio_cpp.as_ref().map(|cfg| {
+                let spec = manifest
+                    .resolved_spec
+                    .clone()
+                    .or_else(|| cfg.model_spec.clone())
+                    .or_else(|| read_spec(dir, cfg));
+                Section::generic(cfg, spec)
+            }),
         };
         let cfg = section.ok_or_else(|| {
             CoreError::Load(format!(
@@ -265,6 +334,10 @@ impl AudioCppEngine {
             id: manifest.id.clone(),
             name: manifest.name.clone(),
             family,
+            family_name: cfg.family_name,
+            spec: cfg.spec,
+            input_field: cfg.input_field,
+            voice_ref: cfg.voice_ref,
             binary,
             model,
             backend,
@@ -348,6 +421,11 @@ impl SpeechEngine for AudioCppEngine {
     }
 
     fn synthesize(&self, req: &SynthRequest) -> Result<Audio> {
+        // A generic install is driven entirely by its model spec and may
+        // be a conversion model rather than a TTS one.
+        if self.family == Family::Generic {
+            return self.synthesize_generic(req);
+        }
         let is_music = self.family == Family::AceStep;
         // Music never clones a voice; a stray `samples` upload must not turn
         // into a `--voice-ref` the music family does not understand.
@@ -575,6 +653,39 @@ impl SpeechEngine for AudioCppEngine {
             channels,
         })
     }
+
+    /// Convert an existing clip into the engine's target voice.
+    ///
+    /// Only generic audio.cpp families that declare a conversion task
+    /// implement this; the spec supplies the options.
+    fn convert(&self, req: &ConvertRequest) -> Result<Audio> {
+        let Some(spec) = &self.spec else {
+            return Err(CoreError::BadRequest(format!(
+                "{} does not support voice conversion",
+                self.name
+            )));
+        };
+        if req.input_samples.is_empty() {
+            return Err(CoreError::UserError(i18n::Message::new(
+                Key::SourceAudioRequired,
+            )));
+        }
+        if self.voice_ref && req.prompt_samples.is_empty() {
+            return Err(CoreError::UserError(
+                i18n::Message::new(Key::ReferenceAudioRequired).arg("engine", &self.name),
+            ));
+        }
+        let options = spec.resolve(&req.params)?;
+        let reference = (!req.prompt_samples.is_empty())
+            .then_some((req.prompt_samples.as_slice(), req.prompt_sr));
+        self.run_generic(
+            "",
+            Some((&req.input_samples, req.input_sr)),
+            reference,
+            options,
+            req.progress.as_ref(),
+        )
+    }
 }
 
 impl AudioCppEngine {
@@ -594,6 +705,7 @@ impl AudioCppEngine {
             Family::CosyVoice => self.cosyvoice_task(req),
             Family::IndexTts2 => self.indextts2_task(req),
             Family::AceStep => self.ace_step_task(req),
+            Family::Generic => self.task.as_str(),
         }
     }
 
@@ -604,6 +716,7 @@ impl AudioCppEngine {
             Family::CosyVoice => self.cosyvoice_options(req, cmd),
             Family::IndexTts2 => self.indextts2_options(req, cmd),
             Family::AceStep => self.ace_step_options(req, cmd),
+            Family::Generic => Ok(()),
         }
     }
 
@@ -618,6 +731,293 @@ impl AudioCppEngine {
             .map(str::to_string)
             .or_else(|| (!self.language.is_empty()).then(|| self.language.clone()))
     }
+
+    /// Generic synthesis: a text task driven by the model spec.
+    fn synthesize_generic(&self, req: &SynthRequest) -> Result<Audio> {
+        let Some(spec) = &self.spec else {
+            return Err(CoreError::Load(format!(
+                "{}: kind audio_cpp needs a model_spec.json",
+                self.id
+            )));
+        };
+        if self.input_field.is_some() {
+            return Err(CoreError::BadRequest(format!(
+                "{} converts source audio; use the convert endpoint",
+                self.name
+            )));
+        }
+        if self.voice_ref && req.prompt_samples.is_empty() {
+            return Err(CoreError::UserError(
+                i18n::Message::new(Key::ReferenceAudioRequired).arg("engine", &self.name),
+            ));
+        }
+        let options = spec.resolve(&req.params)?;
+        let reference = (!req.prompt_samples.is_empty())
+            .then_some((req.prompt_samples.as_slice(), req.prompt_sr));
+        self.run_generic(&req.text, None, reference, options, req.progress.as_ref())
+    }
+
+    /// Run one generic audio.cpp task, resident server first and the CLI
+    /// as a fallback.
+    fn run_generic(
+        &self,
+        text: &str,
+        input: Option<(&[f32], i32)>,
+        reference: Option<(&[f32], i32)>,
+        options: BTreeMap<String, Value>,
+        progress: Option<&ProgressSink>,
+    ) -> Result<Audio> {
+        let _guard = self.run_lock.lock().expect("audiocpp run lock");
+
+        let tmp = std::env::temp_dir().join(format!(
+            "laverock-{}-{}-{}",
+            self.family_name,
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.subsec_nanos())
+                .unwrap_or(0)
+        ));
+        std::fs::create_dir_all(&tmp).map_err(CoreError::from)?;
+        let out_wav = tmp.join("out.wav");
+
+        let input_wav = match input {
+            Some((samples, rate)) => {
+                let path = tmp.join("input.wav");
+                std::fs::write(&path, encode_wav(samples, rate)?).map_err(CoreError::from)?;
+                Some(path)
+            }
+            None => None,
+        };
+        let ref_wav = match reference {
+            Some((samples, rate)) => {
+                let path = tmp.join("reference.wav");
+                std::fs::write(&path, encode_wav(samples, rate)?).map_err(CoreError::from)?;
+                Some(path)
+            }
+            None => None,
+        };
+
+        let audio = if self.server_bin.is_some() {
+            let attempt = || {
+                self.run_generic_resident(
+                    text,
+                    input_wav.as_deref(),
+                    ref_wav.as_deref(),
+                    &options,
+                    progress,
+                )
+            };
+            match attempt() {
+                Ok(audio) => audio,
+                Err(failure) if !failure.retryable => return Err(failure.error),
+                Err(failure) => {
+                    tracing::warn!(
+                        target: "audiocpp",
+                        family = %self.family_name,
+                        "resident server failed, restarting it: {}",
+                        failure.error
+                    );
+                    self.stop_resident();
+                    attempt().map_err(|failure| failure.error)?
+                }
+            }
+        } else {
+            self.run_generic_cli(
+                text,
+                input_wav.as_deref(),
+                ref_wav.as_deref(),
+                &options,
+                &out_wav,
+                progress,
+            )?
+        };
+        let _ = std::fs::remove_dir_all(&tmp);
+        Ok(audio)
+    }
+
+    fn run_generic_cli(
+        &self,
+        text: &str,
+        input_wav: Option<&Path>,
+        ref_wav: Option<&Path>,
+        options: &BTreeMap<String, Value>,
+        out_wav: &Path,
+        progress: Option<&ProgressSink>,
+    ) -> Result<Audio> {
+        let mut cmd = Command::new(&self.binary);
+        cmd.arg("--task")
+            .arg(&self.task)
+            .arg("--family")
+            .arg(&self.family_name)
+            .arg("--model")
+            .arg(&self.model)
+            .arg("--backend")
+            .arg(&self.backend)
+            .arg("--out")
+            .arg(out_wav)
+            .arg("--metrics");
+        if !text.is_empty() {
+            cmd.arg("--text").arg(text);
+        }
+        if let Some(path) = input_wav {
+            cmd.arg("--audio").arg(path);
+        }
+        if let Some(path) = ref_wav {
+            cmd.arg("--voice-ref").arg(path);
+        }
+        for (key, value) in options {
+            cmd.arg("--request-option")
+                .arg(format!("{key}={}", option_text(value)));
+        }
+        for (key, value) in &self.load_options {
+            cmd.arg("--load-option").arg(format!("{key}={value}"));
+        }
+        for (key, value) in &self.session_options {
+            cmd.arg("--session-option").arg(format!("{key}={value}"));
+        }
+        for (key, value) in &self.env {
+            cmd.env(key, value);
+        }
+
+        if let Some(cb) = progress {
+            cb(ProgressEvent::Stage(self.stage_label(input_wav.is_some())));
+        }
+
+        cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
+        let mut child = cmd.spawn().map_err(|e| {
+            CoreError::Synth(format!(
+                "failed to run {}: {e} (is the audio.cpp runtime installed?)",
+                self.binary.display()
+            ))
+        })?;
+        let stdout = child.stdout.take().expect("piped stdout");
+        let stdout_handle = std::thread::spawn(move || {
+            let mut lines = Vec::new();
+            for line in BufReader::new(stdout).lines() {
+                let Ok(line) = line else { break };
+                if !line.trim().is_empty() {
+                    lines.push(line);
+                }
+            }
+            lines
+        });
+        let stderr = child.stderr.take().expect("piped stderr");
+        let stderr_handle = std::thread::spawn(move || {
+            let mut buf = Vec::new();
+            BufReader::new(stderr).read_to_end(&mut buf).ok();
+            buf
+        });
+
+        let status = child.wait().map_err(CoreError::from)?;
+        let stdout_lines = stdout_handle.join().unwrap_or_default();
+        let stderr_bytes = stderr_handle.join().unwrap_or_default();
+        if !status.success() {
+            let stderr = String::from_utf8_lossy(&stderr_bytes);
+            let mut tail: Vec<String> = stderr.lines().rev().take(12).map(str::to_string).collect();
+            tail.reverse();
+            tail.extend(stdout_lines.into_iter().rev().take(6).rev());
+            return Err(CoreError::Synth(format!(
+                "{} 推理失败（退出码 {:?}）：\n{}",
+                self.name,
+                status.code(),
+                tail.join("\n").trim()
+            )));
+        }
+
+        let bytes = std::fs::read(out_wav)
+            .map_err(|e| CoreError::Synth(format!("runner produced no audio: {e}")))?;
+        decode_audio(&bytes)
+    }
+
+    fn run_generic_resident(
+        &self,
+        text: &str,
+        input_wav: Option<&Path>,
+        ref_wav: Option<&Path>,
+        options: &BTreeMap<String, Value>,
+        progress: Option<&ProgressSink>,
+    ) -> std::result::Result<Audio, ResidentFailure> {
+        let retry = |error: CoreError| ResidentFailure {
+            error,
+            retryable: true,
+        };
+        let port = self.ensure_server().map_err(retry)?;
+        if let Some(cb) = progress {
+            cb(ProgressEvent::Stage(self.stage_label(input_wav.is_some())));
+        }
+
+        let mut request = Map::new();
+        request.insert(
+            "options".into(),
+            Value::Object(options.clone().into_iter().collect()),
+        );
+        if !text.is_empty() {
+            request.insert("text".into(), json!(text));
+        }
+        if let Some(path) = input_wav {
+            request.insert("audio".into(), json!(path.to_string_lossy()));
+        }
+        if let Some(path) = ref_wav {
+            request.insert("voice_ref".into(), json!(path.to_string_lossy()));
+        }
+        let body = json!({
+            "model": self.resident_id(&self.task),
+            "request": Value::Object(request),
+        });
+        let bytes = self.post_resident(port, "/v1/tasks/run", &body)?;
+
+        // `/v1/tasks/run` answers with a JSON envelope carrying the WAV
+        // as base64, unlike the speech endpoint's raw audio body.
+        let envelope: Value = serde_json::from_slice(&bytes).map_err(|e| ResidentFailure {
+            error: CoreError::Synth(format!("audiocpp_server returned invalid JSON: {e}")),
+            retryable: true,
+        })?;
+        let encoded = envelope
+            .get("audio")
+            .and_then(Value::as_str)
+            .ok_or_else(|| ResidentFailure {
+                error: CoreError::Synth(
+                    "audiocpp_server returned no audio for this task".to_string(),
+                ),
+                retryable: false,
+            })?;
+        let wav = base64::engine::general_purpose::STANDARD
+            .decode(encoded)
+            .map_err(|e| ResidentFailure {
+                error: CoreError::Synth(format!("audiocpp_server returned bad audio: {e}")),
+                retryable: false,
+            })?;
+        decode_audio(&wav).map_err(|error| ResidentFailure {
+            error,
+            retryable: true,
+        })
+    }
+
+    fn stage_label(&self, converting: bool) -> String {
+        let action = if converting { "转换声音" } else { "合成" };
+        format!("正在{action}（{} 常驻运行时）", self.name)
+    }
+}
+
+/// Render an option value the way audio.cpp's CLI parses it.
+fn option_text(value: &Value) -> String {
+    match value {
+        Value::String(text) => text.clone(),
+        Value::Bool(b) => b.to_string(),
+        other => other.to_string(),
+    }
+}
+
+/// Decode a runner's WAV, keeping its channel layout (music and some
+/// conversion models return stereo).
+fn decode_audio(bytes: &[u8]) -> Result<Audio> {
+    let (samples, channels, rate) = decode_wav_channels(bytes)?;
+    Ok(Audio {
+        samples,
+        sample_rate: rate as i32,
+        channels,
+    })
 }
 
 /// Pick a concrete backend when the manifest says `best`, which only the
@@ -664,6 +1064,7 @@ impl AudioCppEngine {
             Family::CosyVoice => self.cosyvoice_server_tasks(),
             Family::IndexTts2 => self.indextts2_server_tasks(),
             Family::AceStep => self.ace_step_server_tasks(),
+            Family::Generic => vec![self.task.as_str()],
         }
     }
 
@@ -690,7 +1091,7 @@ impl AudioCppEngine {
             .map(|task| {
                 let mut entry = json!({
                     "id": self.resident_id(task),
-                    "family": self.family.cli_name(),
+                    "family": self.family_name.as_str(),
                     "path": model,
                     "task": task,
                     "mode": "offline",
@@ -738,6 +1139,11 @@ impl AudioCppEngine {
             Family::CosyVoice => self.cosyvoice_resident(req)?,
             Family::IndexTts2 => self.indextts2_resident(req)?,
             Family::AceStep => self.ace_step_resident(req)?,
+            Family::Generic => {
+                return Err(CoreError::Load(
+                    "generic audio.cpp tasks use /v1/tasks/run".into(),
+                ))
+            }
         };
 
         let mut body = json!({
@@ -895,11 +1301,39 @@ impl AudioCppEngine {
                 error,
                 retryable: false,
             })?;
+        let bytes = self.post_resident(port, "/v1/audio/speech", &body)?;
+        let (samples, sample_rate, channels) = if self.family == Family::AceStep {
+            let (samples, channels, rate) = decode_wav_channels(&bytes).map_err(retry)?;
+            (samples, rate as i32, channels)
+        } else {
+            let (samples, rate) = decode_wav(&bytes).map_err(retry)?;
+            (samples, rate, 1)
+        };
+        Ok(Audio {
+            samples,
+            sample_rate,
+            channels,
+        })
+    }
+
+    /// POST one JSON body to the resident server and return the raw
+    /// response. 4xx is the caller's mistake (no restart); transport
+    /// failures and 5xx are retried against a fresh server.
+    fn post_resident(
+        &self,
+        port: u16,
+        path: &str,
+        body: &Value,
+    ) -> std::result::Result<Vec<u8>, ResidentFailure> {
+        let retry = |error: CoreError| ResidentFailure {
+            error,
+            retryable: true,
+        };
         let agent = ureq::AgentBuilder::new()
             .timeout_connect(Duration::from_secs(3))
             .timeout_read(RESIDENT_READ_TIMEOUT)
             .build();
-        let url = format!("http://127.0.0.1:{port}/v1/audio/speech");
+        let url = format!("http://127.0.0.1:{port}{path}");
         let response = agent
             .post(&url)
             .set("Content-Type", "application/json")
@@ -909,15 +1343,13 @@ impl AudioCppEngine {
             Ok(resp) => {
                 resp.into_reader().read_to_end(&mut bytes).map_err(|e| {
                     retry(CoreError::Synth(format!(
-                        "cannot read the server audio: {e}"
+                        "cannot read the server response: {e}"
                     )))
                 })?;
             }
             Err(ureq::Error::Status(code, resp)) => {
                 let mut text = String::new();
                 let _ = resp.into_reader().read_to_string(&mut text);
-                // 4xx means this request is wrong, not that the server is
-                // unhealthy: restarting it would only repeat the failure.
                 return Err(ResidentFailure {
                     error: CoreError::Synth(format!(
                         "audiocpp_server HTTP {code}: {}",
@@ -932,18 +1364,7 @@ impl AudioCppEngine {
                 ))))
             }
         }
-        let (samples, sample_rate, channels) = if self.family == Family::AceStep {
-            let (samples, channels, rate) = decode_wav_channels(&bytes).map_err(retry)?;
-            (samples, rate as i32, channels)
-        } else {
-            let (samples, rate) = decode_wav(&bytes).map_err(retry)?;
-            (samples, rate, 1)
-        };
-        Ok(Audio {
-            samples,
-            sample_rate,
-            channels,
-        })
+        Ok(bytes)
     }
 }
 
@@ -964,6 +1385,29 @@ fn resolve_path(dir: &Path, value: &str) -> PathBuf {
     }
 }
 
+/// Read the spec a generic install names, or its conventional
+/// `model_spec.json`. A failure only costs the generated parameter
+/// controls; the engine still runs with the manifest's own options.
+fn read_spec(dir: &Path, cfg: &AudioCppTaskManifest) -> Option<ModelSpec> {
+    let path = dir.join(cfg.spec.as_deref().unwrap_or("model_spec.json"));
+    let raw = match std::fs::read_to_string(&path) {
+        Ok(raw) => raw,
+        Err(e) => {
+            if cfg.spec.is_some() {
+                tracing::warn!(spec = %path.display(), "cannot read model spec: {e}");
+            }
+            return None;
+        }
+    };
+    match ModelSpec::parse(&raw) {
+        Ok(spec) => Some(spec),
+        Err(e) => {
+            tracing::warn!(spec = %path.display(), "invalid model spec: {e}");
+            None
+        }
+    }
+}
+
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;
@@ -975,19 +1419,45 @@ mod tests {
             "voxcpm2" => ("voxcpm2", "voxcpm2"),
             "indextts2" => ("indextts2", "indextts2"),
             "music" => ("music", "ace-step"),
+            "audio_cpp" => ("audio_cpp", "seed-vc"),
             _ => ("cosyvoice", "cosyvoice"),
         };
-        let json = serde_json::json!({
-            "id": id,
-            "kind": kind,
-            "name": "test",
-            "defaults": { "speed": 1.0, "num_steps": 10 },
-            section: {
-                "binary": "fake_cli.sh",
-                "model": "fake.gguf",
-                "backend": "cpu"
-            }
-        });
+        let json = if kind == "audio_cpp" {
+            serde_json::json!({
+                "id": id,
+                "kind": kind,
+                "name": "test",
+                "defaults": { "speed": 1.0, "num_steps": 30 },
+                section: {
+                    "binary": "fake_cli.sh",
+                    "model": "fake.gguf",
+                    "backend": "cpu",
+                    "family": "seed_vc",
+                    "task": "vc",
+                    "model_spec": {
+                        "family": "seed_vc",
+                        "options": { "request": [
+                            { "name": "route", "type": "enum",
+                              "values": ["v2_vc", "v1_svc"], "default": "v2_vc" },
+                            { "name": "num_inference_steps", "type": "int",
+                              "default": 30, "min": 1, "max": 100 }
+                        ] }
+                    }
+                }
+            })
+        } else {
+            serde_json::json!({
+                "id": id,
+                "kind": kind,
+                "name": "test",
+                "defaults": { "speed": 1.0, "num_steps": 10 },
+                section: {
+                    "binary": "fake_cli.sh",
+                    "model": "fake.gguf",
+                    "backend": "cpu"
+                }
+            })
+        };
         serde_json::from_value(json).expect("manifest")
     }
 
@@ -996,10 +1466,11 @@ mod tests {
         std::fs::write(
             dir.join("fake_cli.sh"),
             "#!/usr/bin/env bash\nprintf '%s\\n' \"$@\" > \"$(dirname \"$0\")/args.txt\"\n\
-             out=\"\"; ref=\"\"\nwhile [ $# -gt 0 ]; do [ \"$1\" = \"--out\" ] && out=$2; \
-             [ \"$1\" = \"--voice-ref\" ] && ref=$2; shift; done\n\
+             out=\"\"; ref=\"\"; input=\"\"\nwhile [ $# -gt 0 ]; do [ \"$1\" = \"--out\" ] && out=$2; \
+             [ \"$1\" = \"--voice-ref\" ] && ref=$2; [ \"$1\" = \"--audio\" ] && input=$2; shift; done\n\
              d=\"$(dirname \"$0\")\"; cp \"$d/fx.wav\" \"$out\"\n\
-             [ -n \"$ref\" ] && cp \"$ref\" \"$d/ref.wav\"\nexit 0\n",
+             [ -n \"$ref\" ] && cp \"$ref\" \"$d/ref.wav\"\n\
+             [ -n \"$input\" ] && cp \"$input\" \"$d/input.wav\"\nexit 0\n",
         )
         .unwrap();
         #[cfg(unix)]
@@ -1018,6 +1489,7 @@ mod tests {
             "voxcpm2" => super::Family::VoxCpm2,
             "indextts2" => super::Family::IndexTts2,
             "music" => super::Family::AceStep,
+            "audio_cpp" => super::Family::Generic,
             _ => super::Family::CosyVoice,
         };
         AudioCppEngine::build(dir, &m, family).expect("engine")
@@ -1443,5 +1915,92 @@ mod tests {
         engine.synthesize(&req).expect("synthesis");
         assert_eq!(seen.lock().unwrap().len(), 1);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    fn convert_request() -> ConvertRequest {
+        ConvertRequest {
+            input_samples: vec![0.3; 2400],
+            input_sr: 24_000,
+            prompt_samples: vec![0.2; 2400],
+            prompt_sr: 24_000,
+            params: std::collections::BTreeMap::new(),
+            progress: None,
+        }
+    }
+
+    #[test]
+    fn generic_vc_runs_the_cli_with_audio_and_spec_options() {
+        let dir = args_dir("generic-vc");
+        let engine = fixture(&dir, "audio_cpp");
+        let audio = engine.convert(&convert_request()).expect("convert");
+        assert_eq!(audio.sample_rate, 24_000);
+        assert_eq!(audio.channels, 1);
+
+        let args: Vec<String> = std::fs::read_to_string(dir.join("args.txt"))
+            .unwrap()
+            .lines()
+            .map(str::to_string)
+            .collect();
+        assert!(args.windows(2).any(|w| w == ["--task", "vc"]));
+        assert!(args.windows(2).any(|w| w == ["--family", "seed_vc"]));
+        assert!(args.iter().any(|a| a == "--audio"));
+        assert!(args.iter().any(|a| a == "--voice-ref"));
+        // Defaults from the spec are passed as request options.
+        assert!(args
+            .windows(2)
+            .any(|w| w == ["--request-option", "route=v2_vc"]));
+        assert!(args
+            .windows(2)
+            .any(|w| w == ["--request-option", "num_inference_steps=30"]));
+
+        // The source clip reached the runner unchanged.
+        let bytes = std::fs::read(dir.join("input.wav")).expect("source audio copied");
+        let (samples, rate) = crate::decode_wav(&bytes).expect("wav");
+        assert_eq!(rate, 24_000);
+        assert_eq!(samples.len(), 2400);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn generic_vc_requires_source_audio() {
+        let dir = args_dir("generic-vc-empty");
+        let engine = fixture(&dir, "audio_cpp");
+        let mut req = convert_request();
+        req.input_samples.clear();
+        let err = engine.convert(&req).unwrap_err();
+        assert!(err.to_string().contains("source clip"), "{err}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn generic_synth_refuses_a_conversion_task() {
+        let dir = args_dir("generic-synth");
+        let engine = fixture(&dir, "audio_cpp");
+        let err = engine.synthesize(&request(&[])).unwrap_err();
+        assert!(err.to_string().contains("convert endpoint"), "{err}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn generic_rejects_unknown_options() {
+        let dir = args_dir("generic-unknown");
+        let engine = fixture(&dir, "audio_cpp");
+        let mut req = convert_request();
+        req.params.insert("surprise".into(), serde_json::json!(1));
+        let err = engine.convert(&req).unwrap_err();
+        assert!(err.to_string().contains("unknown option"), "{err}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn generic_resident_config_and_body() {
+        let dir = args_dir("generic-resident");
+        let engine = fixture(&dir, "audio_cpp");
+        let config = engine.server_config(1234);
+        let models = config["models"].as_array().expect("models");
+        assert_eq!(models.len(), 1);
+        assert_eq!(models[0]["family"], "seed_vc");
+        assert_eq!(models[0]["task"], "vc");
+        assert_eq!(engine.resident_id(&engine.task), "laverock-vc");
     }
 }

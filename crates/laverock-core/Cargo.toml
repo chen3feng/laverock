@@ -13,6 +13,8 @@ sherpa-onnx = { version = "1.13", default-features = false }
 hound = "3.5"
 serde.workspace = true
 serde_json.workspace = true
+# `/v1/tasks/run` returns the generated WAV as base64 inside JSON.
+base64 = "0.22"
 # Blocking HTTP client for the resident audiocpp_server (plain HTTP only).
 ureq = { version = "2.12", default-features = false }
 thiserror.workspace = true

@@ -350,6 +350,57 @@ async function main() {
       }
     }
 
+    // ------------------------------------------------------- voice conversion
+    say('voice conversion');
+    await page.click('nav a[data-page="convert"]');
+    await page.waitForSelector('#page-convert.active');
+    const vcEngine = (await apiJson(context.request, `${base}/api/engines`))
+      .find((e) => e.task === 'vc');
+    if (!vcEngine) {
+      // A machine without Seed-VC still gets an explanation, not a dead button.
+      await page.waitForFunction(
+        () => (document.getElementById('convertStatus')?.textContent || '').trim().length > 0,
+        null,
+        { timeout: 30_000 },
+      );
+      assert.equal(await page.locator('#convertGo').isDisabled(), true, 'convert is disabled');
+      pass('convert page explains the missing model');
+    } else {
+      const convVoiceRes = await context.request.post(`${base}/api/profiles`, {
+        multipart: {
+          name: `ui-convert-voice-${Date.now()}`,
+          prompt_text: '那还是36年前, 1987年. 我呢考上了武汉大学的计算机系.',
+          prompt: {
+            name: 'reference.wav',
+            mimeType: 'audio/wav',
+            buffer: fs.readFileSync(ref),
+          },
+        },
+      });
+      assert.ok(convVoiceRes.ok(), `create convert voice -> HTTP ${convVoiceRes.status()}`);
+      const convVoice = await convVoiceRes.json();
+      await page.evaluate(() => loadProfiles());
+      await page.selectOption('#convertEngine', vcEngine.id);
+      await page.setInputFiles('#convertSource .cap-file', ref);
+      await page.waitForFunction(
+        () => (document.querySelector('#convertSource .cap-info')?.textContent || '').includes('.wav'),
+        null,
+        { timeout: 30_000 },
+      );
+      await page.selectOption('#convertProfile', convVoice.id);
+      await page.click('#convertGo');
+      await page.waitForSelector('#convertResults:not([hidden]) audio', { timeout: 900_000 });
+      const converted = await saveDownload(
+        page,
+        page.locator('#convertResults a.hint').first(),
+        artifacts,
+      );
+      assert.ok(fs.statSync(converted).size > 44, 'converted WAV is not empty');
+      assert.equal(fs.readFileSync(converted).subarray(0, 4).toString(), 'RIFF');
+      pass(`conversion finished (${path.basename(converted)})`);
+      await context.request.delete(`${base}/api/profiles/${convVoice.id}`);
+    }
+
     // --------------------------------------------------------------- projects
     say('subtitle projects');
     await page.click('nav a[data-page="projects"]');

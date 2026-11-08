@@ -86,6 +86,9 @@ messages! {
     ReferenceAudioRequired = "reference_audio_required"
         { en: "{engine} needs a reference clip (3–10 s of clean speech works best).",
           zh: "{engine} 需要一段参考音频（3–10 秒干净人声效果最好）。" },
+    SourceAudioRequired = "source_audio_required"
+        { en: "Voice conversion needs a source clip to convert.",
+          zh: "变声需要一段要转换的源音频。" },
     TranscriptRequired = "transcript_required"
         { en: "{engine} needs the transcript of the reference clip.",
           zh: "{engine} 需要参考音频对应的文字。" },

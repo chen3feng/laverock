@@ -107,7 +107,7 @@ audio.cpp、sherpa-onnx）返回 `None`，保留自己的分段器，避免同�
 受支持类型的模型不需要改代码：创建 `<models>/<id>/engine.json`，把其中的路径指向
 该目录里的文件即可。受支持的 `kind` 有 `zipvoice`、`voxcpm2`、`qwen3tts`、
 `longcat`、`dots`、`cosyvoice`、`kokoro`、`ming3tts`、`chatterbox`、
-`indextts2`、`mosstts` 和 `stt`。
+`indextts2`、`mosstts`、`stt`，以及通用的 `audio_cpp`。
 
 ```json
 {
@@ -151,6 +151,14 @@ audio.cpp、sherpa-onnx）返回 `None`，保留自己的分段器，避免同�
   随界面切换；手写的第三方清单也可以直接写字符串。
 - `Manifest::problem()` 会在用户遇到合成错误之前标记安装的结构性问题（例如来自
   旧运行器的安装）。
+- `kind: "audio_cpp"` 是任意 audio.cpp 家族的通用入口，应用无需为它单独写代码。
+  它的 `audio_cpp` 段声明 `binary`、`model`、`backend`、`family` 和 `task`，
+  还可以用 `spec` 指向 audio.cpp 的 `model_spec.json`。Laverock 解析该规格，把
+  `options.request` 变成界面控件、校验提交值，并把解析后的参数以
+  `--request-option`（CLI）或 `request.options`（常驻服务）传给 audio.cpp。
+  `input` 指定承载源音频的字段（`vc`/`svc` 默认 `audio`），`voice_ref: false`
+  表示不需要目标参考音。新增这类模型不需要改 Rust，完整示例见
+  `scripts/download-seedvc.sh`。
 
 要让模型出现在界面的可安装目录中，在
 `crates/laverock-server/assets/catalog.json` 里加一条记录，包含 `id`、`task`、
