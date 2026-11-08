@@ -114,6 +114,11 @@ its first audio track is converted to mono 48 kHz WAV. `GET /api/health`
 reports `"ffmpeg": true|false`; `GET /api/settings` also returns the
 resolved `ffmpeg_bin` so the page can show what was found.
 
+Exporting the finished video copies the picture (`-c:v copy`) and re-encodes
+only the audio: AAC in MP4/MOV/MKV, Opus in WebM. Soft subtitles use
+`mov_text`, SRT or WebVTT for those containers respectively. The export is
+cut to the project duration, so picture and sound end together.
+
 ## Packaged builds
 
 Packaged desktop builds ship `scripts/` inside the app bundle (macOS

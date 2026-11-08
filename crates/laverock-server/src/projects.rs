@@ -455,7 +455,7 @@ impl ProjectStore {
         Ok(fs::read(self.segment_file(project_id, segment_id)?)?)
     }
 
-    /// Store a finished export (the mix for now) and record it on the project.
+    /// Store a finished export (the mix, or a muxed video) and record it.
     pub fn write_export(
         &self,
         project_id: &str,
@@ -463,14 +463,26 @@ impl ProjectStore {
         kind: &str,
         bytes: &[u8],
     ) -> Result<Project> {
-        let mut project = self.load(project_id)?;
-        let dir = self.dir(project_id)?;
-        let path = format!("{EXPORT_DIR}/{name}");
-        let target = dir.join(&path);
-        if let Some(parent) = target.parent() {
-            fs::create_dir_all(parent)?;
-        }
+        let target = self.export_target(project_id, name)?;
         write_atomic(&target, bytes)?;
+        self.record_export(project_id, name, kind)
+    }
+
+    /// Where a large export should be written directly (a video is not
+    /// buffered in memory). The name must be a plain file name.
+    pub fn export_target(&self, project_id: &str, name: &str) -> Result<PathBuf> {
+        let name = export_file_name(name)?;
+        let dir = self.dir(project_id)?.join(EXPORT_DIR);
+        fs::create_dir_all(&dir)?;
+        Ok(dir.join(name))
+    }
+
+    /// Record an export whose file was already written to
+    /// [`export_target`](Self::export_target).
+    pub fn record_export(&self, project_id: &str, name: &str, kind: &str) -> Result<Project> {
+        let name = export_file_name(name)?;
+        let mut project = self.load(project_id)?;
+        let path = format!("{EXPORT_DIR}/{name}");
         project.exports.retain(|export| export.name != name);
         project.exports.push(Export {
             name: name.to_string(),
@@ -485,13 +497,24 @@ impl ProjectStore {
     /// Read an export by the name recorded on the project; the path itself
     /// never comes from the request.
     pub fn export_file(&self, project_id: &str, name: &str) -> Result<Vec<u8>> {
+        Ok(fs::read(self.export_path(project_id, name)?)?)
+    }
+
+    /// Path of a recorded export, without reading it into memory.
+    pub fn export_path(&self, project_id: &str, name: &str) -> Result<PathBuf> {
         let project = self.load(project_id)?;
         let export = project
             .exports
             .iter()
             .find(|export| export.name == name)
             .ok_or_else(|| CoreError::NotFound(name.to_string()))?;
-        Ok(fs::read(self.dir(project_id)?.join(&export.path))?)
+        Ok(self.dir(project_id)?.join(&export.path))
+    }
+
+    /// Path of the uploaded media file (video or compressed audio).
+    pub fn media_path(&self, id: &str) -> Result<PathBuf> {
+        let project = self.load(id)?;
+        Ok(self.dir(id)?.join(&project.source.file))
     }
 
     fn load(&self, id: &str) -> Result<Project> {
@@ -559,6 +582,22 @@ fn media_file_name(ext: &str) -> String {
     } else {
         format!("source.{ext}")
     }
+}
+
+/// Export names become file names, so only a plain name is accepted.
+fn export_file_name(name: &str) -> Result<&str> {
+    let valid = !name.is_empty()
+        && name.len() <= 64
+        && !name.starts_with('.')
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_'));
+    if !valid {
+        return Err(CoreError::BadRequest(format!(
+            "invalid export name: {name}"
+        )));
+    }
+    Ok(name)
 }
 
 fn clean_name(raw: &str) -> Result<String> {

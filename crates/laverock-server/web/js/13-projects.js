@@ -82,8 +82,31 @@ function openProject(project) {
     $('projectVideo').removeAttribute('src');
   }
   $('projectAudio').src = `/api/projects/${encodeURIComponent(project.id)}/source`;
+  // Video packaging: only video projects get the export row. The previous
+  // export (if any) is shown for playback and download.
+  $('projectExportRow').hidden = !isVideo;
+  $('projectExportStatus').textContent = '';
+  $('projectExportProgress').hidden = true;
+  $('projectExportSubs').checked = isVideo && supportsSoftSubs(project);
+  $('projectExportAudio').value = hasMix ? 'mix' : 'original';
+  const videoExport = (project.exports || []).find((e) => e.kind === 'video');
+  $('projectExportResult').hidden = !videoExport;
+  if (videoExport) {
+    $('projectExportPlayer').src =
+      `${projectFileUrl(project.id, videoExport.name)}?v=${project.updated_at}`;
+  } else {
+    $('projectExportPlayer').pause();
+    $('projectExportPlayer').removeAttribute('src');
+  }
   renderSegments(project.segments || []);
   $('projectEditor').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+// Containers that can carry soft subtitles (see media::subtitle_codec).
+function supportsSoftSubs(project) {
+  const file = project.source.file || '';
+  const ext = file.includes('.') ? file.split('.').pop().toLowerCase() : '';
+  return ['mp4', 'm4v', 'mov', 'mkv', 'webm'].includes(ext);
 }
 
 // Speech engines and saved voices, keeping the project's own choice when it
@@ -146,6 +169,12 @@ function closeProjectEditor() {
   $('projectMixStatus').textContent = '';
   $('projectMixProgress').hidden = true;
   $('projectMixResult').hidden = true;
+  $('projectExportPlayer').pause();
+  $('projectExportPlayer').removeAttribute('src');
+  $('projectExportStatus').textContent = '';
+  $('projectExportProgress').hidden = true;
+  $('projectExportResult').hidden = true;
+  $('projectExportRow').hidden = true;
 }
 
 function renderSegments(segments) {
@@ -393,6 +422,66 @@ async function downloadMix() {
   }
 }
 
+// Mux the chosen audio track and optional soft subtitles back into the
+// source video. The picture is copied server-side, so this stays quick.
+async function exportProject() {
+  if (!currentProject) return;
+  const id = currentProject.id;
+  const fd = new FormData();
+  fd.append('audio', $('projectExportAudio').value);
+  fd.append('subtitles', $('projectExportSubs').checked ? 'soft' : 'none');
+  const progress = $('projectExportProgress');
+  const status = $('projectExportStatus');
+  progress.hidden = false;
+  progress.value = 0;
+  status.textContent = t('projects.export.starting');
+  $('projectExport').disabled = true;
+  try {
+    const result = await runJob(
+      `/api/projects/${encodeURIComponent(id)}/export?format=video`,
+      fd,
+      {
+        stage: (e) => { status.textContent = e.message; },
+        progress: (e) => { progress.value = e.value; },
+      },
+    );
+    status.textContent = result.cancelled
+      ? t('projects.synth.cancelled')
+      : t('projects.export.done');
+    currentProject = await api(`/api/projects/${encodeURIComponent(id)}`);
+    const exported = (currentProject.exports || []).find((e) => e.kind === 'video');
+    if (exported) {
+      $('projectExportResult').hidden = false;
+      // The export file is replaced in place; bust the player's cache.
+      $('projectExportPlayer').src =
+        `${projectFileUrl(id, exported.name)}?v=${Date.now()}`;
+    }
+    await loadProjects();
+  } catch (e) {
+    status.textContent = t('projects.export.failed') + e.message;
+  } finally {
+    $('projectExport').disabled = false;
+  }
+}
+
+async function downloadExport() {
+  if (!currentProject) return;
+  const exported = (currentProject.exports || []).find((e) => e.kind === 'video');
+  if (!exported) return;
+  try {
+    const res = await apiFetch(projectFileUrl(currentProject.id, exported.name));
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.error || res.statusText || ('HTTP ' + res.status));
+    }
+    const name = (currentProject.name || 'laverock').replace(/[\\/:*?"<>|]+/g, '_');
+    const ext = exported.name.includes('.') ? exported.name.split('.').pop() : 'mp4';
+    await saveBlob(await res.blob(), `${name}-dubbed.${ext}`);
+  } catch (e) {
+    toast(t('ui.download_failed') + e.message, true);
+  }
+}
+
 async function deleteProject(project) {
   if (!(await confirmAction(t('projects.delete_confirm').replace('{name}', project.name)))) return;
   try {
@@ -538,3 +627,5 @@ $('projectSynthesize').onclick = () => synthesizeProject();
 $('projectSynthCancel').onclick = cancelSynthesize;
 $('projectMix').onclick = mixProject;
 $('projectMixDownload').onclick = downloadMix;
+$('projectExport').onclick = exportProject;
+$('projectExportDownload').onclick = downloadExport;

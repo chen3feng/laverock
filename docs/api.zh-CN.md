@@ -60,7 +60,9 @@ Cookie）；以下均指回环监听。
 | POST | `/api/projects/:id/synthesize` | 配音后台任务：multipart，可重复 `segment` 只重跑指定分段 → `202`；为每段写出 `segments/<id>.wav` |
 | GET | `/api/projects/:id/segments/:segment/audio` | 某一段已生成的配音 |
 | POST | `/api/projects/:id/mix` | multipart：可选 `background_volume`、`voice_volume`（0–4）与 `ducking` → `202`；写出并记录 `mix.wav` |
-| GET | `/api/projects/:id/files/:name` | 已记录的导出文件（`mix.wav`） |
+| POST | `/api/projects/:id/export?format=video\|audio` | `202` 任务；`video` 把选定音轨与可选软字幕封装回源视频，`audio` 重新混音 |
+| GET | `/api/projects/:id/export?format=srt\|vtt` | 项目的分段 → 可下载的 SRT 或 WebVTT |
+| GET | `/api/projects/:id/files/:name` | 已记录的导出文件（`mix.wav`、`export.mp4`） |
 | GET | `/api/projects/:id/subtitles?format=srt\|vtt` | 项目的分段 → 可下载的 SRT 或 WebVTT |
 | POST | `/api/transcribe` | multipart：`audio`（WAV）→ 转写文字（需安装 SenseVoice 模型） |
 | POST | `/api/transcribe/details` | 同样的输入 → `{text, segments: [{start, end, text}], language, duration}` |
@@ -118,6 +120,16 @@ WAV。重复传 `segment` 字段可只重跑指定分段。`tts_path`、`tts_dur
 两端各有 100 ms 过渡。输出为源采样率的单声道，长度至少覆盖最后一段配音（即使
 超出源音频），因此较长的配音不会被截断。文件保存为项目导出 `mix.wav`（同时也是
 任务文件），由 files 接口提供下载；`PATCH` 也接受同样的 `mix` 对象。
+
+`POST /api/projects/:id/export?format=video` 用于封装视频项目：画面直接复制
+（`-c:v copy`），音轨取已记录的混音（multipart `audio=mix`，默认；必须已混音）
+或源视频自带音轨（`audio=original`），字幕以内嵌软字幕加入（`subtitles=soft`，
+默认）或省略（`subtitles=none`）。软字幕在 MP4/MOV 中使用 `mov_text`，Matroska
+使用 SRT，WebM 使用 WebVTT；容器不支持时会报错，除非关闭字幕。输出按项目时长
+截断，保证音画同时结束，保存为 `exports/export.<容器扩展名>`，以
+`kind: "video"` 记录，并由 files 接口按正确的媒体类型提供。任务会上报 `stage`
+事件，完成后导出文件即可下载。`format=audio` 重新执行混音；`GET` 加
+`format=srt|vtt` 则下载字幕文件。
 
 引擎参数（`speed`、`num_steps`、`cfg`、`seed` 等）由各引擎的清单声明，服务端按
 同一份列表校验，界面也用同一份列表生成控件；`GET /api/engines` 可查看。每个引擎

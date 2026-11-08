@@ -99,6 +99,10 @@ FLAC、OGG 等）需要系统安装 `ffmpeg` 与 `ffprobe`；没有时只能导�
 `GET /api/health` 返回 `"ffmpeg": true|false`；`GET /api/settings` 还会返回解析到的
 `ffmpeg_bin`，供设置页显示实际找到的路径。
 
+导出成片时画面直接复制（`-c:v copy`），只重新编码音频：MP4/MOV/MKV 用 AAC，
+WebM 用 Opus。软字幕依次使用 `mov_text`、SRT 与 WebVTT。导出按项目时长截断，
+保证音画同时结束。
+
 ## 打包版
 
 打包后的桌面版在应用包内附带 `scripts/`（macOS 为 `Contents/Resources/scripts`，

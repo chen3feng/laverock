@@ -257,6 +257,23 @@
   }
   .project-mix-result b { font-size: 12.5px; color: var(--muted); font-weight: 600; }
   .project-mix-result audio { flex: 1; min-width: 220px; margin: 0; }
+  .project-mix-result video {
+    flex: 1; min-width: 260px; max-width: 480px; margin: 0;
+    border-radius: 8px; background: #000;
+  }
+  .project-export {
+    display: flex; align-items: flex-end; gap: 14px; flex-wrap: wrap;
+    margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--line);
+  }
+  .project-export > div { flex: 0 1 200px; min-width: 150px; }
+  .project-export label { margin-bottom: 6px; }
+  .project-export .switch { margin-bottom: 8px; }
+  .project-export button { margin-left: auto; }
+  #projectExportProgress {
+    width: 100%; height: 6px; margin-top: 12px;
+    accent-color: var(--accent);
+  }
+  #projectExportStatus { min-height: 18px; }
   .empty {
     border: 1px dashed var(--line); border-radius: 14px; padding: 34px 20px;
     text-align: center; color: var(--muted); font-size: 13.5px;
@@ -717,6 +734,27 @@
           <b data-i18n="projects.mix.result">混音结果</b>
           <audio id="projectMixAudio" controls></audio>
           <button class="ghost small" id="projectMixDownload" type="button" data-i18n="projects.mix.download">下载 WAV</button>
+        </div>
+        <div class="project-export" id="projectExportRow" hidden>
+          <div>
+            <label for="projectExportAudio" data-i18n="projects.export.audio">音轨</label>
+            <select id="projectExportAudio">
+              <option value="mix" data-i18n="projects.export.audio.mix">混音（配音）</option>
+              <option value="original" data-i18n="projects.export.audio.original">原音轨</option>
+            </select>
+          </div>
+          <label class="switch">
+            <input id="projectExportSubs" type="checkbox" checked />
+            <span data-i18n="projects.export.subtitles">附带软字幕</span>
+          </label>
+          <button id="projectExport" type="button" data-i18n="projects.export.run">导出视频</button>
+        </div>
+        <progress id="projectExportProgress" max="1" value="0" hidden></progress>
+        <div class="hint" id="projectExportStatus"></div>
+        <div class="project-mix-result" id="projectExportResult" hidden>
+          <b data-i18n="projects.export.result">导出视频</b>
+          <video id="projectExportPlayer" controls></video>
+          <button class="ghost small" id="projectExportDownload" type="button" data-i18n="projects.export.download">下载视频</button>
         </div>
         <audio id="projectSegAudio" hidden></audio>
       </div>
@@ -1532,6 +1570,16 @@ addI18n({
     'projects.mix.failed': '混音失败：',
     'projects.mix.result': '混音结果',
     'projects.mix.download': '下载 WAV',
+    'projects.export.audio': '音轨',
+    'projects.export.audio.mix': '混音（配音）',
+    'projects.export.audio.original': '原音轨',
+    'projects.export.subtitles': '附带软字幕',
+    'projects.export.run': '导出视频',
+    'projects.export.starting': '正在封装视频…',
+    'projects.export.done': '视频导出完成',
+    'projects.export.failed': '视频导出失败：',
+    'projects.export.result': '导出视频',
+    'projects.export.download': '下载视频',
   },
   en: {
     'nav.projects': 'Subtitles',
@@ -1587,6 +1635,16 @@ addI18n({
     'projects.mix.failed': 'Mixing failed: ',
     'projects.mix.result': 'Mix',
     'projects.mix.download': 'Download WAV',
+    'projects.export.audio': 'Audio track',
+    'projects.export.audio.mix': 'Mix (dub)',
+    'projects.export.audio.original': 'Original audio',
+    'projects.export.subtitles': 'Include soft subtitles',
+    'projects.export.run': 'Export video',
+    'projects.export.starting': 'Muxing the video…',
+    'projects.export.done': 'Video exported',
+    'projects.export.failed': 'Video export failed: ',
+    'projects.export.result': 'Exported video',
+    'projects.export.download': 'Download video',
   },
 });
 
@@ -5164,8 +5222,31 @@ function openProject(project) {
     $('projectVideo').removeAttribute('src');
   }
   $('projectAudio').src = `/api/projects/${encodeURIComponent(project.id)}/source`;
+  // Video packaging: only video projects get the export row. The previous
+  // export (if any) is shown for playback and download.
+  $('projectExportRow').hidden = !isVideo;
+  $('projectExportStatus').textContent = '';
+  $('projectExportProgress').hidden = true;
+  $('projectExportSubs').checked = isVideo && supportsSoftSubs(project);
+  $('projectExportAudio').value = hasMix ? 'mix' : 'original';
+  const videoExport = (project.exports || []).find((e) => e.kind === 'video');
+  $('projectExportResult').hidden = !videoExport;
+  if (videoExport) {
+    $('projectExportPlayer').src =
+      `${projectFileUrl(project.id, videoExport.name)}?v=${project.updated_at}`;
+  } else {
+    $('projectExportPlayer').pause();
+    $('projectExportPlayer').removeAttribute('src');
+  }
   renderSegments(project.segments || []);
   $('projectEditor').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+// Containers that can carry soft subtitles (see media::subtitle_codec).
+function supportsSoftSubs(project) {
+  const file = project.source.file || '';
+  const ext = file.includes('.') ? file.split('.').pop().toLowerCase() : '';
+  return ['mp4', 'm4v', 'mov', 'mkv', 'webm'].includes(ext);
 }
 
 // Speech engines and saved voices, keeping the project's own choice when it
@@ -5228,6 +5309,12 @@ function closeProjectEditor() {
   $('projectMixStatus').textContent = '';
   $('projectMixProgress').hidden = true;
   $('projectMixResult').hidden = true;
+  $('projectExportPlayer').pause();
+  $('projectExportPlayer').removeAttribute('src');
+  $('projectExportStatus').textContent = '';
+  $('projectExportProgress').hidden = true;
+  $('projectExportResult').hidden = true;
+  $('projectExportRow').hidden = true;
 }
 
 function renderSegments(segments) {
@@ -5475,6 +5562,66 @@ async function downloadMix() {
   }
 }
 
+// Mux the chosen audio track and optional soft subtitles back into the
+// source video. The picture is copied server-side, so this stays quick.
+async function exportProject() {
+  if (!currentProject) return;
+  const id = currentProject.id;
+  const fd = new FormData();
+  fd.append('audio', $('projectExportAudio').value);
+  fd.append('subtitles', $('projectExportSubs').checked ? 'soft' : 'none');
+  const progress = $('projectExportProgress');
+  const status = $('projectExportStatus');
+  progress.hidden = false;
+  progress.value = 0;
+  status.textContent = t('projects.export.starting');
+  $('projectExport').disabled = true;
+  try {
+    const result = await runJob(
+      `/api/projects/${encodeURIComponent(id)}/export?format=video`,
+      fd,
+      {
+        stage: (e) => { status.textContent = e.message; },
+        progress: (e) => { progress.value = e.value; },
+      },
+    );
+    status.textContent = result.cancelled
+      ? t('projects.synth.cancelled')
+      : t('projects.export.done');
+    currentProject = await api(`/api/projects/${encodeURIComponent(id)}`);
+    const exported = (currentProject.exports || []).find((e) => e.kind === 'video');
+    if (exported) {
+      $('projectExportResult').hidden = false;
+      // The export file is replaced in place; bust the player's cache.
+      $('projectExportPlayer').src =
+        `${projectFileUrl(id, exported.name)}?v=${Date.now()}`;
+    }
+    await loadProjects();
+  } catch (e) {
+    status.textContent = t('projects.export.failed') + e.message;
+  } finally {
+    $('projectExport').disabled = false;
+  }
+}
+
+async function downloadExport() {
+  if (!currentProject) return;
+  const exported = (currentProject.exports || []).find((e) => e.kind === 'video');
+  if (!exported) return;
+  try {
+    const res = await apiFetch(projectFileUrl(currentProject.id, exported.name));
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.error || res.statusText || ('HTTP ' + res.status));
+    }
+    const name = (currentProject.name || 'laverock').replace(/[\\/:*?"<>|]+/g, '_');
+    const ext = exported.name.includes('.') ? exported.name.split('.').pop() : 'mp4';
+    await saveBlob(await res.blob(), `${name}-dubbed.${ext}`);
+  } catch (e) {
+    toast(t('ui.download_failed') + e.message, true);
+  }
+}
+
 async function deleteProject(project) {
   if (!(await confirmAction(t('projects.delete_confirm').replace('{name}', project.name)))) return;
   try {
@@ -5620,6 +5767,8 @@ $('projectSynthesize').onclick = () => synthesizeProject();
 $('projectSynthCancel').onclick = cancelSynthesize;
 $('projectMix').onclick = mixProject;
 $('projectMixDownload').onclick = downloadMix;
+$('projectExport').onclick = exportProject;
+$('projectExportDownload').onclick = downloadExport;
 
 // ---------------------------------------------------------------- remote / pairing
 

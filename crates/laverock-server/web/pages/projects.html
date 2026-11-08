@@ -81,6 +81,27 @@
           <audio id="projectMixAudio" controls></audio>
           <button class="ghost small" id="projectMixDownload" type="button" data-i18n="projects.mix.download">下载 WAV</button>
         </div>
+        <div class="project-export" id="projectExportRow" hidden>
+          <div>
+            <label for="projectExportAudio" data-i18n="projects.export.audio">音轨</label>
+            <select id="projectExportAudio">
+              <option value="mix" data-i18n="projects.export.audio.mix">混音（配音）</option>
+              <option value="original" data-i18n="projects.export.audio.original">原音轨</option>
+            </select>
+          </div>
+          <label class="switch">
+            <input id="projectExportSubs" type="checkbox" checked />
+            <span data-i18n="projects.export.subtitles">附带软字幕</span>
+          </label>
+          <button id="projectExport" type="button" data-i18n="projects.export.run">导出视频</button>
+        </div>
+        <progress id="projectExportProgress" max="1" value="0" hidden></progress>
+        <div class="hint" id="projectExportStatus"></div>
+        <div class="project-mix-result" id="projectExportResult" hidden>
+          <b data-i18n="projects.export.result">导出视频</b>
+          <video id="projectExportPlayer" controls></video>
+          <button class="ghost small" id="projectExportDownload" type="button" data-i18n="projects.export.download">下载视频</button>
+        </div>
         <audio id="projectSegAudio" hidden></audio>
       </div>
     </section>
