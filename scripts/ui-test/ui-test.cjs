@@ -361,12 +361,32 @@ async function main() {
       pass('music page explains the missing model');
     } else {
       await page.selectOption('#musicEngine', musicEngine.id);
-      await page.waitForSelector('#music-param-task_route', { timeout: 30_000 });
-      await page.selectOption('#music-param-task_route', 'repaint');
-      assert.equal(await page.locator('#musicSourceCard').isVisible(), true);
-      await page.selectOption('#music-param-task_route', 'text2music');
-      assert.equal(await page.locator('#musicSourceCard').isVisible(), false);
-      pass('editing routes ask for a source song');
+      await page.waitForSelector(
+        '#music-param-task_route, #music-param-audio_input_kind',
+        { timeout: 30_000 },
+      );
+      if (await page.locator('#music-param-task_route').count()) {
+        await page.selectOption('#music-param-task_route', 'repaint');
+        assert.equal(await page.locator('#musicSourceCard').isVisible(), true);
+        await page.selectOption('#music-param-task_route', 'text2music');
+        assert.equal(await page.locator('#musicSourceCard').isVisible(), false);
+        pass('editing routes ask for a source song');
+      } else {
+        await page.selectOption('#music-param-audio_input_kind', 'init_audio');
+        assert.equal(await page.locator('#musicSourceCard').isVisible(), true);
+        assert.equal(
+          await page.locator('#music-param-inpaint_mask_start_sec').isVisible(),
+          false,
+        );
+        await page.selectOption('#music-param-audio_input_kind', 'inpaint_audio');
+        assert.equal(
+          await page.locator('#music-param-inpaint_mask_start_sec').isVisible(),
+          true,
+        );
+        await page.selectOption('#music-param-audio_input_kind', 'none');
+        assert.equal(await page.locator('#musicSourceCard').isVisible(), false);
+        pass('audio-conditioned modes ask for a source song');
+      }
     }
 
     // ------------------------------------------------------- voice conversion

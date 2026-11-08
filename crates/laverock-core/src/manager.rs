@@ -336,7 +336,15 @@ impl EngineManager {
                 Arc::new(AudioCppEngine::build(&dir, &manifest, Family::IndexTts2)?)
             }
             EngineKind::MossTts => Arc::new(MossTtsEngine::build(&dir, &manifest)?),
-            EngineKind::Music => Arc::new(AudioCppEngine::build(&dir, &manifest, Family::AceStep)?),
+            EngineKind::Music => {
+                // The manifest names the audio.cpp family; ACE-Step is the
+                // historical default for installs written before the field.
+                let family = match manifest.music.as_ref().map(|m| m.family.as_str()) {
+                    Some("stable_audio") => Family::StableAudio,
+                    _ => Family::AceStep,
+                };
+                Arc::new(AudioCppEngine::build(&dir, &manifest, family)?)
+            }
             EngineKind::AudioCpp => {
                 Arc::new(AudioCppEngine::build(&dir, &manifest, Family::Generic)?)
             }

@@ -347,12 +347,12 @@ impl Manifest {
                     return params;
                 }
             }
-            Self::default_parameters(self.kind)
+            self.kind_default_parameters()
         } else {
             let mut params = self.parameters.clone();
             // New built-in controls must reach installs written before they
             // existed; the manifest's own entries win by name.
-            for spec in Self::default_parameters(self.kind) {
+            for spec in self.kind_default_parameters() {
                 if !params.iter().any(|p| p.name == spec.name) {
                     params.push(spec);
                 }
@@ -360,6 +360,163 @@ impl Manifest {
             crate::legacy_i18n::localize(self.kind, &mut params);
             params
         }
+    }
+
+    /// Built-in controls for this manifest's kind and, for music, family.
+    ///
+    /// ACE-Step's editing routes and Stable Audio's conditioning controls
+    /// are different enough that one music list cannot describe both.
+    fn kind_default_parameters(&self) -> Vec<ParamSpec> {
+        match self.music.as_ref().map(|m| m.family.as_str()) {
+            Some("stable_audio") if self.kind == EngineKind::Music => {
+                Self::stable_audio_parameters()
+            }
+            _ => Self::default_parameters(self.kind),
+        }
+    }
+
+    /// Stable Audio 3 controls: text-to-music and sound effects, plus the
+    /// audio-conditioned init/inpaint modes.
+    fn stable_audio_parameters() -> Vec<ParamSpec> {
+        use serde_json::json;
+        vec![
+            ParamSpec::slider(
+                "duration_sec",
+                ("Duration (seconds)", "时长（秒）"),
+                30.0,
+                1.0,
+                300.0,
+                1.0,
+                (
+                    "Requested clip length; longer clips take proportionally longer.",
+                    "期望的音频长度；越长耗时越久。",
+                ),
+            ),
+            ParamSpec::int_slider(
+                "num_steps",
+                ("Diffusion steps", "扩散步数"),
+                8,
+                1,
+                50,
+                1,
+                (
+                    "8 is the model default; more steps are slower.",
+                    "8 是模型默认值；越多越慢。",
+                ),
+            ),
+            ParamSpec::slider(
+                "guidance_scale",
+                ("Guidance strength", "引导强度"),
+                1.0,
+                0.0,
+                10.0,
+                0.1,
+                (
+                    "Classifier-free guidance; 1 keeps the model default.",
+                    "无分类器引导；1 表示使用模型默认值。",
+                ),
+            ),
+            ParamSpec {
+                name: "negative_prompt".into(),
+                label: ("Negative prompt", "反向提示").into(),
+                kind: ParamKind::Text,
+                min: None,
+                max: None,
+                step: None,
+                options: Vec::new(),
+                default: json!(""),
+                hint: (
+                    "What to avoid; leave empty to use the model default.",
+                    "希望避免的内容；留空使用模型默认值。",
+                )
+                    .into(),
+            },
+            ParamSpec {
+                name: "seed".into(),
+                label: ("Random seed", "随机种子").into(),
+                kind: ParamKind::Int,
+                min: Some(json!(0)),
+                max: Some(json!(4_294_967_295i64)),
+                step: None,
+                options: Vec::new(),
+                default: json!(42),
+                hint: (
+                    "Same seed + prompt gives a reproducible clip.",
+                    "相同种子 + 提示词得到可复现的音频。",
+                )
+                    .into(),
+            },
+            ParamSpec {
+                name: "audio_input_kind".into(),
+                label: ("Source audio use", "源音频用法").into(),
+                kind: ParamKind::Choice,
+                min: None,
+                max: None,
+                step: None,
+                options: vec![
+                    ParamOption {
+                        label: ("None", "不使用").into(),
+                        value: "none".into(),
+                    },
+                    ParamOption {
+                        label: ("Init audio", "初始音频").into(),
+                        value: "init_audio".into(),
+                    },
+                    ParamOption {
+                        label: ("Inpaint", "局部重绘").into(),
+                        value: "inpaint_audio".into(),
+                    },
+                ],
+                default: json!("none"),
+                hint: (
+                    "Condition generation on an uploaded song, or inpaint masked regions.",
+                    "用上传的歌曲作为生成条件，或对掩码区间做局部重绘。",
+                )
+                    .into(),
+            },
+            ParamSpec::slider(
+                "init_noise_level",
+                ("Init noise", "初始噪声"),
+                0.45,
+                0.0,
+                1.0,
+                0.05,
+                (
+                    "How far audio-conditioned generation may move from the source.",
+                    "音频条件生成允许偏离源音频的程度。",
+                ),
+            ),
+            ParamSpec {
+                name: "inpaint_mask_start_sec".into(),
+                label: ("Inpaint starts (s)", "重绘起点（秒）").into(),
+                kind: ParamKind::Text,
+                min: None,
+                max: None,
+                step: None,
+                options: Vec::new(),
+                default: json!(""),
+                hint: (
+                    "Comma-separated start times, e.g. 2.5,6.5.",
+                    "逗号分隔的起点，例如 2.5,6.5。",
+                )
+                    .into(),
+            },
+            ParamSpec {
+                name: "inpaint_mask_end_sec".into(),
+                label: ("Inpaint ends (s)", "重绘终点（秒）").into(),
+                kind: ParamKind::Text,
+                min: None,
+                max: None,
+                step: None,
+                options: Vec::new(),
+                default: json!(""),
+                hint: (
+                    "Comma-separated end times, e.g. 3.5,8.0.",
+                    "逗号分隔的终点，例如 3.5,8.0。",
+                )
+                    .into(),
+            },
+        ]
     }
 
     /// Longest reference clip this engine will use, in seconds.
@@ -1808,6 +1965,44 @@ mod tests {
         );
         // The manifest's own spec wins; the built-in one only fills gaps.
         assert_eq!(params[0].label.for_lang("en"), "Decoding");
+    }
+
+    #[test]
+    fn music_defaults_follow_the_family() {
+        let ace: Manifest = serde_json::from_str(
+            r#"{"id":"ace","kind":"music","name":"a",
+                "music":{"binary":"/b","model":"/m"}}"#,
+        )
+        .expect("ACE-Step manifest");
+        let ace_params = ace.parameters_or_defaults();
+        let names: Vec<&str> = ace_params.iter().map(|p| p.name.as_str()).collect();
+        assert!(names.contains(&"task_route"), "ACE-Step has editing routes");
+        assert!(!names.contains(&"audio_input_kind"));
+
+        let stable: Manifest = serde_json::from_str(
+            r#"{"id":"sa","kind":"music","name":"s",
+                "music":{"binary":"/b","model":"/m","family":"stable_audio"}}"#,
+        )
+        .expect("Stable Audio manifest");
+        let params = stable.parameters_or_defaults();
+        let names: Vec<&str> = params.iter().map(|p| p.name.as_str()).collect();
+        assert_eq!(
+            names,
+            [
+                "duration_sec",
+                "num_steps",
+                "guidance_scale",
+                "negative_prompt",
+                "seed",
+                "audio_input_kind",
+                "init_noise_level",
+                "inpaint_mask_start_sec",
+                "inpaint_mask_end_sec",
+            ]
+        );
+        assert_eq!(params[0].default, serde_json::json!(30.0));
+        assert!(!names.contains(&"task_route"), "no ACE-Step routes");
+        assert!(!names.contains(&"lyrics"), "Stable Audio takes no lyrics");
     }
 
     #[test]

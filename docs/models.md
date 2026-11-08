@@ -30,7 +30,12 @@ installs and CI use them directly:
 ./scripts/download-indextts2.sh    # IndexTTS-2, 3.6 GB Q8_0 GGUF (shares the runtime)
 ./scripts/download-mosstts.sh      # MOSS-TTS-Delay, macOS/Linux only, ~10 GB weights
 ./scripts/download-ace-step.sh     # ACE-Step 1.5 Turbo music, ~10 GB BF16 (shares the runtime)
+./scripts/download-stable-audio.sh # Stable Audio 3 Small Music, ~1.7 GB Q8_0 (shares the runtime)
 ./scripts/download-seedvc.sh       # Seed-VC voice conversion, ~3.1 GB Q8_0 (shares the runtime)
+
+# Variants
+STABLE_AUDIO_VARIANT=sfx ./scripts/download-stable-audio.sh    # sound effects, 8 s default
+STABLE_AUDIO_VARIANT=medium ./scripts/download-stable-audio.sh # larger music model, ~3.6 GB
 
 # Variants
 QWEN3TTS_VARIANT=custom ./scripts/download-qwen3tts.sh    # 9 preset speakers
@@ -79,6 +84,9 @@ endpoint call the model.
 | `indextts2` | IndexTTS-2 Q8_0 | clone | zh, en | ~3.6 GB |
 | `mosstts` | MOSS-TTS-Delay | clone, multilingual | 20 languages | ~10 GB (peak ~16 GB) |
 | `ace-step` | ACE-Step 1.5 Turbo | text-to-music, lyrics | 50+ languages | ~10 GB (BF16) / ~6.2 GB (Q8_0) |
+| `stable-audio-music` | Stable Audio 3 Small Music | text-to-music, init audio, inpainting | en | ~1.7 GB (Q8_0) / ~2.4 GB (F16) |
+| `stable-audio-sfx` | Stable Audio 3 Small SFX | sound effects | en | ~1.7 GB (Q8_0) / ~2.4 GB (F16) |
+| `stable-audio-medium` | Stable Audio 3 Medium | text-to-music, init audio, inpainting | en | ~3.6 GB (Q8_0) / ~5.8 GB (F16) |
 | `seed-vc` | Seed-VC | voice conversion (`vc`) | language-agnostic | ~3.1 GB (Q8_0) / ~3.6 GB (F16) |
 | `enhance` | Voice cleanup (GTCRN + BS-RoFormer) | recording cleanup | — | ~165 MB |
 
@@ -235,6 +243,23 @@ offload; installing with `ACE_STEP_QUANT=q8_0` halves the download, though
 the quantized planner occasionally fails to sample. The BF16 build is the
 reliable default.
 
+**Stable Audio 3** — text-to-music and sound effects on the same audio.cpp
+runtime, with three installs: `stable-audio-music` (Small Music),
+`stable-audio-sfx` (Small SFX) and `stable-audio-medium`. All three use the
+Music page; the caption is `text`, and `duration_sec`, `num_steps`,
+`guidance_scale`, `negative_prompt` and `seed` control the take. The SFX
+install defaults to 8 s clips; the music installs default to 30 s.
+
+Unlike ACE-Step, Stable Audio conditions on audio through
+`audio_input_kind` rather than a named route. `init_audio` starts from an
+uploaded song (`init_noise_level` says how far it may drift), and
+`inpaint_audio` regenerates the regions given by comma-separated
+`inpaint_mask_start_sec`/`inpaint_mask_end_sec` pairs. The page shows the
+source card whenever either mode is selected and hides the mask fields
+otherwise. Stable Audio 3 is English-only and outputs 44.1 kHz stereo.
+Check the model card's licence before commercial use; the installer's note
+also says so.
+
 **Seed-VC** — zero-shot voice conversion on the shared audio.cpp runtime.
 It turns an existing recording into a target voice from the library while
 keeping the words and timing; the **Convert** page takes a source clip and a
@@ -389,8 +414,9 @@ with a negative slope.
 | Feature | Requirement |
 | --- | --- |
 | ONNX engines (ZipVoice, Kokoro, SenseVoice) | none beyond the app |
-| audio.cpp engines (dots, CosyVoice, VoxCPM2, IndexTTS-2, ACE-Step, Seed-VC) | prebuilt CLI and resident server are downloaded |
+| audio.cpp engines (dots, CosyVoice, VoxCPM2, IndexTTS-2, ACE-Step, Stable Audio, Seed-VC) | prebuilt CLI and resident server are downloaded |
 | ACE-Step music | 12 GB+ VRAM recommended; 8 GB cards use CPU/offload |
+| Stable Audio 3 | Small builds run comfortably on 8 GB; Medium needs roughly twice the memory |
 | Python engines (Qwen3-TTS, LongCat, Ming, Chatterbox) | Python 3.10–3.12; the scripts create an isolated venv |
 | MOSS-TTS | macOS/Linux only (not offered on Windows); prebuilt runtime is downloaded; Python 3 for the one-time tokenizer conversion |
 | In-app installs on Windows | `bash` from Git for Windows |

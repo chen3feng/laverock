@@ -13,9 +13,10 @@ generation history and a phone remote that joins over your local network.
   voice, then have any cloning engine read new text in it. Engines without a
   reference clip are covered by preset-voice and voice-design modes.
 - **Music generation and editing** — describe a style and optionally add
-  lyrics; ACE-Step renders a complete 48 kHz stereo song locally. Upload an
-  existing song to cover, repaint a range, complete it, or work on one track,
-  with the same history and downloads as speech.
+  lyrics; ACE-Step renders a complete 48 kHz stereo song locally, while
+  Stable Audio 3 covers background music, sound effects, init-audio and
+  inpainting. Upload an existing song to cover, repaint a range, complete it,
+  or work on one track, with the same history and downloads as speech.
 - **Voice conversion** — turn an existing recording into a saved voice while
   keeping its words and timing. Seed-VC runs on the same local runtime, and
   long conversions continue as background jobs.
@@ -75,6 +76,7 @@ configure.
 | IndexTTS-2 | clone | zh, en | ~3.6 GB |
 | MOSS-TTS-Delay | clone | 20 | ~10 GB |
 | ACE-Step 1.5 Turbo | text-to-music, lyrics | 50+ | ~10 GB (BF16) |
+| Stable Audio 3 Small / Medium | music, sound effects, inpainting | en | 1.7–3.6 GB (Q8_0) |
 | Seed-VC | voice conversion | any | ~3.1 GB (Q8_0) |
 | SenseVoice Small (optional) | speech recognition | 5 | ~234 MB |
 

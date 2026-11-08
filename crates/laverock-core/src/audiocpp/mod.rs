@@ -55,8 +55,10 @@ pub enum Family {
     CosyVoice,
     VoxCpm2,
     IndexTts2,
-    /// Music generation (`--task gen`), currently ACE-Step 1.5.
+    /// Music generation (`--task gen`), ACE-Step 1.5.
     AceStep,
+    /// Music and sound effects (`--task gen`), Stable Audio 3.
+    StableAudio,
     /// Any family driven by a `model_spec.json`; the manifest supplies
     /// the family and task names.
     Generic,
@@ -71,8 +73,14 @@ impl Family {
             Family::VoxCpm2 => "voxcpm2",
             Family::IndexTts2 => "index_tts2",
             Family::AceStep => "ace_step",
+            Family::StableAudio => "stable_audio",
             Family::Generic => "audio_cpp",
         }
+    }
+
+    /// Families that generate music rather than speech.
+    fn is_music(self) -> bool {
+        matches!(self, Family::AceStep | Family::StableAudio)
     }
 
     fn label(self) -> &'static str {
@@ -82,6 +90,7 @@ impl Family {
             Family::VoxCpm2 => "VoxCPM2",
             Family::IndexTts2 => "IndexTTS-2",
             Family::AceStep => "ACE-Step",
+            Family::StableAudio => "Stable Audio 3",
             Family::Generic => "audio.cpp",
         }
     }
@@ -165,7 +174,7 @@ impl Section {
 
     fn music(cfg: &MusicManifest) -> Self {
         Self {
-            family_name: Family::AceStep.cli_name().to_string(),
+            family_name: cfg.family.clone(),
             spec: None,
             input_field: None,
             voice_ref: false,
@@ -256,7 +265,7 @@ impl AudioCppEngine {
                 .indextts2
                 .as_ref()
                 .map(|c| Section::speech(c, family)),
-            Family::AceStep => manifest.music.as_ref().map(Section::music),
+            Family::AceStep | Family::StableAudio => manifest.music.as_ref().map(Section::music),
             Family::Generic => manifest.audio_cpp.as_ref().map(|cfg| {
                 let spec = manifest
                     .resolved_spec
@@ -428,7 +437,7 @@ impl SpeechEngine for AudioCppEngine {
         if self.family == Family::Generic {
             return self.synthesize_generic(req);
         }
-        let is_music = self.family == Family::AceStep;
+        let is_music = self.family.is_music();
         // Music never clones a voice; a stray `samples` upload must not turn
         // into a `--voice-ref` the music family does not understand.
         let has_prompt = !is_music && !req.prompt_samples.is_empty();
@@ -446,7 +455,24 @@ impl SpeechEngine for AudioCppEngine {
 
         // Every music route except text2music edits a source song. Fail
         // before loading a multi-gigabyte model with a clear message.
-        if is_music {
+        if self.family == Family::StableAudio {
+            let kind = self.param_str(req, "audio_input_kind", "none");
+            if kind != "none" && req.input_samples.is_empty() {
+                return Err(CoreError::UserError(
+                    i18n::Message::new(Key::MusicSourceRequired).arg("route", &kind),
+                ));
+            }
+            if kind == "inpaint_audio" {
+                let start = self.param_str(req, "inpaint_mask_start_sec", "");
+                let end = self.param_str(req, "inpaint_mask_end_sec", "");
+                if start.is_empty() || end.is_empty() {
+                    return Err(CoreError::BadRequest(
+                        "inpaint_audio needs inpaint_mask_start_sec and inpaint_mask_end_sec"
+                            .into(),
+                    ));
+                }
+            }
+        } else if is_music {
             let route = self.param_str(req, "task_route", "text2music");
             if route != "text2music" && req.input_samples.is_empty() {
                 return Err(CoreError::UserError(
@@ -759,7 +785,7 @@ impl AudioCppEngine {
             Family::VoxCpm2 => self.voxcpm2_task(req),
             Family::CosyVoice => self.cosyvoice_task(req),
             Family::IndexTts2 => self.indextts2_task(req),
-            Family::AceStep => self.ace_step_task(req),
+            Family::AceStep | Family::StableAudio => self.ace_step_task(req),
             Family::Generic => self.task.as_str(),
         }
     }
@@ -771,6 +797,7 @@ impl AudioCppEngine {
             Family::CosyVoice => self.cosyvoice_options(req, cmd),
             Family::IndexTts2 => self.indextts2_options(req, cmd),
             Family::AceStep => self.ace_step_options(req, cmd),
+            Family::StableAudio => self.stable_audio_options(req, cmd),
             Family::Generic => Ok(()),
         }
     }
@@ -1118,7 +1145,7 @@ impl AudioCppEngine {
             Family::VoxCpm2 => self.voxcpm2_server_tasks(),
             Family::CosyVoice => self.cosyvoice_server_tasks(),
             Family::IndexTts2 => self.indextts2_server_tasks(),
-            Family::AceStep => self.ace_step_server_tasks(),
+            Family::AceStep | Family::StableAudio => self.ace_step_server_tasks(),
             Family::Generic => vec![self.task.as_str()],
         }
     }
@@ -1195,6 +1222,7 @@ impl AudioCppEngine {
             Family::CosyVoice => self.cosyvoice_resident(req)?,
             Family::IndexTts2 => self.indextts2_resident(req)?,
             Family::AceStep => self.ace_step_resident(req)?,
+            Family::StableAudio => self.stable_audio_resident(req)?,
             Family::Generic => {
                 return Err(CoreError::Load(
                     "generic audio.cpp tasks use /v1/tasks/run".into(),
@@ -1348,7 +1376,7 @@ impl AudioCppEngine {
         };
         let port = self.ensure_server().map_err(retry)?;
         if let Some(cb) = &req.progress {
-            cb(ProgressEvent::Stage(if self.family == Family::AceStep {
+            cb(ProgressEvent::Stage(if self.family.is_music() {
                 format!("正在生成音乐（{} 常驻运行时）", self.family.label())
             } else {
                 format!("正在合成（{} 常驻运行时）", self.family.label())
@@ -1362,7 +1390,7 @@ impl AudioCppEngine {
                 retryable: false,
             })?;
         let bytes = self.post_resident(port, "/v1/audio/speech", &body)?;
-        let (samples, sample_rate, channels) = if self.family == Family::AceStep {
+        let (samples, sample_rate, channels) = if self.family.is_music() {
             let (samples, channels, rate) = decode_wav_channels(&bytes).map_err(retry)?;
             (samples, rate as i32, channels)
         } else {
@@ -1479,6 +1507,7 @@ mod tests {
             "voxcpm2" => ("voxcpm2", "voxcpm2"),
             "indextts2" => ("indextts2", "indextts2"),
             "music" => ("music", "ace-step"),
+            "stable_audio" => ("music", "stable-audio"),
             "audio_cpp" => ("audio_cpp", "seed-vc"),
             _ => ("cosyvoice", "cosyvoice"),
         };
@@ -1506,16 +1535,20 @@ mod tests {
                 }
             })
         } else {
+            let mut section_cfg = serde_json::json!({
+                "binary": "fake_cli.sh",
+                "model": "fake.gguf",
+                "backend": "cpu"
+            });
+            if kind == "stable_audio" {
+                section_cfg["family"] = serde_json::json!("stable_audio");
+            }
             serde_json::json!({
                 "id": id,
-                "kind": kind,
+                "kind": if kind == "stable_audio" { "music" } else { kind },
                 "name": "test",
                 "defaults": { "speed": 1.0, "num_steps": 10 },
-                section: {
-                    "binary": "fake_cli.sh",
-                    "model": "fake.gguf",
-                    "backend": "cpu"
-                }
+                section: section_cfg
             })
         };
         serde_json::from_value(json).expect("manifest")
@@ -1549,6 +1582,7 @@ mod tests {
             "voxcpm2" => super::Family::VoxCpm2,
             "indextts2" => super::Family::IndexTts2,
             "music" => super::Family::AceStep,
+            "stable_audio" => super::Family::StableAudio,
             "audio_cpp" => super::Family::Generic,
             _ => super::Family::CosyVoice,
         };
@@ -1892,6 +1926,91 @@ mod tests {
             .collect();
         assert!(!args.iter().any(|a| a == "--lyrics"));
         assert!(args.windows(2).any(|w| w == ["--duration-seconds", "30"]));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn stable_audio_maps_prompts_and_source_audio() {
+        let dir = args_dir("stable-audio");
+        let engine = fixture(&dir, "stable_audio");
+        let mut req = request(&[
+            ("duration_sec", serde_json::json!(30)),
+            ("negative_prompt", serde_json::json!("muddy")),
+            ("audio_input_kind", serde_json::json!("inpaint_audio")),
+            ("inpaint_mask_start_sec", serde_json::json!("2.5")),
+            ("inpaint_mask_end_sec", serde_json::json!("3.5")),
+        ]);
+        req.input_samples = vec![0.1; 48_000];
+        req.input_sr = 48_000;
+        engine.synthesize(&req).expect("inpaint");
+
+        let args: Vec<String> = std::fs::read_to_string(dir.join("args.txt"))
+            .unwrap()
+            .lines()
+            .map(str::to_string)
+            .collect();
+        assert!(args.windows(2).any(|w| w == ["--task", "gen"]));
+        assert!(args.windows(2).any(|w| w == ["--family", "stable_audio"]));
+        assert!(args.windows(2).any(|w| w == ["--duration-seconds", "30"]));
+        assert!(args.iter().any(|a| a == "--audio"));
+        assert!(args
+            .windows(2)
+            .any(|w| w == ["--request-option", "audio_input_kind=inpaint_audio"]));
+        assert!(args
+            .windows(2)
+            .any(|w| w == ["--request-option", "inpaint_mask_start_sec=2.5"]));
+        assert!(args
+            .windows(2)
+            .any(|w| w == ["--request-option", "negative_prompt=muddy"]));
+        assert!(!args.iter().any(|a| a == "--task-route"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn stable_audio_text_to_music_skips_conditioning_options() {
+        let dir = args_dir("stable-audio-plain");
+        let engine = fixture(&dir, "stable_audio");
+        let req = request(&[
+            ("init_noise_level", serde_json::json!(0.6)),
+            ("inpaint_mask_start_sec", serde_json::json!("1.0")),
+            ("inpaint_mask_end_sec", serde_json::json!("2.0")),
+        ]);
+        engine.synthesize(&req).expect("text to music");
+
+        let args: Vec<String> = std::fs::read_to_string(dir.join("args.txt"))
+            .unwrap()
+            .lines()
+            .map(str::to_string)
+            .collect();
+        assert!(!args.iter().any(|a| a.starts_with("init_noise_level=")));
+        assert!(!args.iter().any(|a| a.starts_with("inpaint_mask_")));
+        assert!(!args.iter().any(|a| a == "--audio"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn stable_audio_conditioning_requires_a_source_song() {
+        let dir = args_dir("stable-audio-no-source");
+        let engine = fixture(&dir, "stable_audio");
+        let err = engine
+            .synthesize(&request(&[(
+                "audio_input_kind",
+                serde_json::json!("init_audio"),
+            )]))
+            .unwrap_err();
+        assert!(err.to_string().contains("source song"), "{err}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn stable_audio_inpaint_needs_masks() {
+        let dir = args_dir("stable-audio-no-masks");
+        let engine = fixture(&dir, "stable_audio");
+        let mut req = request(&[("audio_input_kind", serde_json::json!("inpaint_audio"))]);
+        req.input_samples = vec![0.1; 48_000];
+        req.input_sr = 48_000;
+        let err = engine.synthesize(&req).unwrap_err();
+        assert!(err.to_string().contains("inpaint_mask"), "{err}");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
