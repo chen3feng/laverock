@@ -159,6 +159,12 @@ async fn enhance(
                 return;
             }
         };
+        // A cancel can land just after the separator exits; do not turn
+        // that into a finished job with artifacts.
+        if worker.is_cancelled() {
+            worker.finish_cancelled(0);
+            return;
+        }
         worker.set_progress(0.85, None);
 
         match encode_outputs(&stems, mode) {
