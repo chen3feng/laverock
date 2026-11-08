@@ -21,6 +21,8 @@ use std::{
 
 const PROJECT_FILE: &str = "project.json";
 const SOURCE_FILE: &str = "source.wav";
+/// Generated per-cue audio, relative to the project directory.
+const SEGMENT_DIR: &str = "segments";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Source {
@@ -226,12 +228,19 @@ impl ProjectStore {
     }
 
     /// Apply the editable fields. `None` leaves a field untouched.
+    ///
+    /// Per-cue TTS is server-owned: a client cannot set `tts_path` (it would
+    /// choose which file to read), and editing a cue's text invalidates the
+    /// audio generated for the old wording.
+    #[allow(clippy::too_many_arguments)]
     pub fn update(
         &self,
         id: &str,
         name: Option<&str>,
         source_language: Option<&str>,
         target_language: Option<&str>,
+        engine_id: Option<&str>,
+        voice_id: Option<&str>,
         segments: Option<Vec<Segment>>,
     ) -> Result<Project> {
         let mut project = self.load(id)?;
@@ -244,8 +253,16 @@ impl ProjectStore {
         if let Some(language) = target_language {
             project.target_language = clean_language(language);
         }
+        if let Some(engine) = engine_id {
+            project.engine_id = clean_id(engine);
+        }
+        if let Some(voice) = voice_id {
+            project.voice_id = clean_id(voice);
+        }
         if let Some(mut segments) = segments {
             normalize_segments(&mut segments, project.source.duration)?;
+            let dir = self.dir(id)?;
+            keep_generated_audio(&dir, &project.segments, &mut segments);
             project.segments = segments;
         }
         project.revision += 1;
@@ -254,13 +271,15 @@ impl ProjectStore {
         Ok(project)
     }
 
-    /// Replace the cues, e.g. after transcription.
+    /// Replace the cues, e.g. after transcription. Every old cue's audio is
+    /// stale, so the generated segment files are dropped with it.
     pub fn set_segments(&self, id: &str, mut segments: Vec<Segment>) -> Result<Project> {
         let mut project = self.load(id)?;
         normalize_segments(&mut segments, project.source.duration)?;
         project.segments = segments;
         project.revision += 1;
         project.updated_at = now_secs();
+        let _ = fs::remove_dir_all(self.dir(id)?.join(SEGMENT_DIR));
         self.save(&project)?;
         Ok(project)
     }
@@ -281,6 +300,52 @@ impl ProjectStore {
         Ok((project.source.file, bytes))
     }
 
+    /// Persist a project the worker has been mutating (dubbing writes each
+    /// finished cue as it goes).
+    pub(crate) fn save(&self, project: &Project) -> Result<()> {
+        let path = self.dir(&project.id)?.join(PROJECT_FILE);
+        write_atomic(&path, &serde_json::to_vec_pretty(project)?)
+    }
+
+    /// Path of a cue's generated audio. Only a valid id becomes a file name,
+    /// so a cue id can never escape the project directory.
+    pub fn segment_file(&self, project_id: &str, segment_id: &str) -> Result<PathBuf> {
+        if !is_valid_id(segment_id) {
+            return Err(CoreError::NotFound(segment_id.to_string()));
+        }
+        Ok(segment_file_in(&self.dir(project_id)?, segment_id))
+    }
+
+    /// Store the audio generated for one cue.
+    pub fn write_segment_audio(
+        &self,
+        project_id: &str,
+        segment_id: &str,
+        wav: &[u8],
+    ) -> Result<PathBuf> {
+        let path = self.segment_file(project_id, segment_id)?;
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        write_atomic(&path, wav)?;
+        Ok(path)
+    }
+
+    /// The generated audio for one cue. A cue without audio is a 404 rather
+    /// than a read of a path supplied by a client.
+    pub fn segment_audio(&self, project_id: &str, segment_id: &str) -> Result<Vec<u8>> {
+        let project = self.load(project_id)?;
+        let segment = project
+            .segments
+            .iter()
+            .find(|segment| segment.id == segment_id)
+            .ok_or_else(|| CoreError::NotFound(segment_id.to_string()))?;
+        if segment.tts_path.is_empty() {
+            return Err(CoreError::NotFound(format!("{project_id}/{segment_id}")));
+        }
+        Ok(fs::read(self.segment_file(project_id, segment_id)?)?)
+    }
+
     fn load(&self, id: &str) -> Result<Project> {
         let path = self.dir(id)?.join(PROJECT_FILE);
         let bytes = match fs::read(&path) {
@@ -291,11 +356,6 @@ impl ProjectStore {
             Err(e) => return Err(e.into()),
         };
         Ok(serde_json::from_slice(&bytes)?)
-    }
-
-    fn save(&self, project: &Project) -> Result<()> {
-        let path = self.dir(&project.id)?.join(PROJECT_FILE);
-        write_atomic(&path, &serde_json::to_vec_pretty(project)?)
     }
 
     fn dir(&self, id: &str) -> Result<PathBuf> {
@@ -359,6 +419,48 @@ fn clean_language(raw: &str) -> String {
     }
 }
 
+/// Engine and voice ids are opaque, but they end up in JSON and logs only;
+/// trim and cap them so a stray paste cannot bloat the project file.
+fn clean_id(raw: &str) -> String {
+    let id = raw.trim();
+    id.chars().take(64).collect()
+}
+
+fn segment_file_in(dir: &Path, segment_id: &str) -> PathBuf {
+    dir.join(SEGMENT_DIR).join(format!("{segment_id}.wav"))
+}
+
+/// The project-relative path recorded on a cue after its audio is generated.
+pub fn segment_rel_path(segment_id: &str) -> String {
+    format!("{SEGMENT_DIR}/{segment_id}.wav")
+}
+
+/// Keep generated audio only for cues whose wording did not change, and drop
+/// the files of cues that were edited or removed.
+fn keep_generated_audio(dir: &Path, old: &[Segment], new: &mut [Segment]) {
+    let previous: std::collections::HashMap<&str, &Segment> =
+        old.iter().map(|s| (s.id.as_str(), s)).collect();
+    let kept: HashSet<String> = new.iter().map(|s| s.id.clone()).collect();
+    for segment in new.iter_mut() {
+        match previous.get(segment.id.as_str()) {
+            Some(prev) if prev.text == segment.text && prev.translated == segment.translated => {
+                segment.tts_path = prev.tts_path.clone();
+                segment.tts_duration = prev.tts_duration;
+                segment.status = prev.status.clone();
+            }
+            _ => {
+                segment.tts_path.clear();
+                segment.tts_duration = 0.0;
+                segment.status = default_status();
+                let _ = fs::remove_file(segment_file_in(dir, &segment.id));
+            }
+        }
+    }
+    for id in previous.keys().filter(|id| !kept.contains(**id)) {
+        let _ = fs::remove_file(segment_file_in(dir, id));
+    }
+}
+
 /// Reject impossible cue ranges and give every cue a unique id. Text is
 /// trimmed; overlapping cues are allowed because real subtitles do that.
 fn normalize_segments(segments: &mut [Segment], duration: f32) -> Result<()> {
@@ -384,7 +486,7 @@ fn normalize_segments(segments: &mut [Segment], duration: f32) -> Result<()> {
             )));
         }
         let mut id = segment.id.trim().to_string();
-        if id.is_empty() || seen.contains(&id) {
+        if id.is_empty() || !is_valid_id(&id) || seen.contains(&id) {
             let mut n = index + 1;
             loop {
                 id = format!("s{n}");
@@ -461,6 +563,8 @@ mod tests {
                 Some("Renamed"),
                 None,
                 Some("EN"),
+                Some("zipvoice"),
+                Some("voice-1"),
                 Some(vec![Segment {
                     start: 0.1,
                     end: 0.8,
@@ -471,9 +575,92 @@ mod tests {
             .unwrap();
         assert_eq!(updated.name, "Renamed");
         assert_eq!(updated.target_language, "en");
+        assert_eq!(updated.engine_id, "zipvoice");
+        assert_eq!(updated.voice_id, "voice-1");
         assert_eq!(updated.revision, 2);
         assert_eq!(updated.segments[0].text, "hello");
         assert_eq!(updated.segments[0].id, "s1");
+
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn editing_a_cue_invalidates_its_audio() {
+        let (store, dir) = store("dub");
+        let project = store
+            .create(
+                "Dub",
+                &wav(),
+                1.0,
+                vec![Segment {
+                    id: "s1".into(),
+                    start: 0.0,
+                    end: 0.5,
+                    text: "one".into(),
+                    ..Segment::default()
+                }],
+            )
+            .unwrap();
+        let audio = encode_wav(&[0.1f32, 0.2], 16_000).unwrap();
+        store
+            .write_segment_audio(&project.id, "s1", &audio)
+            .unwrap();
+        let mut project = store.get(&project.id).unwrap();
+        project.segments[0].tts_path = segment_rel_path("s1");
+        project.segments[0].tts_duration = 0.5;
+        project.segments[0].status = "done".into();
+        store.save(&project).unwrap();
+        assert_eq!(store.segment_audio(&project.id, "s1").unwrap(), audio);
+
+        // Same wording keeps the audio, and the server ignores client-sent
+        // TTS fields (they choose which file would be read).
+        let kept = store
+            .update(
+                &project.id,
+                None,
+                None,
+                None,
+                None,
+                None,
+                Some(vec![Segment {
+                    id: "s1".into(),
+                    start: 0.0,
+                    end: 0.6,
+                    text: "one".into(),
+                    tts_path: "../escape.wav".into(),
+                    status: "hacked".into(),
+                    ..Segment::default()
+                }]),
+            )
+            .unwrap();
+        assert_eq!(kept.segments[0].tts_path, segment_rel_path("s1"));
+        assert_eq!(kept.segments[0].status, "done");
+        assert!(store.segment_audio(&project.id, "s1").is_ok());
+
+        // Editing the text makes the generated audio stale.
+        let edited = store
+            .update(
+                &project.id,
+                None,
+                None,
+                None,
+                None,
+                None,
+                Some(vec![Segment {
+                    id: "s1".into(),
+                    start: 0.0,
+                    end: 0.6,
+                    text: "two".into(),
+                    ..Segment::default()
+                }]),
+            )
+            .unwrap();
+        assert!(edited.segments[0].tts_path.is_empty());
+        assert_eq!(edited.segments[0].status, "pending");
+        assert!(matches!(
+            store.segment_audio(&project.id, "s1"),
+            Err(CoreError::NotFound(_))
+        ));
 
         let _ = fs::remove_dir_all(dir);
     }
@@ -565,6 +752,22 @@ mod tests {
         assert!(store
             .create("x".repeat(200).as_str(), &wav(), 1.0, Vec::new())
             .is_err());
+        let project = store.create("ok", &wav(), 1.0, Vec::new()).unwrap();
+        // A cue id becomes a file name, so anything unsafe is replaced.
+        let updated = store
+            .set_segments(
+                &project.id,
+                vec![Segment {
+                    id: "../escape".into(),
+                    start: 0.0,
+                    end: 0.5,
+                    text: "x".into(),
+                    ..Segment::default()
+                }],
+            )
+            .unwrap();
+        assert_eq!(updated.segments[0].id, "s1");
+        assert!(store.segment_file(&project.id, "../escape").is_err());
         let _ = fs::remove_dir_all(dir);
     }
 }

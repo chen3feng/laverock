@@ -9,8 +9,9 @@ use axum::{
 };
 use laverock_core::{decode_wav, i18n, CoreError};
 
-use super::{subtitle_response, ApiError, AppState};
+use super::{request_lang, subtitle_response, ApiError, AppState};
 use crate::{
+    dubbing,
     projects::{self, Project, Segment},
     subtitles,
 };
@@ -36,6 +37,11 @@ pub(crate) fn router() -> Router<AppState> {
         .route("/api/projects/{id}/source", get(project_source))
         .route("/api/projects/{id}/transcribe", post(transcribe_project))
         .route("/api/projects/{id}/subtitles", get(download_subtitles))
+        .route("/api/projects/{id}/synthesize", post(synthesize_project))
+        .route(
+            "/api/projects/{id}/segments/{segment}/audio",
+            get(segment_audio),
+        )
 }
 
 async fn list_projects(State(state): State<AppState>) -> Result<Json<Vec<Project>>, ApiError> {
@@ -136,6 +142,8 @@ struct ProjectPatch {
     name: Option<String>,
     source_language: Option<String>,
     target_language: Option<String>,
+    engine_id: Option<String>,
+    voice_id: Option<String>,
     segments: Option<Vec<Segment>>,
 }
 
@@ -144,14 +152,50 @@ async fn update_project(
     Path(id): Path<String>,
     Json(body): Json<ProjectPatch>,
 ) -> Result<Json<Project>, ApiError> {
+    // Validate the dubbing choices up front so the editor's save fails on a
+    // stale voice instead of the synthesize job failing later.
+    if let Some(engine) = non_empty(&body.engine_id) {
+        check_engine(&state, engine)?;
+    }
+    if let Some(voice) = non_empty(&body.voice_id) {
+        check_voice(&state, voice)?;
+    }
     let project = state.projects.update(
         &id,
         body.name.as_deref(),
         body.source_language.as_deref(),
         body.target_language.as_deref(),
+        body.engine_id.as_deref(),
+        body.voice_id.as_deref(),
         body.segments,
     )?;
     Ok(Json(project))
+}
+
+fn non_empty(value: &Option<String>) -> Option<&str> {
+    value.as_deref().map(str::trim).filter(|v| !v.is_empty())
+}
+
+/// A dubbing engine must exist. An unknown id is a client error (the editor
+/// may be holding a stale choice), not a missing resource.
+fn check_engine(state: &AppState, engine: &str) -> Result<(), ApiError> {
+    match state.manager.parameters(engine) {
+        Ok(_) => Ok(()),
+        Err(CoreError::NotFound(_)) => Err(ApiError::bad_request(format!(
+            "unknown synthesis engine: {engine}"
+        ))),
+        Err(e) => Err(e.into()),
+    }
+}
+
+fn check_voice(state: &AppState, voice: &str) -> Result<(), ApiError> {
+    match state.profiles.get(voice) {
+        Ok(_) => Ok(()),
+        Err(CoreError::NotFound(_)) => {
+            Err(ApiError::bad_request(format!("unknown voice: {voice}")))
+        }
+        Err(e) => Err(e.into()),
+    }
 }
 
 async fn delete_project(
@@ -219,6 +263,132 @@ async fn download_subtitles(
         return Err(CoreError::UserError(i18n::Message::new(i18n::Key::ProjectNoCues)).into());
     }
     Ok(subtitle_response(&cues, format, "laverock"))
+}
+
+/// `POST /api/projects/{id}/synthesize` — dubbing job. The engine and voice
+/// come from the saved project; repeated `segment` fields re-run only those
+/// cues (a single cue's audio, without redoing the rest). Returns `202` with
+/// a `job_id`; follow `/api/jobs/{id}/events` for progress.
+async fn synthesize_project(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    mut multipart: Multipart,
+) -> Result<Response, ApiError> {
+    let mut only = Vec::new();
+    while let Some(field) = multipart
+        .next_field()
+        .await
+        .map_err(|e| ApiError::bad_request(format!("malformed multipart: {e}")))?
+    {
+        if field.name() == Some("segment") {
+            let raw = field
+                .text()
+                .await
+                .map_err(|e| ApiError::bad_request(format!("bad segment field: {e}")))?;
+            if !raw.trim().is_empty() {
+                only.push(raw.trim().to_string());
+            }
+        }
+    }
+
+    let project = state.projects.get(&id)?;
+    if project.engine_id.trim().is_empty() {
+        return Err(user_error(i18n::Key::ProjectSynthNoEngine));
+    }
+    // Validate before creating a job: a stale engine or voice is a client
+    // error, not a job that fails after the first cue.
+    check_engine(&state, &project.engine_id)?;
+    if !project.voice_id.trim().is_empty() {
+        check_voice(&state, &project.voice_id)?;
+    }
+
+    let job = state.jobs.create("dubbing")?;
+    let worker = job.clone();
+    let supervisor = job.clone();
+    let store = state.projects.clone();
+    let manager = state.manager.clone();
+    let profiles = state.profiles.clone();
+    let lang = request_lang();
+
+    let handle = tokio::task::spawn_blocking(move || {
+        worker.start();
+        let mut project = match store.get(&id) {
+            Ok(project) => project,
+            Err(e) => {
+                worker.fail(&render_error(&e, lang));
+                return;
+            }
+        };
+        let report = |step: usize, total: usize| {
+            let value = if total == 0 {
+                0.0
+            } else {
+                step as f32 / total as f32
+            };
+            let message = i18n::Message::new(i18n::Key::ProjectSynthProgress)
+                .arg("i", step + 1)
+                .arg("n", total)
+                .render(lang);
+            worker.emit("stage", serde_json::json!({ "message": message }));
+            worker.set_progress(value, Some(&message));
+        };
+        let cancelled = || worker.is_cancelled();
+        match dubbing::synthesize(
+            &store,
+            &manager,
+            &profiles,
+            &mut project,
+            &only,
+            &report,
+            &cancelled,
+        ) {
+            Ok(count) if worker.is_cancelled() => worker.finish_cancelled(count as u32),
+            Ok(count) => worker.finish(count as u32),
+            Err(e) if worker.is_cancelled() => {
+                worker.log(&render_error(&e, lang));
+                worker.finish_cancelled(0);
+            }
+            Err(e) => worker.fail(&render_error(&e, lang)),
+        }
+    });
+
+    // A panic inside the engine must not leave the job "running" forever.
+    tokio::spawn(async move {
+        if let Err(e) = handle.await {
+            supervisor.fail(&format!("dubbing task failed: {e}"));
+        }
+    });
+
+    Ok((
+        StatusCode::ACCEPTED,
+        Json(serde_json::json!({ "job_id": job.id() })),
+    )
+        .into_response())
+}
+
+/// The audio generated for one cue, for the editor's play button.
+async fn segment_audio(
+    State(state): State<AppState>,
+    Path((id, segment)): Path<(String, String)>,
+) -> Result<Response, ApiError> {
+    let bytes = state.projects.segment_audio(&id, &segment)?;
+    Ok((
+        StatusCode::OK,
+        [(header::CONTENT_TYPE, "audio/wav".to_string())],
+        bytes,
+    )
+        .into_response())
+}
+
+fn user_error(key: i18n::Key) -> ApiError {
+    ApiError::from(CoreError::UserError(i18n::Message::new(key)))
+}
+
+fn render_error(err: &CoreError, lang: i18n::Lang) -> String {
+    match err {
+        CoreError::UserError(message) => message.render(lang),
+        other => other.to_string(),
+    }
 }
 
 fn is_wav(bytes: &[u8]) -> bool {

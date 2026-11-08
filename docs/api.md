@@ -58,6 +58,8 @@ describes the loopback listener.
 | DELETE | `/api/projects/:id` | delete a project and its source clip |
 | GET | `/api/projects/:id/source` | the project's source clip (WAV) |
 | POST | `/api/projects/:id/transcribe` | run speech recognition over the source and replace the cues → project |
+| POST | `/api/projects/:id/synthesize` | dubbing job: multipart, optional repeated `segment` ids to re-run only those cues → `202`; writes `segments/<id>.wav` per cue |
+| GET | `/api/projects/:id/segments/:segment/audio` | the generated audio for one cue |
 | GET | `/api/projects/:id/subtitles?format=srt\|vtt` | the project's cues as a downloadable file |
 | POST | `/api/transcribe` | multipart `audio` (WAV) → transcript (needs the SenseVoice model) |
 | POST | `/api/transcribe/details` | same input → `{text, segments: [{start, end, text}], language, duration}` |
@@ -97,8 +99,17 @@ accepts an existing SRT/VTT file and imports its cues; otherwise the project
 starts empty and `POST /api/projects/:id/transcribe` fills it from the
 SenseVoice model. `PATCH` replaces the whole cue list, so the editor sends
 every row; cue times must be finite, non-negative, `end > start`, and start
-inside the clip (overlaps are allowed). Each segment also carries `translated`, `tts_path` and
-`status` fields that the subtitle stage leaves untouched, ready for dubbing.
+inside the clip (overlaps are allowed). Each segment also carries
+`translated`, `tts_path` and `status`.
+
+Dubbing uses the project's saved `engine_id` and `voice_id` (set through
+`PATCH`; an empty voice means the engine's own default, as with preset
+engines). `POST /api/projects/:id/synthesize` runs as a background job,
+speaks `translated` when it is non-empty and `text` otherwise, and writes
+one WAV per cue. Sending repeated `segment` fields re-runs just those cues.
+`tts_path`, `tts_duration` and `status` are server-owned: a client cannot
+set them, and editing a cue's text (or its translation) deletes the stale
+audio and resets the cue to `pending`.
 
 Engine parameters (`speed`, `num_steps`, `cfg`, `seed`, …) are declared per
 engine by its manifest and validated server-side against the same list the

@@ -6,6 +6,7 @@
 // the stored schema already carries their fields.
 let projectList = [];
 let currentProject = null;
+let synthJobId = null;
 
 async function loadProjects() {
   try {
@@ -15,7 +16,10 @@ async function loadProjects() {
     return;
   }
   renderProjects();
-  if (currentProject) updateProjectMeta(currentProject);
+  if (currentProject) {
+    updateProjectMeta(currentProject);
+    fillProjectPickers(currentProject);
+  }
 }
 
 function renderProjects() {
@@ -52,9 +56,53 @@ function openProject(project) {
   $('projectEditor').hidden = false;
   $('projectTitle').value = project.name;
   updateProjectMeta(project);
+  fillProjectPickers(project);
+  $('projectSynthStatus').textContent = '';
+  $('projectSynthProgress').hidden = true;
   $('projectAudio').src = `/api/projects/${encodeURIComponent(project.id)}/source`;
   renderSegments(project.segments || []);
   $('projectEditor').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+// Speech engines and saved voices, keeping the project's own choice when it
+// still exists. Preset engines (Kokoro) work with the empty "engine default"
+// voice.
+function fillProjectPickers(project) {
+  const engineSel = $('projectEngine');
+  const speech = engines.filter(
+    (e) => (e.task || (e.kind === 'music' ? 'music' : 'tts')) === 'tts');
+  engineSel.innerHTML = '';
+  if (!speech.length) {
+    const o = document.createElement('option');
+    o.value = '';
+    o.textContent = t('ui.no_models_found_download_one');
+    engineSel.appendChild(o);
+  }
+  for (const e of speech) {
+    const o = document.createElement('option');
+    o.value = e.id;
+    o.textContent = e.name;
+    engineSel.appendChild(o);
+  }
+  if (project.engine_id && speech.some((e) => e.id === project.engine_id)) {
+    engineSel.value = project.engine_id;
+  }
+
+  const voiceSel = $('projectVoice');
+  voiceSel.innerHTML = '';
+  const none = document.createElement('option');
+  none.value = '';
+  none.textContent = t('projects.voice.none');
+  voiceSel.appendChild(none);
+  for (const p of profiles) {
+    const o = document.createElement('option');
+    o.value = p.id;
+    o.textContent = p.name;
+    voiceSel.appendChild(o);
+  }
+  if (project.voice_id && profiles.some((p) => p.id === project.voice_id)) {
+    voiceSel.value = project.voice_id;
+  }
 }
 
 function closeProjectEditor() {
@@ -63,6 +111,10 @@ function closeProjectEditor() {
   $('projectSegments').innerHTML = '';
   $('projectAudio').pause();
   $('projectAudio').removeAttribute('src');
+  $('projectSegAudio').pause();
+  $('projectSegAudio').removeAttribute('src');
+  $('projectSynthStatus').textContent = '';
+  $('projectSynthProgress').hidden = true;
 }
 
 function renderSegments(segments) {
@@ -77,13 +129,27 @@ function segmentRow(segment, index) {
   row.dataset.id = segment.id || '';
   const start = Number.isFinite(segment.start) ? segment.start : 0;
   const end = Number.isFinite(segment.end) ? segment.end : start + 1;
+  const hasAudio = !!segment.tts_path;
   row.innerHTML = `
     <span class="seg-index">${index + 1}</span>
     <input class="seg-start" type="number" min="0" step="0.01" value="${start.toFixed(2)}" />
     <span class="seg-arrow">→</span>
     <input class="seg-end" type="number" min="0" step="0.01" value="${end.toFixed(2)}" />
-    <textarea class="seg-text" rows="2">${esc(segment.text || '')}</textarea>
-    <button class="ghost small danger seg-del" type="button" title="${esc(t('ui.delete'))}">×</button>`;
+    <div class="seg-texts">
+      <textarea class="seg-text" rows="2">${esc(segment.text || '')}</textarea>
+      <textarea class="seg-translated" rows="1" data-i18n-ph="projects.translation.ph"></textarea>
+    </div>
+    <div class="seg-actions">
+      <button class="ghost small seg-play" type="button" title="${esc(t('projects.play'))}"${hasAudio ? '' : ' hidden'}>▶</button>
+      <button class="ghost small seg-rerun" type="button" title="${esc(t('projects.rerun'))}">↻</button>
+      <button class="ghost small danger seg-del" type="button" title="${esc(t('ui.delete'))}">×</button>
+    </div>`;
+  row.querySelector('.seg-translated').value = segment.translated || '';
+  applyI18n(row);
+  row.querySelector('.seg-play').onclick = () => playSegment(segment.id);
+  const rerun = row.querySelector('.seg-rerun');
+  if (segment.id) rerun.onclick = () => synthesizeProject([segment.id]);
+  else rerun.disabled = true;
   row.querySelector('.seg-del').onclick = () => {
     row.remove();
     renumberSegments();
@@ -110,6 +176,7 @@ function collectSegments() {
       start: parseFloat(row.querySelector('.seg-start').value) || 0,
       end: parseFloat(row.querySelector('.seg-end').value) || 0,
       text: row.querySelector('.seg-text').value,
+      translated: row.querySelector('.seg-translated').value,
     };
   });
 }
@@ -120,7 +187,12 @@ async function saveProject() {
     currentProject = await api(`/api/projects/${encodeURIComponent(currentProject.id)}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: $('projectTitle').value, segments: collectSegments() }),
+      body: JSON.stringify({
+        name: $('projectTitle').value,
+        engine_id: $('projectEngine').value,
+        voice_id: $('projectVoice').value,
+        segments: collectSegments(),
+      }),
     });
     toast(t('projects.saved'));
     await loadProjects();
@@ -152,6 +224,86 @@ async function transcribeProject() {
   } finally {
     button.disabled = false;
   }
+}
+
+async function synthesizeProject(only = []) {
+  if (!currentProject || synthJobId) return;
+  // Persist the engine/voice choice (and any cue edits) first: the worker
+  // reads the saved project, and an edited cue's old audio is invalidated.
+  try {
+    currentProject = await api(`/api/projects/${encodeURIComponent(currentProject.id)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        engine_id: $('projectEngine').value,
+        voice_id: $('projectVoice').value,
+        segments: collectSegments(),
+      }),
+    });
+  } catch (e) {
+    toast(t('ui.failed') + e.message, true);
+    return;
+  }
+  const fd = new FormData();
+  for (const id of only) fd.append('segment', id);
+  const progress = $('projectSynthProgress');
+  const status = $('projectSynthStatus');
+  progress.hidden = false;
+  progress.value = 0;
+  status.textContent = t('projects.synth.starting');
+  $('projectSynthesize').disabled = true;
+  try {
+    const result = await runJob(
+      `/api/projects/${encodeURIComponent(currentProject.id)}/synthesize`,
+      fd,
+      {
+        started: ({ id }) => {
+          synthJobId = id;
+          $('projectSynthCancel').hidden = false;
+        },
+        stage: (e) => { status.textContent = e.message; },
+        progress: (e) => { progress.value = e.value; },
+      },
+    );
+    status.textContent = result.cancelled
+      ? t('projects.synth.cancelled')
+      : t('projects.synth.done');
+    currentProject = await api(`/api/projects/${encodeURIComponent(currentProject.id)}`);
+    renderSegments(currentProject.segments || []);
+    updateProjectMeta(currentProject);
+    await loadProjects();
+  } catch (e) {
+    status.textContent = t('projects.synth.failed') + e.message;
+  } finally {
+    synthJobId = null;
+    $('projectSynthesize').disabled = false;
+    $('projectSynthCancel').hidden = true;
+  }
+}
+
+async function cancelSynthesize() {
+  if (!synthJobId) return;
+  $('projectSynthCancel').disabled = true;
+  try {
+    await cancelJob(synthJobId);
+  } catch (e) {
+    toast(t('ui.failed') + e.message, true);
+  } finally {
+    $('projectSynthCancel').disabled = false;
+  }
+}
+
+function playSegment(segmentId) {
+  if (!currentProject || !segmentId) return;
+  const player = $('projectSegAudio');
+  const url = `/api/projects/${encodeURIComponent(currentProject.id)}/segments/${encodeURIComponent(segmentId)}/audio`;
+  if (player.dataset.segment === segmentId && !player.paused) {
+    player.pause();
+    return;
+  }
+  player.dataset.segment = segmentId;
+  player.src = url;
+  player.play().catch(() => toast(t('ui.failed'), true));
 }
 
 async function deleteProject(project) {
@@ -268,3 +420,5 @@ $('projectDelete').onclick = () => {
 };
 $('projectClose').onclick = closeProjectEditor;
 $('projectAddSegment').onclick = addSegment;
+$('projectSynthesize').onclick = () => synthesizeProject();
+$('projectSynthCancel').onclick = cancelSynthesize;

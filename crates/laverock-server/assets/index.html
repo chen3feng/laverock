@@ -196,11 +196,27 @@
   }
   .project-title:hover, .project-title:focus { border-color: var(--line); background: var(--panel2); }
   .project-head .hint { margin: 0; }
+  .project-dub {
+    display: flex; align-items: flex-end; gap: 14px; flex-wrap: wrap;
+    margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--line);
+  }
+  .project-dub > div { flex: 1 1 200px; min-width: 160px; }
+  .project-dub label { margin-bottom: 6px; }
+  .project-dub > .project-dub-actions { flex: 0 0 auto; display: flex; gap: 8px; }
+  #projectSynthProgress {
+    width: 100%; height: 6px; margin-top: 12px;
+    accent-color: var(--accent);
+  }
+  #projectSynthStatus { min-height: 18px; }
   .seg-list { display: flex; flex-direction: column; gap: 8px; margin-top: 14px; }
   .seg-row {
-    display: grid; grid-template-columns: 26px 78px auto 78px minmax(0, 1fr) 30px;
+    display: grid; grid-template-columns: 26px 78px auto 78px minmax(0, 1fr) auto;
     align-items: start; gap: 8px;
   }
+  .seg-texts { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+  .seg-actions { display: flex; flex-direction: column; gap: 4px; }
+  .seg-actions button { padding: 4px 8px; font-size: 12px; line-height: 1; }
+  .seg-actions button[hidden] { display: none; }
   .seg-row input[type="number"] {
     width: 100%; background: var(--panel2); color: var(--text);
     border: 1px solid var(--line); border-radius: 9px; padding: 7px 8px;
@@ -214,11 +230,12 @@
   }
   .seg-arrow { color: var(--muted); padding-top: 8px; }
   .seg-text { min-height: 38px; padding: 7px 10px; font-size: 13.5px; }
-  .seg-del { padding: 7px 0; line-height: 1; }
+  .seg-translated { min-height: 30px; padding: 6px 10px; font-size: 13px; }
   @media (max-width: 640px) {
-    .seg-row { grid-template-columns: 22px minmax(0, 1fr) minmax(0, 1fr) 30px; }
+    .seg-row { grid-template-columns: 22px minmax(0, 1fr) minmax(0, 1fr) auto; }
     .seg-row .seg-arrow { display: none; }
-    .seg-text { grid-column: 1 / -1; }
+    .seg-texts { grid-column: 1 / -1; }
+    .seg-actions { flex-direction: row; }
   }
   .empty {
     border: 1px dashed var(--line); border-radius: 14px; padding: 34px 20px;
@@ -637,8 +654,25 @@
           <button class="ghost" id="projectClose" type="button" data-i18n="projects.close">关闭</button>
         </div>
         <audio id="projectAudio" controls></audio>
+        <div class="project-dub">
+          <div>
+            <label for="projectEngine" data-i18n="projects.engine">合成引擎</label>
+            <select id="projectEngine"></select>
+          </div>
+          <div>
+            <label for="projectVoice" data-i18n="projects.voice">声音</label>
+            <select id="projectVoice"></select>
+          </div>
+          <div class="project-dub-actions">
+            <button id="projectSynthesize" type="button" data-i18n="projects.synthesize">生成配音</button>
+            <button class="ghost" id="projectSynthCancel" type="button" data-i18n="cancel" hidden>取消</button>
+          </div>
+        </div>
+        <progress id="projectSynthProgress" max="1" value="0" hidden></progress>
+        <div class="hint" id="projectSynthStatus"></div>
         <div class="seg-list" id="projectSegments"></div>
         <button class="ghost small" id="projectAddSegment" type="button" data-i18n="projects.add_segment">＋ 添加分段</button>
+        <audio id="projectSegAudio" hidden></audio>
       </div>
     </section>
 
@@ -1415,6 +1449,17 @@ addI18n({
     'projects.close': '关闭',
     'projects.deleted': '项目已删除',
     'projects.delete_confirm': '删除项目「{name}」？源音频和字幕会一并删除，此操作不可撤销。',
+    'projects.engine': '合成引擎',
+    'projects.voice': '声音',
+    'projects.voice.none': '引擎默认（无参考）',
+    'projects.synthesize': '生成配音',
+    'projects.synth.starting': '正在准备配音…',
+    'projects.synth.done': '配音完成',
+    'projects.synth.cancelled': '已取消',
+    'projects.synth.failed': '配音失败：',
+    'projects.translation.ph': '译文（可选；配音时优先使用）',
+    'projects.play': '播放这一段配音',
+    'projects.rerun': '只重新生成这一段',
   },
   en: {
     'nav.projects': 'Subtitles',
@@ -1445,6 +1490,17 @@ addI18n({
     'projects.close': 'Close',
     'projects.deleted': 'Project deleted',
     'projects.delete_confirm': 'Delete “{name}”? Its source clip and cues are removed too. This cannot be undone.',
+    'projects.engine': 'Synthesis engine',
+    'projects.voice': 'Voice',
+    'projects.voice.none': 'Engine default (no reference)',
+    'projects.synthesize': 'Generate dub',
+    'projects.synth.starting': 'Preparing the dub…',
+    'projects.synth.done': 'Dub complete',
+    'projects.synth.cancelled': 'Cancelled',
+    'projects.synth.failed': 'Dubbing failed: ',
+    'projects.translation.ph': 'Translation (optional; used for dubbing)',
+    'projects.play': 'Play this cue',
+    'projects.rerun': 'Re-generate this cue only',
   },
 });
 
@@ -4930,6 +4986,7 @@ $('saveSettings').onclick = async () => {
 // the stored schema already carries their fields.
 let projectList = [];
 let currentProject = null;
+let synthJobId = null;
 
 async function loadProjects() {
   try {
@@ -4939,7 +4996,10 @@ async function loadProjects() {
     return;
   }
   renderProjects();
-  if (currentProject) updateProjectMeta(currentProject);
+  if (currentProject) {
+    updateProjectMeta(currentProject);
+    fillProjectPickers(currentProject);
+  }
 }
 
 function renderProjects() {
@@ -4976,9 +5036,53 @@ function openProject(project) {
   $('projectEditor').hidden = false;
   $('projectTitle').value = project.name;
   updateProjectMeta(project);
+  fillProjectPickers(project);
+  $('projectSynthStatus').textContent = '';
+  $('projectSynthProgress').hidden = true;
   $('projectAudio').src = `/api/projects/${encodeURIComponent(project.id)}/source`;
   renderSegments(project.segments || []);
   $('projectEditor').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+// Speech engines and saved voices, keeping the project's own choice when it
+// still exists. Preset engines (Kokoro) work with the empty "engine default"
+// voice.
+function fillProjectPickers(project) {
+  const engineSel = $('projectEngine');
+  const speech = engines.filter(
+    (e) => (e.task || (e.kind === 'music' ? 'music' : 'tts')) === 'tts');
+  engineSel.innerHTML = '';
+  if (!speech.length) {
+    const o = document.createElement('option');
+    o.value = '';
+    o.textContent = t('ui.no_models_found_download_one');
+    engineSel.appendChild(o);
+  }
+  for (const e of speech) {
+    const o = document.createElement('option');
+    o.value = e.id;
+    o.textContent = e.name;
+    engineSel.appendChild(o);
+  }
+  if (project.engine_id && speech.some((e) => e.id === project.engine_id)) {
+    engineSel.value = project.engine_id;
+  }
+
+  const voiceSel = $('projectVoice');
+  voiceSel.innerHTML = '';
+  const none = document.createElement('option');
+  none.value = '';
+  none.textContent = t('projects.voice.none');
+  voiceSel.appendChild(none);
+  for (const p of profiles) {
+    const o = document.createElement('option');
+    o.value = p.id;
+    o.textContent = p.name;
+    voiceSel.appendChild(o);
+  }
+  if (project.voice_id && profiles.some((p) => p.id === project.voice_id)) {
+    voiceSel.value = project.voice_id;
+  }
 }
 
 function closeProjectEditor() {
@@ -4987,6 +5091,10 @@ function closeProjectEditor() {
   $('projectSegments').innerHTML = '';
   $('projectAudio').pause();
   $('projectAudio').removeAttribute('src');
+  $('projectSegAudio').pause();
+  $('projectSegAudio').removeAttribute('src');
+  $('projectSynthStatus').textContent = '';
+  $('projectSynthProgress').hidden = true;
 }
 
 function renderSegments(segments) {
@@ -5001,13 +5109,27 @@ function segmentRow(segment, index) {
   row.dataset.id = segment.id || '';
   const start = Number.isFinite(segment.start) ? segment.start : 0;
   const end = Number.isFinite(segment.end) ? segment.end : start + 1;
+  const hasAudio = !!segment.tts_path;
   row.innerHTML = `
     <span class="seg-index">${index + 1}</span>
     <input class="seg-start" type="number" min="0" step="0.01" value="${start.toFixed(2)}" />
     <span class="seg-arrow">→</span>
     <input class="seg-end" type="number" min="0" step="0.01" value="${end.toFixed(2)}" />
-    <textarea class="seg-text" rows="2">${esc(segment.text || '')}</textarea>
-    <button class="ghost small danger seg-del" type="button" title="${esc(t('ui.delete'))}">×</button>`;
+    <div class="seg-texts">
+      <textarea class="seg-text" rows="2">${esc(segment.text || '')}</textarea>
+      <textarea class="seg-translated" rows="1" data-i18n-ph="projects.translation.ph"></textarea>
+    </div>
+    <div class="seg-actions">
+      <button class="ghost small seg-play" type="button" title="${esc(t('projects.play'))}"${hasAudio ? '' : ' hidden'}>▶</button>
+      <button class="ghost small seg-rerun" type="button" title="${esc(t('projects.rerun'))}">↻</button>
+      <button class="ghost small danger seg-del" type="button" title="${esc(t('ui.delete'))}">×</button>
+    </div>`;
+  row.querySelector('.seg-translated').value = segment.translated || '';
+  applyI18n(row);
+  row.querySelector('.seg-play').onclick = () => playSegment(segment.id);
+  const rerun = row.querySelector('.seg-rerun');
+  if (segment.id) rerun.onclick = () => synthesizeProject([segment.id]);
+  else rerun.disabled = true;
   row.querySelector('.seg-del').onclick = () => {
     row.remove();
     renumberSegments();
@@ -5034,6 +5156,7 @@ function collectSegments() {
       start: parseFloat(row.querySelector('.seg-start').value) || 0,
       end: parseFloat(row.querySelector('.seg-end').value) || 0,
       text: row.querySelector('.seg-text').value,
+      translated: row.querySelector('.seg-translated').value,
     };
   });
 }
@@ -5044,7 +5167,12 @@ async function saveProject() {
     currentProject = await api(`/api/projects/${encodeURIComponent(currentProject.id)}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: $('projectTitle').value, segments: collectSegments() }),
+      body: JSON.stringify({
+        name: $('projectTitle').value,
+        engine_id: $('projectEngine').value,
+        voice_id: $('projectVoice').value,
+        segments: collectSegments(),
+      }),
     });
     toast(t('projects.saved'));
     await loadProjects();
@@ -5076,6 +5204,86 @@ async function transcribeProject() {
   } finally {
     button.disabled = false;
   }
+}
+
+async function synthesizeProject(only = []) {
+  if (!currentProject || synthJobId) return;
+  // Persist the engine/voice choice (and any cue edits) first: the worker
+  // reads the saved project, and an edited cue's old audio is invalidated.
+  try {
+    currentProject = await api(`/api/projects/${encodeURIComponent(currentProject.id)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        engine_id: $('projectEngine').value,
+        voice_id: $('projectVoice').value,
+        segments: collectSegments(),
+      }),
+    });
+  } catch (e) {
+    toast(t('ui.failed') + e.message, true);
+    return;
+  }
+  const fd = new FormData();
+  for (const id of only) fd.append('segment', id);
+  const progress = $('projectSynthProgress');
+  const status = $('projectSynthStatus');
+  progress.hidden = false;
+  progress.value = 0;
+  status.textContent = t('projects.synth.starting');
+  $('projectSynthesize').disabled = true;
+  try {
+    const result = await runJob(
+      `/api/projects/${encodeURIComponent(currentProject.id)}/synthesize`,
+      fd,
+      {
+        started: ({ id }) => {
+          synthJobId = id;
+          $('projectSynthCancel').hidden = false;
+        },
+        stage: (e) => { status.textContent = e.message; },
+        progress: (e) => { progress.value = e.value; },
+      },
+    );
+    status.textContent = result.cancelled
+      ? t('projects.synth.cancelled')
+      : t('projects.synth.done');
+    currentProject = await api(`/api/projects/${encodeURIComponent(currentProject.id)}`);
+    renderSegments(currentProject.segments || []);
+    updateProjectMeta(currentProject);
+    await loadProjects();
+  } catch (e) {
+    status.textContent = t('projects.synth.failed') + e.message;
+  } finally {
+    synthJobId = null;
+    $('projectSynthesize').disabled = false;
+    $('projectSynthCancel').hidden = true;
+  }
+}
+
+async function cancelSynthesize() {
+  if (!synthJobId) return;
+  $('projectSynthCancel').disabled = true;
+  try {
+    await cancelJob(synthJobId);
+  } catch (e) {
+    toast(t('ui.failed') + e.message, true);
+  } finally {
+    $('projectSynthCancel').disabled = false;
+  }
+}
+
+function playSegment(segmentId) {
+  if (!currentProject || !segmentId) return;
+  const player = $('projectSegAudio');
+  const url = `/api/projects/${encodeURIComponent(currentProject.id)}/segments/${encodeURIComponent(segmentId)}/audio`;
+  if (player.dataset.segment === segmentId && !player.paused) {
+    player.pause();
+    return;
+  }
+  player.dataset.segment = segmentId;
+  player.src = url;
+  player.play().catch(() => toast(t('ui.failed'), true));
 }
 
 async function deleteProject(project) {
@@ -5192,6 +5400,8 @@ $('projectDelete').onclick = () => {
 };
 $('projectClose').onclick = closeProjectEditor;
 $('projectAddSegment').onclick = addSegment;
+$('projectSynthesize').onclick = () => synthesizeProject();
+$('projectSynthCancel').onclick = cancelSynthesize;
 
 // ---------------------------------------------------------------- remote / pairing
 
