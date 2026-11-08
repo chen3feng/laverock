@@ -940,7 +940,7 @@ code=$(curl -s -o /dev/null -w '%{http_code}' -X POST \
 
 # Run a real conversion when a vc engine is installed.
 vc_id=$(printf '%s' "$engines_json" | sed 's/},{/}\n{/g' \
-  | grep '"task":"vc"' | sed -n 's/.*"id":"\([^"]*\)".*/\1/p' | head -1)
+  | grep '"task":"vc"' | sed -n 's/.*"id":"\([^"]*\)".*/\1/p' | head -1 || true)
 if [ -n "$vc_id" ]; then
   code=$(curl -s -o "$OUT/converted.wav" -w '%{http_code}' -X POST \
     "$BASE/api/engines/$vc_id/convert" \
