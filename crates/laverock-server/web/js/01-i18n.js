@@ -87,5 +87,6 @@ let previewId = null;
 let toastTimer = null;
 let mp3Supported = false;
 let transcribeAvailable = false;
+let ffmpegAvailable = false;
 let lastSynthBlob = null;
 let serverSettings = null;

@@ -16,6 +16,7 @@
 | `LAVEROCK_DATA_DIR` | `data` | 声音、历史、设置、配对状态、TLS 证书 |
 | `LAVEROCK_MODELS_DIR` | `models` | 扫描 `*/engine.json` 的目录；可用 `:`（Windows 为 `;`）分隔多个，靠前的优先 |
 | `LAVEROCK_TOOLS_DIR` | — | 引擎使用的 Python venv 与构建工具 |
+| `LAVEROCK_FFMPEG` | — | `ffmpeg` 可执行文件，或同时包含 `ffmpeg` 与 `ffprobe` 的目录；用于视频和非 WAV 音频 |
 | `LAVEROCK_SCRIPTS_DIR` | 自动检测 | 模型安装器使用的 `scripts/` |
 
 桌面外壳在启动服务端时会设置 `LAVEROCK_DATA_DIR`、`LAVEROCK_MODELS_DIR`、
@@ -82,6 +83,21 @@ Settings。选择「手动指定」可覆盖，选择「不使用代理」强制
   Apache-2.0），无需在系统安装 ffmpeg 或 lame。16/24 kHz 的引擎输出按 MPEG-2
   编码；其它采样率会先重采样到九个 MPEG Layer III 合法采样率中最近的一个。
 - 生成的 WAV 为单声道 16 位 PCM，采样率取引擎的原生采样率。
+
+## 视频与压缩音频
+
+字幕项目可以直接导入 WAV。视频（MP4、MOV、MKV、WebM 等）和压缩音频（MP3、M4A、
+FLAC、OGG 等）需要系统安装 `ffmpeg` 与 `ffprobe`；没有时只能导入 WAV，页面会给出
+提示。查找顺序为：
+
+1. **设置 → ffmpeg 路径** —— 可执行文件本身，或同时包含两个二进制的目录。支持
+   `~` 展开；路径必须是绝对路径。
+2. `LAVEROCK_FFMPEG` —— 含义相同。
+3. `PATH`。
+
+上传会流式写入磁盘，读取时长与画面尺寸后，把第一条音轨转换为单声道 48 kHz WAV。
+`GET /api/health` 返回 `"ffmpeg": true|false`；`GET /api/settings` 还会返回解析到的
+`ffmpeg_bin`，供设置页显示实际找到的路径。
 
 ## 打包版
 

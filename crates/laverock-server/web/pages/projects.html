@@ -6,7 +6,10 @@
       </div>
 
       <div class="card" id="newProjectCard" hidden>
-        <label data-i18n="projects.audio">音频（WAV）</label>
+        <label for="projectMedia" data-i18n="projects.media">音频或视频文件</label>
+        <input id="projectMedia" type="file" accept=".wav,.mp3,.m4a,.aac,.flac,.ogg,.mp4,.mov,.mkv,.webm,video/*,audio/*" />
+        <div class="hint" id="projectMediaHint" data-i18n="projects.media.hint">支持 WAV、MP3、M4A 与常见视频格式；视频需要系统安装 ffmpeg。</div>
+        <label data-i18n="projects.record">或录制一段音频（WAV）</label>
         <div id="projectCapture"></div>
         <label for="projectName" data-i18n="projects.name">项目名称</label>
         <input id="projectName" type="text" data-i18n-ph="projects.name.ph" />
@@ -36,6 +39,7 @@
           <button class="ghost danger" id="projectDelete" type="button" data-i18n="ui.delete">删除</button>
           <button class="ghost" id="projectClose" type="button" data-i18n="projects.close">关闭</button>
         </div>
+        <video id="projectVideo" controls hidden></video>
         <audio id="projectAudio" controls></audio>
         <div class="project-dub">
           <div>

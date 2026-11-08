@@ -32,6 +32,8 @@ async function loadHealth() {
     $('connState').classList.remove('off');
     mp3Supported = !!h.mp3;
     transcribeAvailable = !!h.transcribe;
+    ffmpegAvailable = !!h.ffmpeg;
+    syncProjectMediaInput();
     for (const cap of [synthCapture, voiceCapture, libraryCapture]) cap.syncTranscribeButton();
   } catch (_) {
     $('connState').classList.add('off');

@@ -108,6 +108,14 @@ function syncProxyMode() {
 }
 $('proxyMode').onchange = syncProxyMode;
 
+function setFfmpegHint(bin) {
+  const hint = $('ffmpegHint');
+  hint.className = 'hint';
+  hint.textContent = bin
+    ? t('settings.ffmpeg.found', { path: bin })
+    : t('settings.ffmpeg.missing');
+}
+
 async function loadSettingsPage() {
   if (!session.loopback) {
     $('downloadSettings').hidden = true;
@@ -126,6 +134,8 @@ async function loadSettingsPage() {
     setPreset('hf', s.hf_endpoint || '', HF_PRESETS);
     setPreset('pip', s.pip_index || '', PIP_PRESETS);
     $('workspaceDir').value = s.workspace_dir || '';
+    $('ffmpegPath').value = s.ffmpeg_path || '';
+    setFfmpegHint(s.ffmpeg_bin || '');
     $('pathModels').textContent = s.models_dir || '—';
     $('pathTools').textContent = s.tools_dir || (t("ui.not_found"));
     $('pathScripts').textContent = s.scripts_dir || (t("ui.not_found"));
@@ -146,6 +156,7 @@ $('saveSettings').onclick = async () => {
     hf_endpoint: getPreset('hf'),
     pip_index: getPreset('pip'),
     workspace_dir: $('workspaceDir').value.trim(),
+    ffmpeg_path: $('ffmpegPath').value.trim(),
     language: localStorage.getItem('laverock.lang') || '',
   };
   try {
@@ -159,10 +170,14 @@ $('saveSettings').onclick = async () => {
     syncProxyMode();
     setPreset('hf', saved.hf_endpoint || '', HF_PRESETS);
     setPreset('pip', saved.pip_index || '', PIP_PRESETS);
+    $('ffmpegPath').value = saved.ffmpeg_path || '';
+    setFfmpegHint(saved.ffmpeg_bin || '');
     hint.className = 'hint ok';
     hint.textContent = t("ui.saved_applies_to_the_next");
     toast(t("ui.download_settings_saved"));
     serverSettings = saved;
+    // The projects page's file picker follows the detected ffmpeg.
+    await loadHealth();
   } catch (e) {
     hint.className = 'hint err';
     hint.textContent = (t("ui.save_failed")) + e.message;

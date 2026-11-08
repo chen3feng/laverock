@@ -47,6 +47,10 @@ pub struct Settings {
     /// `LAVEROCK_TOOLS_DIR` from the environment. Profiles/history stay in
     /// the data directory (next to this file), so it never chases itself.
     pub workspace_dir: String,
+    /// `ffmpeg` used to read video and non-WAV audio. Empty means
+    /// `LAVEROCK_FFMPEG`, then `PATH`. A directory is accepted too, in
+    /// which case `ffmpeg` and `ffprobe` are looked up inside it.
+    pub ffmpeg_path: String,
     /// UI language: "" follows the browser, otherwise a code such as
     /// `zh` or `en`. Only the web UI interprets it.
     pub language: String,
@@ -132,6 +136,13 @@ impl Settings {
         if !matches!(self.language.as_str(), "" | "zh" | "en") {
             return Err(CoreError::UserError(
                 i18n::Message::new(Key::UnsupportedLanguage).arg("lang", &self.language),
+            ));
+        }
+
+        self.ffmpeg_path = expand_home(self.ffmpeg_path.trim());
+        if !self.ffmpeg_path.is_empty() && !Path::new(&self.ffmpeg_path).is_absolute() {
+            return Err(CoreError::UserError(
+                i18n::Message::new(Key::WorkspaceDirNotAbsolute).arg_key("label", Key::LabelFfmpeg),
             ));
         }
         Ok(self)
@@ -286,6 +297,7 @@ mod tests {
             hf_endpoint: " https://hf-mirror.com/ ".into(),
             pip_index: "https://pypi.tuna.tsinghua.edu.cn/simple/".into(),
             workspace_dir: "  ".into(),
+            ffmpeg_path: "  ".into(),
             language: String::new(),
         }
         .normalize()
@@ -297,6 +309,7 @@ mod tests {
             "https://pypi.tuna.tsinghua.edu.cn/simple"
         );
         assert_eq!(settings.workspace_dir, "");
+        assert_eq!(settings.ffmpeg_path, "");
         assert!(settings.workspace_paths().is_none());
     }
 
@@ -333,6 +346,7 @@ mod tests {
             hf_endpoint: "https://hf-mirror.com".into(),
             pip_index: "https://pypi.tuna.tsinghua.edu.cn/simple".into(),
             workspace_dir: String::new(),
+            ffmpeg_path: String::new(),
             language: String::new(),
         };
         let env = settings.download_env(None);
@@ -418,6 +432,28 @@ mod tests {
         .expect("expanded path is absolute");
         assert!(Path::new(&s.workspace_dir).is_absolute());
         assert!(s.workspace_dir.ends_with("laverock-tts"));
+    }
+
+    #[test]
+    fn ffmpeg_path_must_be_absolute_and_expands_home() {
+        for bad in ["ffmpeg", "./ffmpeg", "../bin/ffmpeg"] {
+            let s = Settings {
+                ffmpeg_path: bad.into(),
+                ..Settings::default()
+            };
+            assert!(s.normalize().is_err(), "{bad} should be rejected");
+        }
+        if std::env::var_os("HOME").is_none() {
+            return;
+        }
+        let s = Settings {
+            ffmpeg_path: "  ~/bin/ffmpeg  ".into(),
+            ..Settings::default()
+        }
+        .normalize()
+        .expect("expanded path is absolute");
+        assert!(Path::new(&s.ffmpeg_path).is_absolute());
+        assert!(s.ffmpeg_path.ends_with("bin/ffmpeg") || s.ffmpeg_path.ends_with("bin\\ffmpeg"));
     }
 
     #[test]

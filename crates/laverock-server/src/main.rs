@@ -25,6 +25,7 @@ mod dubbing;
 mod export;
 mod history;
 mod jobs;
+mod media;
 mod models;
 mod openai_compat;
 mod profiles;

@@ -18,6 +18,7 @@ These apply to the `laverock-server` binary.
 | `LAVEROCK_DATA_DIR` | `data` | voices, history, settings, pairing state, TLS certificates |
 | `LAVEROCK_MODELS_DIR` | `models` | directories scanned for `*/engine.json`; separate several with `:` (`;` on Windows), highest priority first |
 | `LAVEROCK_TOOLS_DIR` | — | Python venvs and build tools for engines |
+| `LAVEROCK_FFMPEG` | — | `ffmpeg` executable or a directory holding `ffmpeg` and `ffprobe`; used for video and non-WAV audio |
 | `LAVEROCK_SCRIPTS_DIR` | auto-detected | `scripts/` used by the model installer |
 
 The desktop shell sets `LAVEROCK_DATA_DIR`, `LAVEROCK_MODELS_DIR`,
@@ -95,6 +96,23 @@ server-side validation messages follow the language too.
   MPEG-2; other rates are resampled to the nearest of the nine MPEG Layer III
   rates first.
 - Generated WAVs are mono 16-bit PCM at the engine's native rate.
+
+## Video and compressed audio
+
+Subtitle projects accept WAV directly. Video (MP4, MOV, MKV, WebM …) and
+compressed audio (MP3, M4A, FLAC, OGG …) need system `ffmpeg` and
+`ffprobe`; without them only WAV can be imported and the page says so.
+The binaries are found in this order:
+
+1. **Settings → ffmpeg path** — the executable itself or a directory
+   containing both binaries. `~` is expanded; the path must be absolute.
+2. `LAVEROCK_FFMPEG` — same meaning.
+3. `PATH`.
+
+The upload is streamed to disk, probed for duration and picture size, and
+its first audio track is converted to mono 48 kHz WAV. `GET /api/health`
+reports `"ffmpeg": true|false`; `GET /api/settings` also returns the
+resolved `ffmpeg_bin` so the page can show what was found.
 
 ## Packaged builds
 

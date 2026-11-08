@@ -144,9 +144,18 @@ messages! {
         { en: "Separating vocals and instrumental…", zh: "正在分离人声与伴奏…" },
     ToolStageDenoising = "tool_stage_denoising"
         { en: "Removing background noise…", zh: "正在降噪…" },
-    ProjectWavOnly = "project_wav_only"
-        { en: "Projects accept WAV audio for now; video and other formats come with media packaging.",
-          zh: "项目目前只支持 WAV 音频；视频等格式会在媒体封装阶段支持。" },
+    ProjectFfmpegMissing = "project_ffmpeg_missing"
+        { en: "This file needs ffmpeg. Install ffmpeg/ffprobe or set their path in Settings.",
+          zh: "读取该文件需要 ffmpeg。请安装 ffmpeg/ffprobe，或在设置中填写路径。" },
+    ProjectNoAudioTrack = "project_no_audio_track"
+        { en: "This file has no audio track to transcribe or dub.",
+          zh: "这个文件没有可转写或配音的音轨。" },
+    ProjectMediaFailed = "project_media_failed"
+        { en: "Could not read the media file: {detail}", zh: "无法读取媒体文件：{detail}" },
+    ProjectMediaTooLarge = "project_media_too_large"
+        { en: "The media file is too large (1 GB max).", zh: "媒体文件过大（最大 1 GB）。" },
+    ProjectAudioTooLarge = "project_audio_too_large"
+        { en: "The audio file exceeds 200 MB.", zh: "音频文件超过 200 MB。" },
     ProjectNoCues = "project_no_cues"
         { en: "This project has no subtitle cues yet; transcribe it first.",
           zh: "这个项目还没有字幕分段；请先转写。" },
@@ -242,6 +251,8 @@ messages! {
         { en: "PyPI mirror", zh: "PyPI 镜像" },
     LabelWorkspace = "label_workspace"
         { en: "Workspace directory", zh: "工作区目录" },
+    LabelFfmpeg = "label_ffmpeg"
+        { en: "ffmpeg path", zh: "ffmpeg 路径" },
     WorkspaceDirNotAbsolute = "workspace_dir_not_absolute"
         { en: "{label} must be an absolute path, e.g. /data/laverock or D:\\laverock.",
           zh: "{label}必须是绝对路径，例如 /data/laverock 或 D:\\laverock。" },

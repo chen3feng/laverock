@@ -762,7 +762,39 @@ code=$(curl -s -o /dev/null -w '%{http_code}' -X POST \
 printf 'not a wav\n' >"$OUT/not-a-wav-project.txt"
 code=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/projects" \
   -F 'name=bad' -F "audio=@$OUT/not-a-wav-project.txt;filename=note.wav")
-[ "$code" = "400" ] && ok "non-WAV project -> 400" || bad "non-WAV project -> $code"
+[ "$code" = "400" ] && ok "unreadable media -> 400" || bad "unreadable media -> $code"
+
+# Video ingestion: streamed to disk, probed with ffprobe, and its first
+# audio track extracted. Skipped when this machine has no ffmpeg.
+if command -v ffmpeg >/dev/null 2>&1 && command -v ffprobe >/dev/null 2>&1 \
+  && curl -s "$BASE/api/health" | grep -q '"ffmpeg":true'; then
+  ffmpeg -y -v error -f lavfi -i testsrc=size=160x120:rate=10:duration=1 \
+    -f lavfi -i sine=frequency=440:duration=1 -shortest \
+    -c:v mpeg4 -c:a aac "$OUT/clip.mp4"
+  vp=$(curl -s -X POST "$BASE/api/projects" -F 'name=smoke-video' \
+    -F "media=@$OUT/clip.mp4" | project_id)
+  [ -n "$vp" ] && ok "create video project ($vp)" || bad "create video project"
+  vjson=$(curl -s "$BASE/api/projects/$vp")
+  case "$vjson" in
+    *'"kind":"video"'*) ok "video source recorded" ;;
+    *) bad "video kind: $(printf '%s' "$vjson" | head -c 160)" ;;
+  esac
+  case "$vjson" in
+    *'"width":160'*'"height":120'*) ok "video dimensions probed" ;;
+    *) bad "video dimensions: $(printf '%s' "$vjson" | head -c 160)" ;;
+  esac
+  curl -sf "$BASE/api/projects/$vp/source" -o "$OUT/video-audio.wav" \
+    && head -c 4 "$OUT/video-audio.wav" | grep -q RIFF \
+    && ok "video audio extracted" || bad "video audio extracted"
+  curl -sf "$BASE/api/projects/$vp/media" -o "$OUT/video-copy.mp4" \
+    && [ -s "$OUT/video-copy.mp4" ] && ok "original media served" \
+    || bad "original media served"
+  code=$(curl -s -o /dev/null -w '%{http_code}' -X DELETE "$BASE/api/projects/$vp")
+  [ "$code" = "204" ] && ok "delete video project" \
+    || bad "delete video project -> $code"
+else
+  echo "  skip video project (no ffmpeg)"
+fi
 
 for id in "$pj" "$empty"; do
   curl -s -o /dev/null -X DELETE "$BASE/api/projects/$id"

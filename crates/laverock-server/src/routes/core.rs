@@ -25,12 +25,14 @@ async fn index() -> Html<&'static str> {
 }
 
 async fn health(State(state): State<AppState>) -> impl axum::response::IntoResponse {
+    let ffmpeg = crate::media::Ffmpeg::discover(&state.settings.get().ffmpeg_path).is_some();
     Json(serde_json::json!({
         "status": "ok",
         "version": env!("CARGO_PKG_VERSION"),
         "engines": state.manager.len(),
         "mp3": export::mp3_available(),
         "transcribe": state.transcriber.available(),
+        "ffmpeg": ffmpeg,
     }))
 }
 
