@@ -22,8 +22,39 @@ impl AudioCppEngine {
         }
         let duration = self.param_f64(req, "duration_sec", 60.0).clamp(10.0, 600.0);
         cmd.arg("--duration-seconds").arg(format!("{duration}"));
-        cmd.arg("--task-route")
-            .arg(self.param_str(req, "task_route", "text2music"));
+        let route = self.param_str(req, "task_route", "text2music");
+        cmd.arg("--task-route").arg(&route);
+        let negative = self.param_str(req, "negative_prompt", "");
+        if !negative.is_empty() {
+            cmd.arg("--request-option")
+                .arg(format!("negative_prompt={negative}"));
+        }
+        let track = self.param_str(req, "track_name", "");
+        if !track.is_empty() {
+            cmd.arg("--track-name").arg(track);
+        }
+        if route == "repaint" {
+            cmd.arg("--repaint-start")
+                .arg(format!("{}", self.param_f64(req, "repainting_start", 0.0)));
+            cmd.arg("--repaint-end")
+                .arg(format!("{}", self.param_f64(req, "repainting_end", 0.0)));
+            cmd.arg("--repaint-mode")
+                .arg(self.param_str(req, "repaint_mode", "balanced"));
+            cmd.arg("--repaint-strength")
+                .arg(format!("{}", self.param_f64(req, "repaint_strength", 0.5)));
+        }
+        if route.starts_with("cover") {
+            // Cover conditioning has no dedicated CLI flag, but every
+            // request option is accepted through --request-option.
+            cmd.arg("--request-option").arg(format!(
+                "audio_cover_strength={}",
+                self.param_f64(req, "audio_cover_strength", 1.0)
+            ));
+            cmd.arg("--request-option").arg(format!(
+                "cover_noise_strength={}",
+                self.param_f64(req, "cover_noise_strength", 0.0)
+            ));
+        }
         let guidance = req
             .params
             .get("guidance_scale")
@@ -44,10 +75,45 @@ impl AudioCppEngine {
         }
         let duration = self.param_f64(req, "duration_sec", 60.0).clamp(10.0, 600.0);
         plan.options.insert("duration_sec".into(), json!(duration));
-        plan.options.insert(
-            "route".into(),
-            json!(self.param_str(req, "task_route", "text2music")),
-        );
+        let route = self.param_str(req, "task_route", "text2music");
+        plan.options.insert("route".into(), json!(route));
+        let negative = self.param_str(req, "negative_prompt", "");
+        if !negative.is_empty() {
+            plan.options
+                .insert("negative_prompt".into(), json!(negative));
+        }
+        let track = self.param_str(req, "track_name", "");
+        if !track.is_empty() {
+            plan.options.insert("track_name".into(), json!(track));
+        }
+        if route == "repaint" {
+            plan.options.insert(
+                "repainting_start".into(),
+                json!(self.param_f64(req, "repainting_start", 0.0)),
+            );
+            plan.options.insert(
+                "repainting_end".into(),
+                json!(self.param_f64(req, "repainting_end", 0.0)),
+            );
+            plan.options.insert(
+                "repaint_mode".into(),
+                json!(self.param_str(req, "repaint_mode", "balanced")),
+            );
+            plan.options.insert(
+                "repaint_strength".into(),
+                json!(self.param_f64(req, "repaint_strength", 0.5)),
+            );
+        }
+        if route.starts_with("cover") {
+            plan.options.insert(
+                "audio_cover_strength".into(),
+                json!(self.param_f64(req, "audio_cover_strength", 1.0)),
+            );
+            plan.options.insert(
+                "cover_noise_strength".into(),
+                json!(self.param_f64(req, "cover_noise_strength", 0.0)),
+            );
+        }
         let guidance = req
             .params
             .get("guidance_scale")

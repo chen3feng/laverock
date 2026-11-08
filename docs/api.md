@@ -18,7 +18,7 @@ describes the loopback listener.
 | --- | --- | --- |
 | GET | `/api/health` | service status, including whether `ffmpeg` was found |
 | GET | `/api/engines` | registered engines and their defaults |
-| POST | `/api/engines/:id/synthesize` | multipart `text` plus either `profile_id` or (`prompt` WAV + `prompt_text`); optional engine parameters → WAV. Add `x-laverock-job: 1` to run it as a background job, or `x-laverock-stream: 1` + `stream_audio=1` to stream sentences |
+| POST | `/api/engines/:id/synthesize` | multipart `text` plus either `profile_id` or (`prompt` WAV + `prompt_text`); optional engine parameters → WAV. Music editing routes also take an `audio` source song. Add `x-laverock-job: 1` to run it as a background job, or `x-laverock-stream: 1` + `stream_audio=1` to stream sentences |
 | POST | `/api/engines/:id/convert` | multipart `audio` (source WAV) plus either `profile_id` or `prompt` WAV, and optional engine parameters → converted WAV. Add `x-laverock-job: 1` to run it as a background job |
 | POST | `/api/engines/:id/unload` | release the model's memory (it stays installed) → `204` |
 | POST | `/api/engines/unload` | release every loaded model → `204` |

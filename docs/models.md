@@ -221,7 +221,14 @@ The Music page takes a style caption as `text` and optional `lyrics`; leave
 the lyrics empty for an instrumental. `duration_sec` requests a length (the
 planner may stop earlier), and `num_steps` is capped at 8 for Turbo.
 `guidance_scale` is ignored by Turbo checkpoints. Output is 48 kHz stereo.
-Editing routes (cover, repaint, extend) are not exposed yet.
+
+The same model edits an existing song: pick a route on the Music page and
+upload the source. `cover` (and `cover-nofsq`) re-sings it in a new style,
+`repaint` regenerates a time range (`repainting_start`/`repainting_end`,
+`repaint_mode`, `repaint_strength`), `complete` fills in missing sections,
+and `lego`/`extract` generate or pull a single track named by `track_name`.
+Every route except `text2music` needs the source upload; the page hides the
+controls a route does not use.
 
 12 GB+ of VRAM is comfortable. On an 8 GB card the model runs with CPU or
 offload; installing with `ACE_STEP_QUANT=q8_0` halves the download, though

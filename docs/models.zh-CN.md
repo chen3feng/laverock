@@ -178,7 +178,12 @@ M4 Pro 上 Q8_0 检查点实测 RTF 1.47，加载后内存约 4.1 GB（见「速
 音乐页把风格描述作为 `text`，歌词作为可选的 `lyrics`；歌词留空即生成纯音乐。
 `duration_sec` 请求歌曲长度（规划器可能提前结束），Turbo 的 `num_steps`
 最多 8 步，`guidance_scale` 会被 Turbo 检查点忽略。输出为 48 kHz 立体声。
-翻唱、重绘、续写等编辑路由暂未开放。
+
+同一个模型也能编辑现成歌曲：在音乐页选择路由并上传源音乐。`cover`（及
+`cover-nofsq`）用新风格重新演唱，`repaint` 重绘指定时间段（`repainting_start` /
+`repainting_end`、`repaint_mode`、`repaint_strength`），`complete` 补全缺失段落，
+`lego` / `extract` 按 `track_name` 生成或提取单条音轨。除 `text2music` 外，所有
+路由都需要上传源音乐；页面会隐藏当前路由用不到的控件。
 
 建议 12 GB 以上显存。8 GB 显卡可走 CPU/offload；安装时设置
 `ACE_STEP_QUANT=q8_0` 可把下载减半，但量化后的 planner 偶尔会采样失败，

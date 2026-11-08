@@ -350,6 +350,25 @@ async function main() {
       }
     }
 
+    // ---------------------------------------------------------- music editing
+    say('music editing');
+    await page.click('nav a[data-page="music"]');
+    await page.waitForSelector('#page-music.active');
+    const musicEngine = (await apiJson(context.request, `${base}/api/engines`))
+      .find((e) => e.task === 'music');
+    if (!musicEngine) {
+      assert.equal(await page.locator('#musicGo').isDisabled(), true, 'music is disabled');
+      pass('music page explains the missing model');
+    } else {
+      await page.selectOption('#musicEngine', musicEngine.id);
+      await page.waitForSelector('#music-param-task_route', { timeout: 30_000 });
+      await page.selectOption('#music-param-task_route', 'repaint');
+      assert.equal(await page.locator('#musicSourceCard').isVisible(), true);
+      await page.selectOption('#music-param-task_route', 'text2music');
+      assert.equal(await page.locator('#musicSourceCard').isVisible(), false);
+      pass('editing routes ask for a source song');
+    }
+
     // ------------------------------------------------------- voice conversion
     say('voice conversion');
     await page.click('nav a[data-page="convert"]');

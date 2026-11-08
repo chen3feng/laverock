@@ -21,16 +21,19 @@ use super::{ApiError, AppState};
 /// for. Kept small because each take is a full inference run.
 const MAX_SAMPLES: u32 = 4;
 
-/// Voice-conversion uploads are a single clip, but it can be minutes long;
+/// Source clips for conversion and music editing can be minutes long;
 /// 200 MB matches the WAV import limit used by projects.
-const MAX_CONVERT_BYTES: usize = 200 * 1024 * 1024;
+const MAX_AUDIO_BYTES: usize = 200 * 1024 * 1024;
 
 pub(crate) fn router() -> Router<AppState> {
     Router::new()
-        .route("/api/engines/{id}/synthesize", post(synthesize))
+        .route(
+            "/api/engines/{id}/synthesize",
+            post(synthesize).layer(DefaultBodyLimit::max(MAX_AUDIO_BYTES)),
+        )
         .route(
             "/api/engines/{id}/convert",
-            post(convert).layer(DefaultBodyLimit::max(MAX_CONVERT_BYTES)),
+            post(convert).layer(DefaultBodyLimit::max(MAX_AUDIO_BYTES)),
         )
 }
 
@@ -43,6 +46,7 @@ async fn synthesize(
 ) -> Result<Response, ApiError> {
     let mut text: Option<String> = None;
     let mut prompt_bytes: Option<Vec<u8>> = None;
+    let mut audio_bytes: Option<Vec<u8>> = None;
     let mut prompt_text: Option<String> = None;
     let mut profile_id: Option<String> = None;
     let mut samples: u32 = 1;
@@ -74,6 +78,17 @@ async fn synthesize(
                             ApiError::bad_request(format!("bad prompt upload: {e}"))
                         })?,
                     );
+            }
+            Some("audio") => {
+                // Source song for a music editing route (repaint, cover,
+                // lego, extract, complete).
+                audio_bytes = Some(
+                    field
+                        .bytes()
+                        .await
+                        .map(|v| v.to_vec())
+                        .map_err(|e| ApiError::bad_request(format!("bad audio upload: {e}")))?,
+                );
             }
             Some("prompt_text") => {
                 let raw = field
@@ -195,6 +210,18 @@ async fn synthesize(
         None => (Vec::new(), 0),
     };
 
+    // A source song for a music editing route; plain synthesis has none.
+    let (input_samples, input_sr) = match audio_bytes.filter(|b| !b.is_empty()) {
+        Some(bytes) => {
+            let (samples, rate) = decode_wav(&bytes)?;
+            if samples.is_empty() {
+                return Err(ApiError::bad_request("the source audio is empty"));
+            }
+            (samples, rate)
+        }
+        None => (Vec::new(), 0),
+    };
+
     let manager = state.manager.clone();
     let history = state.history.clone();
     let info = state.manager.list().into_iter().find(|e| e.id == engine_id);
@@ -226,6 +253,8 @@ async fn synthesize(
             prompt_text,
             prompt_samples,
             prompt_sr,
+            input_samples,
+            input_sr,
             speed,
             num_steps,
             params,
@@ -257,8 +286,8 @@ async fn synthesize(
             speed,
             num_steps,
             params: params.clone(),
-            input_samples: Vec::new(),
-            input_sr: 0,
+            input_samples: input_samples.clone(),
+            input_sr,
             progress: None,
             audio: None,
         };
@@ -336,8 +365,8 @@ async fn synthesize(
                 speed,
                 num_steps,
                 params: params.clone(),
-                input_samples: Vec::new(),
-                input_sr: 0,
+                input_samples: input_samples.clone(),
+                input_sr,
                 progress: Some(sink.clone()),
                 audio: None,
             };
@@ -397,8 +426,8 @@ async fn synthesize(
                 speed,
                 num_steps,
                 params: params.clone(),
-                input_samples: Vec::new(),
-                input_sr: 0,
+                input_samples: input_samples.clone(),
+                input_sr,
                 progress: Some(sink.clone()),
                 audio: None,
             };
@@ -771,6 +800,8 @@ fn start_job(
     prompt_text: Option<String>,
     prompt_samples: Vec<f32>,
     prompt_sr: i32,
+    input_samples: Vec<f32>,
+    input_sr: i32,
     speed: f32,
     num_steps: i32,
     params: std::collections::BTreeMap<String, serde_json::Value>,
@@ -827,8 +858,8 @@ fn start_job(
                 speed,
                 num_steps,
                 params: params.clone(),
-                input_samples: Vec::new(),
-                input_sr: 0,
+                input_samples: input_samples.clone(),
+                input_sr,
                 progress: Some(sink),
                 audio: None,
             };

@@ -444,6 +444,33 @@ impl SpeechEngine for AudioCppEngine {
         }
         self.validate(req)?;
 
+        // Every music route except text2music edits a source song. Fail
+        // before loading a multi-gigabyte model with a clear message.
+        if is_music {
+            let route = self.param_str(req, "task_route", "text2music");
+            if route != "text2music" && req.input_samples.is_empty() {
+                return Err(CoreError::UserError(
+                    i18n::Message::new(Key::MusicSourceRequired).arg("route", &route),
+                ));
+            }
+            if route == "repaint" {
+                let start = self.param_f64(req, "repainting_start", 0.0);
+                let end = self.param_f64(req, "repainting_end", 10.0);
+                if end <= start {
+                    return Err(CoreError::BadRequest(
+                        "repainting_end must be greater than repainting_start".into(),
+                    ));
+                }
+            }
+            if matches!(route.as_str(), "lego" | "extract")
+                && self.param_str(req, "track_name", "").is_empty()
+            {
+                return Err(CoreError::BadRequest(format!(
+                    "{route} needs a target track (track_name)"
+                )));
+            }
+        }
+
         let _guard = self.run_lock.lock().expect("audiocpp run lock");
 
         let tmp = std::env::temp_dir().join(format!(
@@ -486,6 +513,14 @@ impl SpeechEngine for AudioCppEngine {
         } else {
             None
         };
+        let input_wav = if is_music && !req.input_samples.is_empty() {
+            let path = tmp.join("input.wav");
+            let bytes = encode_wav(&req.input_samples, req.input_sr)?;
+            std::fs::write(&path, bytes).map_err(CoreError::from)?;
+            Some(path)
+        } else {
+            None
+        };
 
         let seed = self.param_i64(req, "seed", self.seed);
 
@@ -497,21 +532,28 @@ impl SpeechEngine for AudioCppEngine {
         // stopped and started again for the next attempt, which is also how a
         // switch to another engine's model works.
         if self.server_bin.is_some() {
-            let audio = match self.synthesize_resident(req, ref_wav.as_deref(), seed) {
-                Ok(audio) => audio,
-                Err(failure) if !failure.retryable => return Err(failure.error),
-                Err(failure) => {
-                    tracing::warn!(
-                        target: "audiocpp",
-                        family = self.family.cli_name(),
-                        "resident server failed, restarting it: {}",
-                        failure.error
-                    );
-                    self.stop_resident();
-                    self.synthesize_resident(req, ref_wav.as_deref(), seed)
+            let audio =
+                match self.synthesize_resident(req, ref_wav.as_deref(), input_wav.as_deref(), seed)
+                {
+                    Ok(audio) => audio,
+                    Err(failure) if !failure.retryable => return Err(failure.error),
+                    Err(failure) => {
+                        tracing::warn!(
+                            target: "audiocpp",
+                            family = self.family.cli_name(),
+                            "resident server failed, restarting it: {}",
+                            failure.error
+                        );
+                        self.stop_resident();
+                        self.synthesize_resident(
+                            req,
+                            ref_wav.as_deref(),
+                            input_wav.as_deref(),
+                            seed,
+                        )
                         .map_err(|failure| failure.error)?
-                }
-            };
+                    }
+                };
             let _ = std::fs::remove_dir_all(&tmp);
             return Ok(audio);
         }
@@ -529,6 +571,9 @@ impl SpeechEngine for AudioCppEngine {
             .arg(&req.text);
         if let Some(ref_wav) = &ref_wav {
             cmd.arg("--voice-ref").arg(ref_wav);
+        }
+        if let Some(input_wav) = &input_wav {
+            cmd.arg("--audio").arg(input_wav);
         }
         cmd.arg("--seed")
             .arg(seed.to_string())
@@ -1141,6 +1186,7 @@ impl AudioCppEngine {
         &self,
         req: &SynthRequest,
         ref_wav: Option<&Path>,
+        input_wav: Option<&Path>,
         seed: i64,
     ) -> Result<Value> {
         let family = match self.family {
@@ -1164,6 +1210,9 @@ impl AudioCppEngine {
         });
         if let Some(path) = ref_wav {
             body["voice_ref"] = json!(path.to_string_lossy());
+        }
+        if let Some(path) = input_wav {
+            body["audio"] = json!(path.to_string_lossy());
         }
         if let Some(text) = family.reference_text {
             body["reference_text"] = json!(text);
@@ -1290,6 +1339,7 @@ impl AudioCppEngine {
         &self,
         req: &SynthRequest,
         ref_wav: Option<&Path>,
+        input_wav: Option<&Path>,
         seed: i64,
     ) -> std::result::Result<Audio, ResidentFailure> {
         let retry = |error: CoreError| ResidentFailure {
@@ -1306,7 +1356,7 @@ impl AudioCppEngine {
         }
         // A malformed request fails the same way on a fresh server.
         let body = self
-            .resident_body(req, ref_wav, seed)
+            .resident_body(req, ref_wav, input_wav, seed)
             .map_err(|error| ResidentFailure {
                 error,
                 retryable: false,
@@ -1691,6 +1741,7 @@ mod tests {
                     ("language", serde_json::json!("en")),
                 ]),
                 Some(Path::new("/tmp/ref.wav")),
+                None,
                 7,
             )
             .expect("body");
@@ -1718,6 +1769,7 @@ mod tests {
                     ("template", serde_json::json!("instruct")),
                     ("instruct", serde_json::json!("warm")),
                 ]),
+                None,
                 None,
                 1,
             )
@@ -1862,6 +1914,7 @@ mod tests {
                     ("guidance_scale", serde_json::json!(3.0)),
                 ]),
                 None,
+                None,
                 9,
             )
             .expect("body");
@@ -1874,6 +1927,88 @@ mod tests {
         assert_eq!(body["options"]["guidance_scale"], 3.0);
         assert_eq!(body["options"]["num_inference_steps"], 10);
         assert!(body.get("voice_ref").is_none());
+        assert!(body.get("audio").is_none());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn ace_step_repaint_passes_the_source_and_region() {
+        let dir = args_dir("ace-step-repaint");
+        let engine = fixture(&dir, "music");
+        let mut req = request(&[
+            ("task_route", serde_json::json!("repaint")),
+            ("repainting_start", serde_json::json!(5.0)),
+            ("repainting_end", serde_json::json!(10.0)),
+            ("repaint_mode", serde_json::json!("aggressive")),
+            ("repaint_strength", serde_json::json!(0.7)),
+            ("negative_prompt", serde_json::json!("noise")),
+        ]);
+        req.input_samples = vec![0.1; 48_000 * 2];
+        req.input_sr = 48_000;
+        engine.synthesize(&req).expect("repaint");
+
+        let args: Vec<String> = std::fs::read_to_string(dir.join("args.txt"))
+            .unwrap()
+            .lines()
+            .map(str::to_string)
+            .collect();
+        assert!(args.windows(2).any(|w| w == ["--task-route", "repaint"]));
+        assert!(args.iter().any(|a| a == "--audio"));
+        assert!(args.windows(2).any(|w| w == ["--repaint-start", "5"]));
+        assert!(args.windows(2).any(|w| w == ["--repaint-end", "10"]));
+        assert!(args
+            .windows(2)
+            .any(|w| w == ["--repaint-mode", "aggressive"]));
+        assert!(args.windows(2).any(|w| w == ["--repaint-strength", "0.7"]));
+        assert!(args
+            .windows(2)
+            .any(|w| w == ["--request-option", "negative_prompt=noise"]));
+
+        // The source song reached the runner unchanged.
+        let bytes = std::fs::read(dir.join("input.wav")).expect("source copied");
+        let (samples, rate) = crate::decode_wav(&bytes).expect("wav");
+        assert_eq!(rate, 48_000);
+        assert_eq!(samples.len(), 96_000);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn ace_step_editing_requires_a_source_song() {
+        let dir = args_dir("ace-step-no-source");
+        let engine = fixture(&dir, "music");
+        let err = engine
+            .synthesize(&request(&[("task_route", serde_json::json!("cover"))]))
+            .unwrap_err();
+        assert!(err.to_string().contains("source song"), "{err}");
+        assert!(err.localized(crate::i18n::Lang::Zh).contains("源音乐"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn ace_step_repaint_needs_a_valid_region() {
+        let dir = args_dir("ace-step-bad-region");
+        let engine = fixture(&dir, "music");
+        let mut req = request(&[
+            ("task_route", serde_json::json!("repaint")),
+            ("repainting_start", serde_json::json!(10.0)),
+            ("repainting_end", serde_json::json!(5.0)),
+        ]);
+        req.input_samples = vec![0.1; 48_000];
+        req.input_sr = 48_000;
+        let err = engine.synthesize(&req).unwrap_err();
+        assert!(err.to_string().contains("greater than"), "{err}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn ace_step_lego_needs_a_track() {
+        let dir = args_dir("ace-step-no-track");
+        let engine = fixture(&dir, "music");
+        let mut req = request(&[("task_route", serde_json::json!("lego"))]);
+        req.input_samples = vec![0.1; 48_000];
+        req.input_sr = 48_000;
+        let err = engine.synthesize(&req).unwrap_err();
+        assert!(err.to_string().contains("track_name"), "{err}");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
