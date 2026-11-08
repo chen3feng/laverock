@@ -643,7 +643,10 @@
       </div>
 
       <div class="card" id="newProjectCard" hidden>
-        <label data-i18n="projects.audio">音频（WAV）</label>
+        <label for="projectMedia" data-i18n="projects.media">音频或视频文件</label>
+        <input id="projectMedia" type="file" accept=".wav,.mp3,.m4a,.aac,.flac,.ogg,.mp4,.mov,.mkv,.webm,video/*,audio/*" />
+        <div class="hint" id="projectMediaHint" data-i18n="projects.media.hint">支持 WAV、MP3、M4A 与常见视频格式；视频需要系统安装 ffmpeg。</div>
+        <label data-i18n="projects.record">或录制一段音频（WAV）</label>
         <div id="projectCapture"></div>
         <label for="projectName" data-i18n="projects.name">项目名称</label>
         <input id="projectName" type="text" data-i18n-ph="projects.name.ph" />
@@ -673,6 +676,7 @@
           <button class="ghost danger" id="projectDelete" type="button" data-i18n="ui.delete">删除</button>
           <button class="ghost" id="projectClose" type="button" data-i18n="projects.close">关闭</button>
         </div>
+        <video id="projectVideo" controls hidden></video>
         <audio id="projectAudio" controls></audio>
         <div class="project-dub">
           <div>
@@ -826,6 +830,10 @@
         <label for="workspaceDir" data-i18n="settings.workspace">工作区目录（可选）</label>
         <input type="text" id="workspaceDir" placeholder="~/Library/Application Support/sh.laverock.desktop" />
         <div class="hint" data-i18n="settings.workspace.hint">留空使用默认位置。设置后模型下载到「目录/models」、虚拟环境装到「目录/tools」，方便把大文件放到更大的磁盘；重启后生效。</div>
+        <label for="ffmpegPath" data-i18n="settings.ffmpeg">ffmpeg 路径（可选）</label>
+        <input type="text" id="ffmpegPath" placeholder="/opt/homebrew/bin/ffmpeg" />
+        <div class="hint" id="ffmpegHint"></div>
+        <div class="hint" data-i18n="settings.ffmpeg.hint">用于导入视频和 MP3 等格式。留空时依次查找环境变量 LAVEROCK_FFMPEG 与系统 PATH。</div>
         <div class="hint"><span data-i18n="settings.modelsdir">当前模型目录：</span><code id="pathModels">…</code> · <span data-i18n="settings.toolsdir">虚拟环境目录：</span><code id="pathTools">…</code> · <span data-i18n="settings.scriptsdir">脚本目录：</span><code id="pathScripts">…</code></div>
         <div class="actions" style="margin-top:14px">
           <button id="saveSettings" type="button" data-i18n="settings.save">保存设置</button>
@@ -1340,6 +1348,10 @@ addI18n({
     'settings.toolsdir': '虚拟环境目录：',
     'settings.workspace': '工作区目录（可选）',
     'settings.workspace.hint': '留空使用默认位置。设置后模型下载到「目录/models」、虚拟环境装到「目录/tools」，方便把大文件放到更大的磁盘；重启后生效。',
+    'settings.ffmpeg': 'ffmpeg 路径（可选）',
+    'settings.ffmpeg.hint': '用于导入视频和 MP3 等格式。留空时依次查找环境变量 LAVEROCK_FFMPEG 与系统 PATH。',
+    'settings.ffmpeg.found': '已找到：{path}',
+    'settings.ffmpeg.missing': '未找到 ffmpeg。导入视频前请安装，或在上方填写可执行文件路径。',
     'settings.save': '保存设置',
     'settings.remote': '手机遥控',
     'lan.hint.default': '开启后，同一 Wi-Fi 下的手机经配对即可访问同一套界面',
@@ -1367,6 +1379,10 @@ addI18n({
     'settings.toolsdir': 'Virtual environments: ',
     'settings.workspace': 'Workspace directory (optional)',
     'settings.workspace.hint': 'Leave empty to use the default. When set, models download to "<dir>/models" and virtual environments install to "<dir>/tools" — handy for keeping the multi-GB files on a larger drive. Takes effect after a restart.',
+    'settings.ffmpeg': 'ffmpeg path (optional)',
+    'settings.ffmpeg.hint': 'Used to import video and formats such as MP3. When empty, LAVEROCK_FFMPEG is checked first, then PATH.',
+    'settings.ffmpeg.found': 'Found: {path}',
+    'settings.ffmpeg.missing': 'ffmpeg was not found. Install it, or enter the executable path above, to import video.',
     'settings.save': 'Save settings',
     'settings.remote': 'Phone remote',
     'lan.hint.default': 'When enabled, a phone on the same Wi-Fi can pair and use the same interface',
@@ -1465,8 +1481,12 @@ addI18n({
   zh: {
     'nav.projects': '字幕',
     'projects.title': '字幕项目',
-    'projects.sub': '导入一段音频，自动转写并校对时间轴，导出 SRT/VTT。',
+    'projects.sub': '导入音频或视频，自动转写并校对时间轴，导出 SRT/VTT。',
     'projects.new': '＋ 新建项目',
+    'projects.media': '音频或视频文件',
+    'projects.media.hint': '支持 WAV、MP3、M4A 与常见视频格式；视频需要系统安装 ffmpeg。',
+    'projects.media.no_ffmpeg': '未检测到 ffmpeg，目前只能导入 WAV。安装 ffmpeg 后可在设置中填写路径。',
+    'projects.record': '或录制一段音频（WAV）',
     'projects.audio': '音频（WAV）',
     'projects.name': '项目名称',
     'projects.name.ph': '例如：访谈第一期',
@@ -1477,7 +1497,8 @@ addI18n({
     'projects.default_name': '未命名项目',
     'projects.need_audio': '请先选择或录制一段音频。',
     'projects.too_large': '音频不能超过 200 MB。',
-    'projects.empty': '还没有项目。点击「新建项目」导入一段音频。',
+    'projects.too_large_media': '媒体文件不能超过 1 GB。',
+    'projects.empty': '还没有项目。点击「新建项目」导入音频或视频。',
     'projects.load_failed': '读取项目失败：',
     'projects.segments': '{n} 段字幕',
     'projects.open': '打开',
@@ -1515,8 +1536,12 @@ addI18n({
   en: {
     'nav.projects': 'Subtitles',
     'projects.title': 'Subtitle projects',
-    'projects.sub': 'Import a clip, transcribe it, fix the timeline, and export SRT/VTT.',
+    'projects.sub': 'Import audio or video, transcribe it, fix the timeline, and export SRT/VTT.',
     'projects.new': '+ New project',
+    'projects.media': 'Audio or video file',
+    'projects.media.hint': 'WAV, MP3, M4A and common video formats; video needs ffmpeg installed.',
+    'projects.media.no_ffmpeg': 'ffmpeg was not found, so only WAV can be imported. Install it, or set its path in Settings.',
+    'projects.record': 'Or record a clip (WAV)',
     'projects.audio': 'Audio (WAV)',
     'projects.name': 'Project name',
     'projects.name.ph': 'e.g. Interview, episode 1',
@@ -1525,9 +1550,10 @@ addI18n({
     'projects.create': 'Create project',
     'projects.creating': 'Creating…',
     'projects.default_name': 'Untitled project',
-    'projects.need_audio': 'Choose or record a clip first.',
+    'projects.need_audio': 'Choose a file or record a clip first.',
     'projects.too_large': 'The clip must be 200 MB or smaller.',
-    'projects.empty': 'No projects yet. Use “New project” to import a clip.',
+    'projects.too_large_media': 'The media file must be 1 GB or smaller.',
+    'projects.empty': 'No projects yet. Use “New project” to import audio or video.',
     'projects.load_failed': 'Could not load projects: ',
     'projects.segments': '{n} cues',
     'projects.open': 'Open',
@@ -2035,6 +2061,7 @@ let previewId = null;
 let toastTimer = null;
 let mp3Supported = false;
 let transcribeAvailable = false;
+let ffmpegAvailable = false;
 let lastSynthBlob = null;
 let serverSettings = null;
 
@@ -4977,6 +5004,14 @@ function syncProxyMode() {
 }
 $('proxyMode').onchange = syncProxyMode;
 
+function setFfmpegHint(bin) {
+  const hint = $('ffmpegHint');
+  hint.className = 'hint';
+  hint.textContent = bin
+    ? t('settings.ffmpeg.found', { path: bin })
+    : t('settings.ffmpeg.missing');
+}
+
 async function loadSettingsPage() {
   if (!session.loopback) {
     $('downloadSettings').hidden = true;
@@ -4995,6 +5030,8 @@ async function loadSettingsPage() {
     setPreset('hf', s.hf_endpoint || '', HF_PRESETS);
     setPreset('pip', s.pip_index || '', PIP_PRESETS);
     $('workspaceDir').value = s.workspace_dir || '';
+    $('ffmpegPath').value = s.ffmpeg_path || '';
+    setFfmpegHint(s.ffmpeg_bin || '');
     $('pathModels').textContent = s.models_dir || '—';
     $('pathTools').textContent = s.tools_dir || (t("ui.not_found"));
     $('pathScripts').textContent = s.scripts_dir || (t("ui.not_found"));
@@ -5015,6 +5052,7 @@ $('saveSettings').onclick = async () => {
     hf_endpoint: getPreset('hf'),
     pip_index: getPreset('pip'),
     workspace_dir: $('workspaceDir').value.trim(),
+    ffmpeg_path: $('ffmpegPath').value.trim(),
     language: localStorage.getItem('laverock.lang') || '',
   };
   try {
@@ -5028,10 +5066,14 @@ $('saveSettings').onclick = async () => {
     syncProxyMode();
     setPreset('hf', saved.hf_endpoint || '', HF_PRESETS);
     setPreset('pip', saved.pip_index || '', PIP_PRESETS);
+    $('ffmpegPath').value = saved.ffmpeg_path || '';
+    setFfmpegHint(saved.ffmpeg_bin || '');
     hint.className = 'hint ok';
     hint.textContent = t("ui.saved_applies_to_the_next");
     toast(t("ui.download_settings_saved"));
     serverSettings = saved;
+    // The projects page's file picker follows the detected ffmpeg.
+    await loadHealth();
   } catch (e) {
     hint.className = 'hint err';
     hint.textContent = (t("ui.save_failed")) + e.message;
@@ -5072,9 +5114,12 @@ function renderProjects() {
     el.className = 'voice-card project-card';
     el.dataset.id = project.id;
     const count = (project.segments || []).length;
+    const size = project.source.kind === 'video' && project.source.width
+      ? ` · ${project.source.width}×${project.source.height}`
+      : '';
     el.innerHTML = `
       <div class="voice-top"><b>${esc(project.name)}</b></div>
-      <div class="voice-meta">${fmtDur(project.source.duration)} · ${esc(t('projects.segments', { n: count }))} · ${fmtDate(project.updated_at)}</div>
+      <div class="voice-meta">${fmtDur(project.source.duration)}${size} · ${esc(t('projects.segments', { n: count }))} · ${fmtDate(project.updated_at)}</div>
       <div class="voice-actions">
         <button class="ghost small open" type="button">${esc(t('projects.open'))}</button>
         <button class="ghost small danger del" type="button">${esc(t('ui.delete'))}</button>
@@ -5107,6 +5152,17 @@ function openProject(project) {
   const hasMix = (project.exports || []).some((e) => e.name === 'mix.wav');
   $('projectMixResult').hidden = !hasMix;
   if (hasMix) $('projectMixAudio').src = projectFileUrl(project.id, 'mix.wav');
+  // A video project plays the uploaded file (with its audio); anything else
+  // plays the extracted audio track.
+  const isVideo = project.source.kind === 'video';
+  $('projectVideo').hidden = !isVideo;
+  $('projectAudio').hidden = isVideo;
+  if (isVideo) {
+    $('projectVideo').src = `/api/projects/${encodeURIComponent(project.id)}/media`;
+  } else {
+    $('projectVideo').pause();
+    $('projectVideo').removeAttribute('src');
+  }
   $('projectAudio').src = `/api/projects/${encodeURIComponent(project.id)}/source`;
   renderSegments(project.segments || []);
   $('projectEditor').scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -5159,6 +5215,10 @@ function closeProjectEditor() {
   $('projectSegments').innerHTML = '';
   $('projectAudio').pause();
   $('projectAudio').removeAttribute('src');
+  $('projectVideo').pause();
+  $('projectVideo').removeAttribute('src');
+  $('projectVideo').hidden = true;
+  $('projectAudio').hidden = false;
   $('projectSegAudio').pause();
   $('projectSegAudio').removeAttribute('src');
   $('projectMixAudio').pause();
@@ -5462,17 +5522,41 @@ if (!window.isSecureContext) {
   projectCapture.rec.title = t('ui.microphone_access_requires_https_or');
 }
 
+const PROJECT_MEDIA_ACCEPT =
+  '.wav,.mp3,.m4a,.aac,.flac,.ogg,.mp4,.mov,.mkv,.webm,video/*,audio/*';
+
+// Without ffmpeg the server can only read WAV, so the picker stops
+// offering formats it would have to reject.
+function syncProjectMediaInput() {
+  const input = $('projectMedia');
+  if (!input) return;
+  input.accept = ffmpegAvailable ? PROJECT_MEDIA_ACCEPT : '.wav';
+  const hint = $('projectMediaHint');
+  if (hint) {
+    hint.textContent = ffmpegAvailable
+      ? t('projects.media.hint')
+      : t('projects.media.no_ffmpeg');
+  }
+}
+
 async function createProject() {
-  if (!projectCapture.blob) {
+  const mediaFile = $('projectMedia').files[0];
+  const blob = mediaFile || projectCapture.blob;
+  const filename = mediaFile ? mediaFile.name : (projectCapture.filename || 'source.wav');
+  if (!blob) {
     toast(t('projects.need_audio'), true);
     return;
   }
-  if (projectCapture.blob.size > 200 * 1024 * 1024) {
-    toast(t('projects.too_large'), true);
+  // WAV is decoded in memory while video is streamed to disk, so the two
+  // paths have different caps.
+  const wav = /\.wav$/i.test(filename);
+  const limit = wav || !ffmpegAvailable ? 200 * 1024 * 1024 : 1024 * 1024 * 1024;
+  if (blob.size > limit) {
+    toast(t(wav || !ffmpegAvailable ? 'projects.too_large' : 'projects.too_large_media'), true);
     return;
   }
   const fd = new FormData();
-  fd.append('audio', projectCapture.blob, projectCapture.filename || 'source.wav');
+  fd.append('media', blob, filename);
   fd.append('name', $('projectName').value.trim() || t('projects.default_name'));
   const subtitleFile = $('projectSubtitles').files[0];
   if (subtitleFile) fd.append('subtitles', await subtitleFile.text());
@@ -5498,6 +5582,7 @@ async function createProject() {
     $('newProjectCard').hidden = true;
     $('projectName').value = '';
     $('projectSubtitles').value = '';
+    $('projectMedia').value = '';
     projectCapture.clear();
     await loadProjects();
     openProject(project);
@@ -5511,6 +5596,7 @@ async function createProject() {
 
 $('newProjectBtn').onclick = () => {
   $('newProjectCard').hidden = false;
+  syncProjectMediaInput();
   $('projectCreateHint').textContent = '';
 };
 $('projectCreateCancel').onclick = () => {
@@ -5518,6 +5604,7 @@ $('projectCreateCancel').onclick = () => {
   projectCapture.clear();
   $('projectName').value = '';
   $('projectSubtitles').value = '';
+  $('projectMedia').value = '';
 };
 $('projectCreate').onclick = createProject;
 $('projectSave').onclick = saveProject;
@@ -5953,6 +6040,8 @@ async function loadHealth() {
     $('connState').classList.remove('off');
     mp3Supported = !!h.mp3;
     transcribeAvailable = !!h.transcribe;
+    ffmpegAvailable = !!h.ffmpeg;
+    syncProjectMediaInput();
     for (const cap of [synthCapture, voiceCapture, libraryCapture]) cap.syncTranscribeButton();
   } catch (_) {
     $('connState').classList.add('off');

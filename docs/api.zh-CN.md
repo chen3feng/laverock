@@ -14,7 +14,7 @@ Cookie）；以下均指回环监听。
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
-| GET | `/api/health` | 服务状态 |
+| GET | `/api/health` | 服务状态，含是否找到 `ffmpeg` |
 | GET | `/api/engines` | 已注册引擎及其默认参数 |
 | POST | `/api/engines/:id/synthesize` | multipart：`text` 加 `profile_id` 或（`prompt` WAV + `prompt_text`），可附引擎参数 → WAV；加 `x-laverock-job: 1` 则作为后台任务运行，或加 `x-laverock-stream: 1` + `stream_audio=1` 逐句流式下发 |
 | POST | `/api/engines/:id/unload` | 释放该模型占用的内存（仍保持安装）→ `204` |
@@ -50,11 +50,12 @@ Cookie）；以下均指回环监听。
 | GET | `/api/tools` | 本机可用的音频工具 → `{denoise, separation, mp3}` |
 | POST | `/api/tools/enhance` | multipart：`audio`（WAV）与 `mode`（`denoise` / `vocals` / `instrumental` / `both`）→ `202` 后台任务；单轨为 WAV，`both` 另附 `stems.zip` |
 | GET | `/api/projects` | 字幕项目列表，最近更新的在前 |
-| POST | `/api/projects` | multipart：`audio`（WAV），可选 `name` 与 `subtitles`（SRT/VTT 文本）→ 项目；不带字幕时分段为空，等待转写 |
+| POST | `/api/projects` | multipart：`audio`（WAV）或 `media`/`video`（ffmpeg 能读取的任意格式），可选 `name` 与 `subtitles`（SRT/VTT 文本）→ 项目；不带字幕时分段为空，等待转写 |
 | GET | `/api/projects/:id` | 单个项目 |
 | PATCH | `/api/projects/:id` | JSON `{name?, source_language?, target_language?, segments?}` → 项目 |
 | DELETE | `/api/projects/:id` | 删除项目及其源音频 |
-| GET | `/api/projects/:id/source` | 项目的源音频（WAV） |
+| GET | `/api/projects/:id/source` | 项目的音轨（WAV） |
+| GET | `/api/projects/:id/media` | 上传的原始媒体文件（视频或压缩音频） |
 | POST | `/api/projects/:id/transcribe` | 对源音频重新语音识别并替换全部分段 → 项目 |
 | POST | `/api/projects/:id/synthesize` | 配音后台任务：multipart，可重复 `segment` 只重跑指定分段 → `202`；为每段写出 `segments/<id>.wav` |
 | GET | `/api/projects/:id/segments/:segment/audio` | 某一段已生成的配音 |
@@ -69,7 +70,7 @@ Cookie）；以下均指回环监听。
 | POST | `/api/pair/claim` | 用配对码换取设备 Cookie（公开） |
 | GET | `/api/devices` · DELETE `/api/devices/:id` | 仅桌面：列出 / 撤销手机 |
 | GET/POST | `/api/settings/lan` | 仅桌面：开关局域网监听 |
-| GET/POST | `/api/settings` | 仅桌面：下载代理、镜像、机器默认界面语言 |
+| GET/POST | `/api/settings` | 仅桌面：下载代理、镜像、机器默认界面语言、ffmpeg 路径 |
 | GET | `/api/models` | 仅桌面：目录、安装状态、任务日志尾部（`?lang=en` 返回英文介绍） |
 | POST | `/api/models/:id/install` | 仅桌面：后台开始下载 |
 | POST | `/api/models/reload` | 仅桌面：重新扫描 `models/*/engine.json` |
@@ -89,12 +90,21 @@ Cookie）；以下均指回环监听。
 `vocals.wav`、`instrumental.wav` 与 `stems.zip`。上传仅支持 WAV，最大 200 MB、
 30 分钟；取消会终止分离进程并删除临时目录。MP3 导出复用 `POST /api/audio/mp3`。
 
-**项目**把一段源音频和一组带时间的字幕绑定在一起。`POST /api/projects` 可以
+**项目**把一段源媒体和一组带时间的字幕绑定在一起。`POST /api/projects` 可以
 导入现成的 SRT/VTT 字幕；不导入时项目从空分段开始，由
 `POST /api/projects/:id/transcribe` 用 SenseVoice 模型补齐。`PATCH` 会整体替换
 分段列表，因此编辑器每次提交所有行；时间必须有限、非负、`end > start`，且起点
 落在音频长度内（允许重叠）。每个分段还带有 `translated`、`tts_path` 和 `status`
 字段。
+
+源可以是 WAV，也可以是视频或压缩音频（MP4、MOV、MKV、MP3、M4A 等）——后者需要
+本机有 `ffmpeg`/`ffprobe`。非 WAV 上传会流式写入磁盘而不是读进内存，用 `ffprobe`
+读取时长与画面信息，再把第一条音轨提取为单声道 48 kHz WAV。`source.kind` 为
+`video` 或 `audio`；视频项目还会记录 `width`、`height` 和 `fps`。
+`/api/projects/:id/source` 始终提供提取出的 WAV 音轨（转写、配音与混音都读它），
+`/media` 则提供原始上传文件供编辑器播放。上传上限为 1 GB（WAV 为 200 MB，因为
+它会被解码进内存）。`GET /api/health` 会报告是否找到 `ffmpeg`；设置里可以显式填写
+`ffmpeg_path`，否则依次查找 `LAVEROCK_FFMPEG` 与 `PATH`。
 
 配音使用项目保存的 `engine_id` 与 `voice_id`（通过 `PATCH` 设置；`voice_id` 为空
 表示用引擎自带默认音色，适合 Kokoro 这类预设引擎）。`POST /api/projects/:id/synthesize`

@@ -20,6 +20,7 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const { spawnSync } = require('node:child_process');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -439,6 +440,52 @@ async function main() {
 
     await context.request.delete(`${base}/api/projects/${projectId}`);
     await context.request.delete(`${base}/api/profiles/${dubVoice.id}`);
+
+    // Video ingestion: the server needs ffmpeg, so skip where it is absent.
+    if (spawnSync('ffmpeg', ['-version'], { stdio: 'ignore' }).status === 0) {
+      const clip = path.join(artifacts, 'clip.mp4');
+      const made = spawnSync(
+        'ffmpeg',
+        [
+          '-y', '-v', 'error',
+          '-f', 'lavfi', '-i', 'testsrc=size=160x120:rate=10:duration=1',
+          '-f', 'lavfi', '-i', 'sine=frequency=440:duration=1',
+          '-shortest', '-c:v', 'mpeg4', '-c:a', 'aac', clip,
+        ],
+        { stdio: 'ignore' },
+      );
+      assert.equal(made.status, 0, 'test video created');
+      const clipSrt = path.join(artifacts, 'clip.srt');
+      fs.writeFileSync(clipSrt, '1\n00:00:00,000 --> 00:00:00,900\nvideo cue\n\n');
+
+      await page.click('#newProjectBtn');
+      await page.setInputFiles('#projectMedia', clip);
+      await page.setInputFiles('#projectSubtitles', clipSrt);
+      await page.fill('#projectName', 'UI video test');
+      await page.click('#projectCreate');
+      // The audio project's editor is still open; wait for this project's
+      // video player instead of the editor container.
+      await page.waitForSelector('#projectVideo:not([hidden])', { timeout: 120_000 });
+      assert.ok(await page.locator('#projectVideo').isVisible(), 'video player shown');
+      const videoProject = (await apiJson(context.request, `${base}/api/projects`))
+        .find((p) => p.name === 'UI video test');
+      assert.ok(videoProject, 'video project created');
+      assert.equal(videoProject.source.kind, 'video');
+      assert.equal(videoProject.source.width, 160);
+      assert.equal(videoProject.source.height, 120);
+      const extracted = await context.request.get(
+        `${base}/api/projects/${videoProject.id}/source`,
+      );
+      assert.equal(
+        (await extracted.body()).subarray(0, 4).toString(),
+        'RIFF',
+        'video audio extracted as WAV',
+      );
+      pass('video project imported');
+      await context.request.delete(`${base}/api/projects/${videoProject.id}`);
+    } else {
+      console.log('  skip video project (ffmpeg not installed)');
+    }
 
     // ---------------------------------------------------------------- voices
     say('voices');

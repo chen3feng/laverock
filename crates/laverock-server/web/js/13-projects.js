@@ -32,9 +32,12 @@ function renderProjects() {
     el.className = 'voice-card project-card';
     el.dataset.id = project.id;
     const count = (project.segments || []).length;
+    const size = project.source.kind === 'video' && project.source.width
+      ? ` · ${project.source.width}×${project.source.height}`
+      : '';
     el.innerHTML = `
       <div class="voice-top"><b>${esc(project.name)}</b></div>
-      <div class="voice-meta">${fmtDur(project.source.duration)} · ${esc(t('projects.segments', { n: count }))} · ${fmtDate(project.updated_at)}</div>
+      <div class="voice-meta">${fmtDur(project.source.duration)}${size} · ${esc(t('projects.segments', { n: count }))} · ${fmtDate(project.updated_at)}</div>
       <div class="voice-actions">
         <button class="ghost small open" type="button">${esc(t('projects.open'))}</button>
         <button class="ghost small danger del" type="button">${esc(t('ui.delete'))}</button>
@@ -67,6 +70,17 @@ function openProject(project) {
   const hasMix = (project.exports || []).some((e) => e.name === 'mix.wav');
   $('projectMixResult').hidden = !hasMix;
   if (hasMix) $('projectMixAudio').src = projectFileUrl(project.id, 'mix.wav');
+  // A video project plays the uploaded file (with its audio); anything else
+  // plays the extracted audio track.
+  const isVideo = project.source.kind === 'video';
+  $('projectVideo').hidden = !isVideo;
+  $('projectAudio').hidden = isVideo;
+  if (isVideo) {
+    $('projectVideo').src = `/api/projects/${encodeURIComponent(project.id)}/media`;
+  } else {
+    $('projectVideo').pause();
+    $('projectVideo').removeAttribute('src');
+  }
   $('projectAudio').src = `/api/projects/${encodeURIComponent(project.id)}/source`;
   renderSegments(project.segments || []);
   $('projectEditor').scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -119,6 +133,10 @@ function closeProjectEditor() {
   $('projectSegments').innerHTML = '';
   $('projectAudio').pause();
   $('projectAudio').removeAttribute('src');
+  $('projectVideo').pause();
+  $('projectVideo').removeAttribute('src');
+  $('projectVideo').hidden = true;
+  $('projectAudio').hidden = false;
   $('projectSegAudio').pause();
   $('projectSegAudio').removeAttribute('src');
   $('projectMixAudio').pause();
@@ -422,17 +440,41 @@ if (!window.isSecureContext) {
   projectCapture.rec.title = t('ui.microphone_access_requires_https_or');
 }
 
+const PROJECT_MEDIA_ACCEPT =
+  '.wav,.mp3,.m4a,.aac,.flac,.ogg,.mp4,.mov,.mkv,.webm,video/*,audio/*';
+
+// Without ffmpeg the server can only read WAV, so the picker stops
+// offering formats it would have to reject.
+function syncProjectMediaInput() {
+  const input = $('projectMedia');
+  if (!input) return;
+  input.accept = ffmpegAvailable ? PROJECT_MEDIA_ACCEPT : '.wav';
+  const hint = $('projectMediaHint');
+  if (hint) {
+    hint.textContent = ffmpegAvailable
+      ? t('projects.media.hint')
+      : t('projects.media.no_ffmpeg');
+  }
+}
+
 async function createProject() {
-  if (!projectCapture.blob) {
+  const mediaFile = $('projectMedia').files[0];
+  const blob = mediaFile || projectCapture.blob;
+  const filename = mediaFile ? mediaFile.name : (projectCapture.filename || 'source.wav');
+  if (!blob) {
     toast(t('projects.need_audio'), true);
     return;
   }
-  if (projectCapture.blob.size > 200 * 1024 * 1024) {
-    toast(t('projects.too_large'), true);
+  // WAV is decoded in memory while video is streamed to disk, so the two
+  // paths have different caps.
+  const wav = /\.wav$/i.test(filename);
+  const limit = wav || !ffmpegAvailable ? 200 * 1024 * 1024 : 1024 * 1024 * 1024;
+  if (blob.size > limit) {
+    toast(t(wav || !ffmpegAvailable ? 'projects.too_large' : 'projects.too_large_media'), true);
     return;
   }
   const fd = new FormData();
-  fd.append('audio', projectCapture.blob, projectCapture.filename || 'source.wav');
+  fd.append('media', blob, filename);
   fd.append('name', $('projectName').value.trim() || t('projects.default_name'));
   const subtitleFile = $('projectSubtitles').files[0];
   if (subtitleFile) fd.append('subtitles', await subtitleFile.text());
@@ -458,6 +500,7 @@ async function createProject() {
     $('newProjectCard').hidden = true;
     $('projectName').value = '';
     $('projectSubtitles').value = '';
+    $('projectMedia').value = '';
     projectCapture.clear();
     await loadProjects();
     openProject(project);
@@ -471,6 +514,7 @@ async function createProject() {
 
 $('newProjectBtn').onclick = () => {
   $('newProjectCard').hidden = false;
+  syncProjectMediaInput();
   $('projectCreateHint').textContent = '';
 };
 $('projectCreateCancel').onclick = () => {
@@ -478,6 +522,7 @@ $('projectCreateCancel').onclick = () => {
   projectCapture.clear();
   $('projectName').value = '';
   $('projectSubtitles').value = '';
+  $('projectMedia').value = '';
 };
 $('projectCreate').onclick = createProject;
 $('projectSave').onclick = saveProject;

@@ -38,6 +38,10 @@
         <label for="workspaceDir" data-i18n="settings.workspace">工作区目录（可选）</label>
         <input type="text" id="workspaceDir" placeholder="~/Library/Application Support/sh.laverock.desktop" />
         <div class="hint" data-i18n="settings.workspace.hint">留空使用默认位置。设置后模型下载到「目录/models」、虚拟环境装到「目录/tools」，方便把大文件放到更大的磁盘；重启后生效。</div>
+        <label for="ffmpegPath" data-i18n="settings.ffmpeg">ffmpeg 路径（可选）</label>
+        <input type="text" id="ffmpegPath" placeholder="/opt/homebrew/bin/ffmpeg" />
+        <div class="hint" id="ffmpegHint"></div>
+        <div class="hint" data-i18n="settings.ffmpeg.hint">用于导入视频和 MP3 等格式。留空时依次查找环境变量 LAVEROCK_FFMPEG 与系统 PATH。</div>
         <div class="hint"><span data-i18n="settings.modelsdir">当前模型目录：</span><code id="pathModels">…</code> · <span data-i18n="settings.toolsdir">虚拟环境目录：</span><code id="pathTools">…</code> · <span data-i18n="settings.scriptsdir">脚本目录：</span><code id="pathScripts">…</code></div>
         <div class="actions" style="margin-top:14px">
           <button id="saveSettings" type="button" data-i18n="settings.save">保存设置</button>

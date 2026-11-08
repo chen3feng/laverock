@@ -8,17 +8,25 @@ use axum::{
     Json, Router,
 };
 use laverock_core::{decode_wav, encode_wav, i18n, CoreError};
+use std::{fs, path::PathBuf};
 
 use super::{request_lang, subtitle_response, ApiError, AppState};
 use crate::{
     dubbing,
+    media::Ffmpeg,
     projects::{self, Mix, Project, Segment},
+    reference::new_id,
     subtitles,
 };
 
-/// A source clip is decoded in memory; 30 minutes of 48 kHz stereo is about
-/// 330 MB, so this is generous for the WAV files the page accepts today.
-const MAX_SOURCE_BYTES: usize = 200 * 1024 * 1024;
+/// A WAV is decoded in memory; 30 minutes of 48 kHz stereo is about
+/// 330 MB, so this is generous for the audio-only path.
+const MAX_WAV_BYTES: usize = 200 * 1024 * 1024;
+/// Videos are streamed to disk instead of held in memory, so the bound is
+/// about disk use rather than RAM.
+const MAX_MEDIA_BYTES: usize = 1024 * 1024 * 1024;
+/// Multipart framing sits on top of the file itself.
+const BODY_LIMIT: usize = MAX_MEDIA_BYTES + 1024 * 1024;
 
 pub(crate) fn router() -> Router<AppState> {
     Router::new()
@@ -26,7 +34,7 @@ pub(crate) fn router() -> Router<AppState> {
             "/api/projects",
             get(list_projects)
                 .post(create_project)
-                .layer(DefaultBodyLimit::max(MAX_SOURCE_BYTES + 1024 * 1024)),
+                .layer(DefaultBodyLimit::max(BODY_LIMIT)),
         )
         .route(
             "/api/projects/{id}",
@@ -35,6 +43,7 @@ pub(crate) fn router() -> Router<AppState> {
                 .delete(delete_project),
         )
         .route("/api/projects/{id}/source", get(project_source))
+        .route("/api/projects/{id}/media", get(project_media))
         .route("/api/projects/{id}/transcribe", post(transcribe_project))
         .route("/api/projects/{id}/subtitles", get(download_subtitles))
         .route("/api/projects/{id}/synthesize", post(synthesize_project))
@@ -50,16 +59,35 @@ async fn list_projects(State(state): State<AppState>) -> Result<Json<Vec<Project
     Ok(Json(state.projects.list()?))
 }
 
-/// `POST /api/projects` — multipart: `audio` (WAV, required), `name`, and
-/// optional `subtitles` (SRT/VTT text). With subtitles the cues are
+/// An upload that has been streamed into the scratch directory. Dropping it
+/// removes the file, so every error path cleans up; a successful create
+/// has already moved or copied it.
+struct Upload {
+    path: PathBuf,
+    file_name: String,
+    size: usize,
+}
+
+impl Drop for Upload {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.path);
+    }
+}
+
+/// `POST /api/projects` — multipart: `audio` (WAV), `media`/`video` (any
+/// format ffmpeg can read), `name`, and optional `subtitles` (SRT/VTT
+/// text). WAV is decoded directly; everything else is probed with
+/// `ffprobe`, its first audio track extracted as `source.wav`, and the
+/// original kept for the editor's player. With subtitles the cues are
 /// imported; otherwise the project starts empty and can be transcribed.
 async fn create_project(
     State(state): State<AppState>,
     mut multipart: Multipart,
 ) -> Result<Json<Project>, ApiError> {
     let mut name = String::new();
-    let mut audio: Option<Vec<u8>> = None;
+    let mut upload: Option<Upload> = None;
     let mut subtitle_text = String::new();
+    let scratch = state.projects.scratch()?;
     while let Some(mut field) = multipart
         .next_field()
         .await
@@ -72,16 +100,10 @@ async fn create_project(
                     .await
                     .map_err(|e| ApiError::bad_request(format!("bad name: {e}")))?;
             }
-            Some("audio") => {
-                let mut bytes = Vec::new();
-                while let Some(chunk) = field
-                    .chunk()
-                    .await
-                    .map_err(|e| ApiError::bad_request(format!("bad audio upload: {e}")))?
-                {
-                    bytes.extend_from_slice(&chunk);
-                }
-                audio = Some(bytes);
+            Some("audio") | Some("media") | Some("video") => {
+                // Stream to disk: a video is far too large to hold while
+                // the rest of the form is still arriving.
+                upload = Some(receive_upload(&mut field, &scratch).await?);
             }
             Some("subtitles") => {
                 subtitle_text = field
@@ -93,12 +115,7 @@ async fn create_project(
         }
     }
 
-    let audio = audio
-        .filter(|bytes| !bytes.is_empty())
-        .ok_or_else(|| ApiError::bad_request("missing required field: audio"))?;
-    if !is_wav(&audio) {
-        return Err(CoreError::UserError(i18n::Message::new(i18n::Key::ProjectWavOnly)).into());
-    }
+    let upload = upload.ok_or_else(|| ApiError::bad_request("missing required field: audio"))?;
     let segments = if subtitle_text.trim().is_empty() {
         Vec::new()
     } else {
@@ -116,13 +133,18 @@ async fn create_project(
         name
     };
 
-    // Decoding a long clip is blocking, and the bytes must stay for storage;
-    // do both in one worker so the upload is not copied.
     let store = state.projects.clone();
+    let scratch_for_task = scratch.clone();
+    let ffmpeg_path = state.settings.get().ffmpeg_path;
     let project = tokio::task::spawn_blocking(move || {
-        let (samples, rate) = decode_wav(&audio)?;
-        let duration = samples.len() as f32 / rate.max(1) as f32;
-        store.create(&name, &audio, duration, segments)
+        create_from_upload(
+            &store,
+            &scratch_for_task,
+            &ffmpeg_path,
+            &name,
+            upload,
+            segments,
+        )
     })
     .await
     .map_err(|e| ApiError {
@@ -130,6 +152,103 @@ async fn create_project(
         message: format!("project task panicked: {e}"),
     })??;
     Ok(Json(project))
+}
+
+/// Decode the upload on a blocking thread. WAV goes straight to the store;
+/// anything else needs `ffmpeg` to produce the audio track first.
+fn create_from_upload(
+    store: &projects::ProjectStore,
+    scratch: &std::path::Path,
+    ffmpeg_path: &str,
+    name: &str,
+    upload: Upload,
+    segments: Vec<Segment>,
+) -> Result<Project, CoreError> {
+    if looks_like_wav_file(&upload.path) {
+        if upload.size > MAX_WAV_BYTES {
+            return Err(user_core_error(i18n::Key::ProjectAudioTooLarge));
+        }
+        let bytes = fs::read(&upload.path)?;
+        let (samples, rate) = decode_wav(&bytes)?;
+        let duration = samples.len() as f32 / rate.max(1) as f32;
+        return store.create(name, &bytes, duration, segments);
+    }
+
+    let ffmpeg = Ffmpeg::discover(ffmpeg_path)
+        .ok_or_else(|| user_core_error(i18n::Key::ProjectFfmpegMissing))?;
+    let extracted = scratch.join(format!("{}.wav", new_id('u')));
+    let outcome = (|| {
+        let info = ffmpeg.probe(&upload.path)?;
+        if !info.has_audio {
+            return Err(user_core_error(i18n::Key::ProjectNoAudioTrack));
+        }
+        ffmpeg.extract_audio(&upload.path, &extracted)?;
+        let wav = fs::read(&extracted)?;
+        let (samples, rate) = decode_wav(&wav)?;
+        let audio_duration = samples.len() as f32 / rate.max(1) as f32;
+        let duration = if info.duration > 0.0 {
+            info.duration
+        } else {
+            audio_duration
+        };
+        let ext = std::path::Path::new(&upload.file_name)
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .unwrap_or("");
+        store.create_media(name, &upload.path, ext, &wav, &info, duration, segments)
+    })();
+    let _ = fs::remove_file(&extracted);
+    outcome
+}
+
+/// Read one file field into the scratch directory, enforcing the size cap
+/// while the bytes arrive.
+async fn receive_upload(
+    field: &mut axum::extract::multipart::Field<'_>,
+    scratch: &std::path::Path,
+) -> Result<Upload, ApiError> {
+    use tokio::io::AsyncWriteExt;
+
+    let file_name = field.file_name().unwrap_or("").to_string();
+    let path = scratch.join(format!("{}.upload", new_id('u')));
+    let mut file = tokio::fs::File::create(&path).await?;
+    let mut size = 0usize;
+    loop {
+        let chunk = match field.chunk().await {
+            Ok(Some(chunk)) => chunk,
+            Ok(None) => break,
+            Err(e) => {
+                drop(file);
+                let _ = tokio::fs::remove_file(&path).await;
+                return Err(ApiError::bad_request(format!("bad media upload: {e}")));
+            }
+        };
+        size += chunk.len();
+        if size > MAX_MEDIA_BYTES {
+            drop(file);
+            let _ = tokio::fs::remove_file(&path).await;
+            return Err(user_error(i18n::Key::ProjectMediaTooLarge));
+        }
+        if let Err(e) = file.write_all(&chunk).await {
+            drop(file);
+            let _ = tokio::fs::remove_file(&path).await;
+            return Err(e.into());
+        }
+    }
+    if let Err(e) = file.flush().await {
+        drop(file);
+        let _ = tokio::fs::remove_file(&path).await;
+        return Err(e.into());
+    }
+    if size == 0 {
+        let _ = tokio::fs::remove_file(&path).await;
+        return Err(ApiError::bad_request("missing required field: audio"));
+    }
+    Ok(Upload {
+        path,
+        file_name,
+        size,
+    })
 }
 
 async fn get_project(
@@ -210,7 +329,8 @@ async fn delete_project(
     Ok(StatusCode::NO_CONTENT)
 }
 
-/// The clip the project was created from, for the editor's player.
+/// The audio track (WAV) of the project's source, for the editor's player
+/// and for transcription.
 async fn project_source(
     State(state): State<AppState>,
     Path(id): Path<String>,
@@ -224,6 +344,43 @@ async fn project_source(
         .into_response())
 }
 
+/// The uploaded media file itself, so the editor can show the video (or
+/// play an imported MP3) instead of only the extracted track.
+async fn project_media(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Response, ApiError> {
+    let (name, bytes) = state.projects.media(&id)?;
+    Ok((
+        StatusCode::OK,
+        [(header::CONTENT_TYPE, media_content_type(&name).to_string())],
+        bytes,
+    )
+        .into_response())
+}
+
+fn media_content_type(name: &str) -> &'static str {
+    let ext = std::path::Path::new(name)
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    match ext.as_str() {
+        "mp4" | "m4v" => "video/mp4",
+        "mov" => "video/quicktime",
+        "mkv" => "video/x-matroska",
+        "webm" => "video/webm",
+        "avi" => "video/x-msvideo",
+        "m4a" | "aac" => "audio/mp4",
+        "mp3" => "audio/mpeg",
+        "flac" => "audio/flac",
+        "ogg" | "oga" => "audio/ogg",
+        "opus" => "audio/opus",
+        "wav" => "audio/wav",
+        _ => "application/octet-stream",
+    }
+}
+
 /// Run speech recognition over the project's source and replace its cues.
 async fn transcribe_project(
     State(state): State<AppState>,
@@ -231,7 +388,9 @@ async fn transcribe_project(
 ) -> Result<Json<Project>, ApiError> {
     let (_, bytes) = state.projects.source(&id)?;
     if !is_wav(&bytes) {
-        return Err(CoreError::UserError(i18n::Message::new(i18n::Key::ProjectWavOnly)).into());
+        return Err(ApiError::bad_request(
+            "the project's audio track is not a WAV file",
+        ));
     }
     let transcriber = state.transcriber.clone();
     let transcript = tokio::task::spawn_blocking(move || transcriber.transcribe_detailed(&bytes))
@@ -510,7 +669,11 @@ async fn project_file(
 }
 
 fn user_error(key: i18n::Key) -> ApiError {
-    ApiError::from(CoreError::UserError(i18n::Message::new(key)))
+    ApiError::from(user_core_error(key))
+}
+
+fn user_core_error(key: i18n::Key) -> CoreError {
+    CoreError::UserError(i18n::Message::new(key))
 }
 
 fn render_error(err: &CoreError, lang: i18n::Lang) -> String {
@@ -522,4 +685,14 @@ fn render_error(err: &CoreError, lang: i18n::Lang) -> String {
 
 fn is_wav(bytes: &[u8]) -> bool {
     bytes.len() >= 12 && &bytes[..4] == b"RIFF" && &bytes[8..12] == b"WAVE"
+}
+
+/// Sniff the upload without reading it into memory.
+fn looks_like_wav_file(path: &std::path::Path) -> bool {
+    use std::io::Read;
+    let Ok(mut file) = fs::File::open(path) else {
+        return false;
+    };
+    let mut header = [0u8; 12];
+    file.read_exact(&mut header).is_ok() && is_wav(&header)
 }

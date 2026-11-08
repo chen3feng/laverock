@@ -95,32 +95,43 @@ async fn get_settings(
     if !is_loopback(&peer) {
         return Err(ApiError::forbidden());
     }
+    Ok(Json(settings_json(&state)))
+}
+
+/// The settings plus paths the page displays but cannot edit. Both the GET
+/// and the POST response use it, so saving refreshes the detection hints.
+fn settings_json(state: &AppState) -> serde_json::Value {
     let settings = state.settings.get();
     let system_proxy = match settings.proxy_mode {
         settings::ProxyMode::System => proxy::system(),
         settings::ProxyMode::Manual | settings::ProxyMode::Direct => None,
     };
-    Ok(Json(serde_json::json!({
+    let ffmpeg_bin = crate::media::Ffmpeg::discover(&settings.ffmpeg_path)
+        .map(|found| found.ffmpeg.display().to_string());
+    serde_json::json!({
         "proxy_mode": settings.proxy_mode,
         "proxy": settings.proxy,
         "system_proxy": system_proxy,
         "hf_endpoint": settings.hf_endpoint,
         "pip_index": settings.pip_index,
         "workspace_dir": settings.workspace_dir,
+        "ffmpeg_path": settings.ffmpeg_path,
+        "ffmpeg_bin": ffmpeg_bin,
         "language": settings.language,
         "models_dir": state.models.models_dir().display().to_string(),
         "tools_dir": state.models.tools_dir().map(|p| p.display().to_string()),
         "scripts_dir": state.models.scripts_dir().map(|p| p.display().to_string()),
-    })))
+    })
 }
 
 async fn set_settings(
     State(state): State<AppState>,
     ConnectInfo(peer): ConnectInfo<SocketAddr>,
     Json(body): Json<Settings>,
-) -> Result<Json<Settings>, ApiError> {
+) -> Result<Json<serde_json::Value>, ApiError> {
     if !is_loopback(&peer) {
         return Err(ApiError::forbidden());
     }
-    Ok(Json(state.settings.update(body)?))
+    state.settings.update(body)?;
+    Ok(Json(settings_json(&state)))
 }

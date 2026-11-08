@@ -9,7 +9,10 @@
 //! per-segment TTS, mix and exports) so adding them does not invalidate
 //! projects created by this stage.
 
-use crate::reference::{is_valid_id, new_id, write_atomic};
+use crate::{
+    media::MediaInfo,
+    reference::{is_valid_id, new_id, write_atomic},
+};
 use laverock_core::{CoreError, Result, TranscriptSegment};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -21,6 +24,9 @@ use std::{
 
 const PROJECT_FILE: &str = "project.json";
 const SOURCE_FILE: &str = "source.wav";
+/// Uploads in flight. A finished upload is moved into its project
+/// directory, which is why this lives next to the projects.
+const SCRATCH_DIR: &str = ".scratch";
 /// Generated per-cue audio, relative to the project directory.
 const SEGMENT_DIR: &str = "segments";
 /// Finished mixes and other exports, relative to the project directory.
@@ -28,10 +34,15 @@ const EXPORT_DIR: &str = "exports";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Source {
-    /// File name inside the project directory.
+    /// File name inside the project directory: the uploaded media for a
+    /// video project, or the WAV clip for an audio-only one.
     pub file: String,
-    /// `audio` for now; `video` once media packaging lands.
+    /// `audio` or `video`.
     pub kind: String,
+    /// Audio track used for transcription, dubbing and mixing. Empty on
+    /// projects created before media packaging; those use `file`.
+    #[serde(default)]
+    pub audio: String,
     pub duration: f32,
     #[serde(default)]
     pub width: u32,
@@ -39,6 +50,18 @@ pub struct Source {
     pub height: u32,
     #[serde(default)]
     pub fps: f32,
+}
+
+impl Source {
+    /// The file the audio pipeline reads (WAV). Falls back to `file` for
+    /// projects stored before `audio` existed.
+    pub fn audio_file(&self) -> &str {
+        if self.audio.is_empty() {
+            &self.file
+        } else {
+            &self.audio
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -186,6 +209,7 @@ impl ProjectStore {
             source: Source {
                 file: SOURCE_FILE.to_string(),
                 kind: "audio".to_string(),
+                audio: SOURCE_FILE.to_string(),
                 duration,
                 width: 0,
                 height: 0,
@@ -204,6 +228,75 @@ impl ProjectStore {
         };
         self.save(&project)?;
         Ok(project)
+    }
+
+    /// Store a project whose source is an uploaded media file (video or a
+    /// non-WAV audio format). `media_path` is moved out of the scratch
+    /// directory; `wav` is the mono track extracted from it and becomes the
+    /// audio the pipeline reads.
+    #[allow(clippy::too_many_arguments)]
+    pub fn create_media(
+        &self,
+        name: &str,
+        media_path: &Path,
+        media_ext: &str,
+        wav: &[u8],
+        info: &MediaInfo,
+        duration: f32,
+        mut segments: Vec<Segment>,
+    ) -> Result<Project> {
+        let name = clean_name(name)?;
+        normalize_segments(&mut segments, duration)?;
+        let id = new_id('j');
+        let dir = self.root.join(&id);
+        fs::create_dir_all(&dir)?;
+        let file = media_file_name(media_ext);
+        if let Err(rename_error) = fs::rename(media_path, dir.join(&file)) {
+            // A scratch directory on another filesystem cannot be renamed
+            // across; copy instead, then drop the upload.
+            tracing::debug!(error = %rename_error, "copying the media upload into place");
+            if let Err(copy_error) = fs::copy(media_path, dir.join(&file)) {
+                let _ = fs::remove_dir_all(&dir);
+                return Err(CoreError::Io(copy_error));
+            }
+            let _ = fs::remove_file(media_path);
+        }
+        fs::write(dir.join(SOURCE_FILE), wav)?;
+        let now = now_secs();
+        let project = Project {
+            id: id.clone(),
+            name,
+            scenario: "subtitles".to_string(),
+            source: Source {
+                file,
+                kind: if info.has_video { "video" } else { "audio" }.to_string(),
+                audio: SOURCE_FILE.to_string(),
+                duration,
+                width: info.width,
+                height: info.height,
+                fps: info.fps,
+            },
+            source_language: default_source_language(),
+            target_language: String::new(),
+            engine_id: String::new(),
+            voice_id: String::new(),
+            segments,
+            mix: Mix::default(),
+            exports: Vec::new(),
+            revision: 1,
+            created_at: now,
+            updated_at: now,
+        };
+        self.save(&project)?;
+        Ok(project)
+    }
+
+    /// A directory for uploads in flight. Keeping it beside the projects
+    /// means the finished file can be renamed into place.
+    pub fn scratch(&self) -> Result<PathBuf> {
+        let dir = self.root.join(SCRATCH_DIR);
+        fs::create_dir_all(&dir)?;
+        Ok(dir)
     }
 
     /// Newest first.
@@ -299,11 +392,21 @@ impl ProjectStore {
         Ok(())
     }
 
-    /// The stored source clip and its file name.
+    /// The audio track (WAV) used by transcription, dubbing and mixing, and
+    /// its file name.
     pub fn source(&self, id: &str) -> Result<(String, Vec<u8>)> {
         let project = self.load(id)?;
-        let bytes = fs::read(self.dir(id)?.join(&project.source.file))?;
-        Ok((project.source.file, bytes))
+        let file = project.source.audio_file().to_string();
+        let bytes = fs::read(self.dir(id)?.join(&file))?;
+        Ok((file, bytes))
+    }
+
+    /// The uploaded media file itself, for the editor's video player.
+    pub fn media(&self, id: &str) -> Result<(String, Vec<u8>)> {
+        let project = self.load(id)?;
+        let file = project.source.file.clone();
+        let bytes = fs::read(self.dir(id)?.join(&file))?;
+        Ok((file, bytes))
     }
 
     /// Persist a project the worker has been mutating (dubbing writes each
@@ -438,6 +541,24 @@ pub fn from_transcript(segments: &[TranscriptSegment]) -> Vec<Segment> {
             ..Segment::default()
         })
         .collect()
+}
+
+/// The uploaded media keeps a sanitized extension: `ffmpeg` reads the
+/// format from the bytes, but the editor's player and the download name
+/// benefit from a truthful one.
+fn media_file_name(ext: &str) -> String {
+    let ext: String = ext
+        .trim_start_matches('.')
+        .to_ascii_lowercase()
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric())
+        .take(8)
+        .collect();
+    if ext.is_empty() {
+        "source.media".to_string()
+    } else {
+        format!("source.{ext}")
+    }
 }
 
 fn clean_name(raw: &str) -> Result<String> {
@@ -617,6 +738,43 @@ mod tests {
     }
 
     #[test]
+    fn stores_video_sources_with_their_audio_track() {
+        let (store, dir) = store("media");
+        let media = dir.join("upload.mp4");
+        fs::write(&media, b"fake video bytes").unwrap();
+        let wav = wav();
+        let info = MediaInfo {
+            duration: 1.0,
+            width: 640,
+            height: 360,
+            fps: 25.0,
+            has_video: true,
+            has_audio: true,
+        };
+        let project = store
+            .create_media("Clip", &media, "mp4", &wav, &info, 1.0, Vec::new())
+            .unwrap();
+        assert_eq!(project.source.kind, "video");
+        assert_eq!(project.source.file, "source.mp4");
+        assert_eq!(project.source.audio, SOURCE_FILE);
+        assert_eq!(project.source.width, 640);
+        assert_eq!(project.source.height, 360);
+        assert_eq!(project.source.fps, 25.0);
+        assert!(!media.exists(), "the upload leaves the scratch directory");
+        assert_eq!(store.source(&project.id).unwrap().1, wav);
+        let (name, bytes) = store.media(&project.id).unwrap();
+        assert_eq!(name, "source.mp4");
+        assert_eq!(bytes, b"fake video bytes");
+
+        // Projects written before `audio` existed read their single file.
+        let mut legacy = project;
+        legacy.source.audio.clear();
+        assert_eq!(legacy.source.audio_file(), "source.mp4");
+
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
     fn updates_segments_and_bumps_the_revision() {
         let (store, dir) = store("update");
         let project = store.create("Edit", &wav(), 1.0, Vec::new()).unwrap();
@@ -789,6 +947,7 @@ mod tests {
             source: Source {
                 file: SOURCE_FILE.into(),
                 kind: "audio".into(),
+                audio: SOURCE_FILE.into(),
                 duration: 2.0,
                 width: 0,
                 height: 0,

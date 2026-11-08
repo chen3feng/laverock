@@ -16,7 +16,7 @@ describes the loopback listener.
 
 | Method | Path | Description |
 | --- | --- | --- |
-| GET | `/api/health` | service status |
+| GET | `/api/health` | service status, including whether `ffmpeg` was found |
 | GET | `/api/engines` | registered engines and their defaults |
 | POST | `/api/engines/:id/synthesize` | multipart `text` plus either `profile_id` or (`prompt` WAV + `prompt_text`); optional engine parameters → WAV. Add `x-laverock-job: 1` to run it as a background job, or `x-laverock-stream: 1` + `stream_audio=1` to stream sentences |
 | POST | `/api/engines/:id/unload` | release the model's memory (it stays installed) → `204` |
@@ -52,11 +52,12 @@ describes the loopback listener.
 | GET | `/api/tools` | audio tools available on this machine → `{denoise, separation, mp3}` |
 | POST | `/api/tools/enhance` | multipart `audio` (WAV) + `mode` (`denoise`, `vocals`, `instrumental`, `both`) → `202` background job; a single stem is a WAV, `both` also bundles `stems.zip` |
 | GET | `/api/projects` | subtitle projects, newest first |
-| POST | `/api/projects` | multipart `audio` (WAV), optional `name` and `subtitles` (SRT/VTT text) → project; without subtitles the cues stay empty until transcribed |
+| POST | `/api/projects` | multipart `audio` (WAV) or `media`/`video` (any format ffmpeg reads), optional `name` and `subtitles` (SRT/VTT text) → project; without subtitles the cues stay empty until transcribed |
 | GET | `/api/projects/:id` | one project |
 | PATCH | `/api/projects/:id` | JSON `{name?, source_language?, target_language?, segments?}` → project |
 | DELETE | `/api/projects/:id` | delete a project and its source clip |
-| GET | `/api/projects/:id/source` | the project's source clip (WAV) |
+| GET | `/api/projects/:id/source` | the project's audio track (WAV) |
+| GET | `/api/projects/:id/media` | the uploaded media file itself (video or compressed audio) |
 | POST | `/api/projects/:id/transcribe` | run speech recognition over the source and replace the cues → project |
 | POST | `/api/projects/:id/synthesize` | dubbing job: multipart, optional repeated `segment` ids to re-run only those cues → `202`; writes `segments/<id>.wav` per cue |
 | GET | `/api/projects/:id/segments/:segment/audio` | the generated audio for one cue |
@@ -71,7 +72,7 @@ describes the loopback listener.
 | POST | `/api/pair/claim` | exchange a pairing code for a device cookie (public) |
 | GET | `/api/devices` · DELETE `/api/devices/:id` | desktop only: list or revoke phones |
 | GET/POST | `/api/settings/lan` | desktop only: toggle the LAN listener |
-| GET/POST | `/api/settings` | desktop only: download proxy, mirrors, machine UI language |
+| GET/POST | `/api/settings` | desktop only: download proxy, mirrors, machine UI language, ffmpeg path |
 | GET | `/api/models` | desktop only: catalog, install state, job log tail (`?lang=en` for English) |
 | POST | `/api/models/:id/install` | desktop only: start a download in the background |
 | POST | `/api/models/reload` | desktop only: re-scan `models/*/engine.json` |
@@ -103,6 +104,18 @@ SenseVoice model. `PATCH` replaces the whole cue list, so the editor sends
 every row; cue times must be finite, non-negative, `end > start`, and start
 inside the clip (overlaps are allowed). Each segment also carries
 `translated`, `tts_path` and `status`.
+
+The source can be a WAV clip or, when `ffmpeg`/`ffprobe` are available, a
+video or compressed audio file (MP4, MOV, MKV, MP3, M4A …). Non-WAV uploads
+are streamed to disk rather than held in memory, probed with `ffprobe`, and
+their first audio track is extracted as mono 48 kHz WAV. `source.kind` is
+`video` or `audio`; video projects also record `width`, `height` and `fps`.
+`/api/projects/:id/source` always serves the extracted WAV track that
+transcription, dubbing and mixing read, while `/media` serves the original
+upload for the editor's player. Uploads are limited to 1 GB (200 MB for WAV,
+which is decoded in memory). `GET /api/health` reports whether `ffmpeg` was
+found; Settings accepts an explicit `ffmpeg_path`, otherwise
+`LAVEROCK_FFMPEG` is checked and then `PATH`.
 
 Dubbing uses the project's saved `engine_id` and `voice_id` (set through
 `PATCH`; an empty voice means the engine's own default, as with preset
