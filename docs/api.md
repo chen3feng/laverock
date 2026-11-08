@@ -51,6 +51,14 @@ describes the loopback listener.
 | POST | `/api/audio/mp3` | body: WAV → MP3 (built-in pure-Rust encoder, no ffmpeg needed) |
 | GET | `/api/tools` | audio tools available on this machine → `{denoise, separation, mp3}` |
 | POST | `/api/tools/enhance` | multipart `audio` (WAV) + `mode` (`denoise`, `vocals`, `instrumental`, `both`) → `202` background job; a single stem is a WAV, `both` also bundles `stems.zip` |
+| GET | `/api/projects` | subtitle projects, newest first |
+| POST | `/api/projects` | multipart `audio` (WAV), optional `name` and `subtitles` (SRT/VTT text) → project; without subtitles the cues stay empty until transcribed |
+| GET | `/api/projects/:id` | one project |
+| PATCH | `/api/projects/:id` | JSON `{name?, source_language?, target_language?, segments?}` → project |
+| DELETE | `/api/projects/:id` | delete a project and its source clip |
+| GET | `/api/projects/:id/source` | the project's source clip (WAV) |
+| POST | `/api/projects/:id/transcribe` | run speech recognition over the source and replace the cues → project |
+| GET | `/api/projects/:id/subtitles?format=srt\|vtt` | the project's cues as a downloadable file |
 | POST | `/api/transcribe` | multipart `audio` (WAV) → transcript (needs the SenseVoice model) |
 | POST | `/api/transcribe/details` | same input → `{text, segments: [{start, end, text}], language, duration}` |
 | POST | `/api/transcribe/subtitles?format=srt\|vtt` | same input → downloadable SRT or WebVTT (`vtt`; `srt` is the default) |
@@ -83,6 +91,14 @@ job artifacts: `denoised.wav`, `vocals.wav`, `instrumental.wav`, or — for
 `both` — `vocals.wav`, `instrumental.wav` and `stems.zip`. Uploads must be
 WAV, at most 200 MB and 30 minutes; cancelling kills the separator process
 and removes its temporary directory. MP3 export reuses `POST /api/audio/mp3`.
+
+A **project** pairs one source clip with timed cues. `POST /api/projects`
+accepts an existing SRT/VTT file and imports its cues; otherwise the project
+starts empty and `POST /api/projects/:id/transcribe` fills it from the
+SenseVoice model. `PATCH` replaces the whole cue list, so the editor sends
+every row; cue times must be finite, non-negative, `end > start`, and start
+inside the clip (overlaps are allowed). Each segment also carries `translated`, `tts_path` and
+`status` fields that the subtitle stage leaves untouched, ready for dubbing.
 
 Engine parameters (`speed`, `num_steps`, `cfg`, `seed`, …) are declared per
 engine by its manifest and validated server-side against the same list the

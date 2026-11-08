@@ -1,0 +1,43 @@
+    <!-- ================= 字幕项目 ================= -->
+    <section id="page-projects" class="page">
+      <div class="page-head" style="display:flex;align-items:flex-end;justify-content:space-between;gap:12px;flex-wrap:wrap">
+        <div><h1 data-i18n="projects.title">字幕项目</h1><p class="sub" data-i18n="projects.sub">导入一段音频，自动转写并校对时间轴，导出 SRT/VTT。</p></div>
+        <div><button id="newProjectBtn" type="button" data-i18n="projects.new">＋ 新建项目</button></div>
+      </div>
+
+      <div class="card" id="newProjectCard" hidden>
+        <label data-i18n="projects.audio">音频（WAV）</label>
+        <div id="projectCapture"></div>
+        <label for="projectName" data-i18n="projects.name">项目名称</label>
+        <input id="projectName" type="text" data-i18n-ph="projects.name.ph" />
+        <label for="projectSubtitles" data-i18n="projects.import">已有字幕（可选）</label>
+        <input id="projectSubtitles" type="file" accept=".srt,.vtt" />
+        <div class="hint" data-i18n="projects.hint">导入字幕后不再自动转写；没有字幕时会用 SenseVoice 转写。</div>
+        <div class="actions" style="margin-top:16px">
+          <button id="projectCreate" type="button" data-i18n="projects.create">创建项目</button>
+          <button class="ghost" id="projectCreateCancel" type="button" data-i18n="cancel">取消</button>
+          <span class="hint" id="projectCreateHint"></span>
+        </div>
+      </div>
+
+      <div class="grid" id="projectGrid"></div>
+      <div class="empty" id="projectsEmpty" data-i18n="projects.empty" hidden>还没有项目。点击「新建项目」导入一段音频。</div>
+
+      <div class="card" id="projectEditor" hidden>
+        <div class="project-head">
+          <input id="projectTitle" class="project-title" type="text" />
+          <span class="hint" id="projectMeta"></span>
+        </div>
+        <div class="actions">
+          <button id="projectSave" type="button" data-i18n="projects.save">保存分段</button>
+          <button class="ghost" id="projectTranscribe" type="button" data-i18n="projects.transcribe">重新转写</button>
+          <button class="ghost" id="projectSrt" type="button">SRT</button>
+          <button class="ghost" id="projectVtt" type="button">VTT</button>
+          <button class="ghost danger" id="projectDelete" type="button" data-i18n="ui.delete">删除</button>
+          <button class="ghost" id="projectClose" type="button" data-i18n="projects.close">关闭</button>
+        </div>
+        <audio id="projectAudio" controls></audio>
+        <div class="seg-list" id="projectSegments"></div>
+        <button class="ghost small" id="projectAddSegment" type="button" data-i18n="projects.add_segment">＋ 添加分段</button>
+      </div>
+    </section>

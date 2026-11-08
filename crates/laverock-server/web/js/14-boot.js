@@ -11,6 +11,7 @@ function showPage(page) {
   document.title = `${t('nav.' + page)} · Laverock`;
   if (page === 'captures') { loadCaptures(); loadEnhanceStatus(); }
   if (page === 'tools') loadToolsPage();
+  if (page === 'projects') loadProjects();
   if (page === 'voices') loadProfiles();
   if (page === 'history') loadHistory();
   // Installs run on the server and can finish while another page is open,

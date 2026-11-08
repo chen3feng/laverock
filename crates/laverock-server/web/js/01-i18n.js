@@ -37,7 +37,7 @@ async function setLanguage(next, { persist = true } = {}) {
   fillPreset($('hfPreset'), HF_PRESETS);
   fillPreset($('pipPreset'), PIP_PRESETS);
   syncProxyMode();
-  await Promise.all([loadEngines(), loadProfiles(), loadCaptures(), loadSettingsPage(), loadToolsPage()]);
+  await Promise.all([loadEngines(), loadProfiles(), loadCaptures(), loadSettingsPage(), loadToolsPage(), loadProjects()]);
   renderHistory();
   await loadModels();
   if (session && session.lan_enabled) loadDevices();

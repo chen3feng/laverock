@@ -27,6 +27,7 @@ mod jobs;
 mod models;
 mod openai_compat;
 mod profiles;
+mod projects;
 mod proxy;
 mod reference;
 mod remote;
@@ -121,6 +122,9 @@ async fn main() {
         tracing::info!("migrated {migrated} saved voices into the recording library");
     }
     let history = Arc::new(history::HistoryStore::open(&data_dir).expect("open history"));
+    let projects = Arc::new(
+        projects::ProjectStore::open(std::path::Path::new(&data_dir)).expect("open projects dir"),
+    );
     let jobs = Arc::new(jobs::JobStore::open(std::path::Path::new(&data_dir)).expect("open jobs"));
     let remote = Arc::new(RemoteState::open(&data_dir).expect("open remote state"));
     let scripts_dir = models::resolve_scripts_dir();
@@ -148,6 +152,7 @@ async fn main() {
         manager,
         profiles,
         history,
+        projects,
         remote: remote.clone(),
         settings,
         models: model_service,

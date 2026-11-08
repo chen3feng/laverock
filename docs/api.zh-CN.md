@@ -49,6 +49,14 @@ Cookie）；以下均指回环监听。
 | POST | `/api/audio/mp3` | 请求体：WAV → MP3（内置纯 Rust 编码器，无需 ffmpeg） |
 | GET | `/api/tools` | 本机可用的音频工具 → `{denoise, separation, mp3}` |
 | POST | `/api/tools/enhance` | multipart：`audio`（WAV）与 `mode`（`denoise` / `vocals` / `instrumental` / `both`）→ `202` 后台任务；单轨为 WAV，`both` 另附 `stems.zip` |
+| GET | `/api/projects` | 字幕项目列表，最近更新的在前 |
+| POST | `/api/projects` | multipart：`audio`（WAV），可选 `name` 与 `subtitles`（SRT/VTT 文本）→ 项目；不带字幕时分段为空，等待转写 |
+| GET | `/api/projects/:id` | 单个项目 |
+| PATCH | `/api/projects/:id` | JSON `{name?, source_language?, target_language?, segments?}` → 项目 |
+| DELETE | `/api/projects/:id` | 删除项目及其源音频 |
+| GET | `/api/projects/:id/source` | 项目的源音频（WAV） |
+| POST | `/api/projects/:id/transcribe` | 对源音频重新语音识别并替换全部分段 → 项目 |
+| GET | `/api/projects/:id/subtitles?format=srt\|vtt` | 项目的分段 → 可下载的 SRT 或 WebVTT |
 | POST | `/api/transcribe` | multipart：`audio`（WAV）→ 转写文字（需安装 SenseVoice 模型） |
 | POST | `/api/transcribe/details` | 同样的输入 → `{text, segments: [{start, end, text}], language, duration}` |
 | POST | `/api/transcribe/subtitles?format=srt\|vtt` | 同样的输入 → 可下载的 SRT 或 WebVTT（`format=vtt`；默认 `srt`） |
@@ -76,6 +84,13 @@ Cookie）；以下均指回环监听。
 `denoised.wav`、`vocals.wav`、`instrumental.wav`；`both` 则同时给出
 `vocals.wav`、`instrumental.wav` 与 `stems.zip`。上传仅支持 WAV，最大 200 MB、
 30 分钟；取消会终止分离进程并删除临时目录。MP3 导出复用 `POST /api/audio/mp3`。
+
+**项目**把一段源音频和一组带时间的字幕绑定在一起。`POST /api/projects` 可以
+导入现成的 SRT/VTT 字幕；不导入时项目从空分段开始，由
+`POST /api/projects/:id/transcribe` 用 SenseVoice 模型补齐。`PATCH` 会整体替换
+分段列表，因此编辑器每次提交所有行；时间必须有限、非负、`end > start`，且起点
+落在音频长度内（允许重叠）。每个分段还带有 `translated`、`tts_path` 和 `status`
+字段，字幕阶段不改动它们，留给后续配音使用。
 
 引擎参数（`speed`、`num_steps`、`cfg`、`seed` 等）由各引擎的清单声明，服务端按
 同一份列表校验，界面也用同一份列表生成控件；`GET /api/engines` 可查看。每个引擎
