@@ -391,7 +391,47 @@ async function main() {
       .map((p) => p.id)
       .find((id) => !projectsBefore.has(id));
     assert.ok(projectId, 'project created');
+
+    // Per-cue dubbing: pick the engine and a voice created through the API,
+    // generate one WAV per cue, and play it back from the editor.
+    const dubVoiceRes = await context.request.post(`${base}/api/profiles`, {
+      multipart: {
+        name: `ui-dub-voice-${Date.now()}`,
+        prompt_text: '那还是36年前, 1987年. 我呢考上了武汉大学的计算机系.',
+        prompt: {
+          name: 'reference.wav',
+          mimeType: 'audio/wav',
+          buffer: fs.readFileSync(ref),
+        },
+      },
+    });
+    assert.ok(dubVoiceRes.ok(), `create dub voice -> HTTP ${dubVoiceRes.status()}`);
+    const dubVoice = await dubVoiceRes.json();
+    await page.evaluate(() => loadProfiles().then(() => openProject(currentProject)));
+    await page.selectOption('#projectEngine', zipvoice);
+    await page.selectOption('#projectVoice', dubVoice.id);
+    await page.click('#projectSynthesize');
+    await page.waitForFunction(
+      () => document.querySelectorAll('#projectSegments .seg-play:not([hidden])').length > 0,
+      null,
+      { timeout: 300_000 },
+    );
+    const dubbed = await apiJson(context.request, `${base}/api/projects/${projectId}`);
+    assert.equal(dubbed.segments[0].status, 'done', 'first cue dubbed');
+    assert.ok(dubbed.segments[0].tts_path, 'cue audio recorded');
+    const cueAudio = await context.request.get(
+      `${base}/api/projects/${projectId}/segments/${dubbed.segments[0].id}/audio`,
+    );
+    assert.ok(cueAudio.ok(), `cue audio -> HTTP ${cueAudio.status()}`);
+    assert.equal(
+      (await cueAudio.body()).subarray(0, 4).toString(),
+      'RIFF',
+      'cue audio is a WAV',
+    );
+    pass('project cues dubbed');
+
     await context.request.delete(`${base}/api/projects/${projectId}`);
+    await context.request.delete(`${base}/api/profiles/${dubVoice.id}`);
 
     // ---------------------------------------------------------------- voices
     say('voices');

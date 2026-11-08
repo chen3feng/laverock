@@ -56,6 +56,8 @@ Cookie）；以下均指回环监听。
 | DELETE | `/api/projects/:id` | 删除项目及其源音频 |
 | GET | `/api/projects/:id/source` | 项目的源音频（WAV） |
 | POST | `/api/projects/:id/transcribe` | 对源音频重新语音识别并替换全部分段 → 项目 |
+| POST | `/api/projects/:id/synthesize` | 配音后台任务：multipart，可重复 `segment` 只重跑指定分段 → `202`；为每段写出 `segments/<id>.wav` |
+| GET | `/api/projects/:id/segments/:segment/audio` | 某一段已生成的配音 |
 | GET | `/api/projects/:id/subtitles?format=srt\|vtt` | 项目的分段 → 可下载的 SRT 或 WebVTT |
 | POST | `/api/transcribe` | multipart：`audio`（WAV）→ 转写文字（需安装 SenseVoice 模型） |
 | POST | `/api/transcribe/details` | 同样的输入 → `{text, segments: [{start, end, text}], language, duration}` |
@@ -90,7 +92,14 @@ Cookie）；以下均指回环监听。
 `POST /api/projects/:id/transcribe` 用 SenseVoice 模型补齐。`PATCH` 会整体替换
 分段列表，因此编辑器每次提交所有行；时间必须有限、非负、`end > start`，且起点
 落在音频长度内（允许重叠）。每个分段还带有 `translated`、`tts_path` 和 `status`
-字段，字幕阶段不改动它们，留给后续配音使用。
+字段。
+
+配音使用项目保存的 `engine_id` 与 `voice_id`（通过 `PATCH` 设置；`voice_id` 为空
+表示用引擎自带默认音色，适合 Kokoro 这类预设引擎）。`POST /api/projects/:id/synthesize`
+作为后台任务运行：`translated` 非空时朗读译文，否则朗读原文，并为每段写一个
+WAV。重复传 `segment` 字段可只重跑指定分段。`tts_path`、`tts_duration` 与
+`status` 由服务端维护，客户端不能设置；修改某段原文或译文会删除过期的配音并把
+该段重置为 `pending`。
 
 引擎参数（`speed`、`num_steps`、`cfg`、`seed` 等）由各引擎的清单声明，服务端按
 同一份列表校验，界面也用同一份列表生成控件；`GET /api/engines` 可查看。每个引擎

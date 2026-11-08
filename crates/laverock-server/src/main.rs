@@ -21,6 +21,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod captures;
+mod dubbing;
 mod export;
 mod history;
 mod jobs;

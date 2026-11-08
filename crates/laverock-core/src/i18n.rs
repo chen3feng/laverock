@@ -150,6 +150,11 @@ messages! {
     ProjectNoCues = "project_no_cues"
         { en: "This project has no subtitle cues yet; transcribe it first.",
           zh: "这个项目还没有字幕分段；请先转写。" },
+    ProjectSynthNoEngine = "project_synth_no_engine"
+        { en: "Choose a synthesis engine before generating the dub.",
+          zh: "请先选择合成引擎再生成配音。" },
+    ProjectSynthProgress = "project_synth_progress"
+        { en: "Synthesizing cue {i}/{n}…", zh: "正在生成第 {i}/{n} 段配音…" },
     ReferenceSilent = "reference_silent"
         { en: "The reference audio is silent; record or upload a clip with speech.",
           zh: "参考音频几乎全是静音，请重新录制或上传一段有人声的音频。" },

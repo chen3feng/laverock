@@ -655,6 +655,67 @@ if curl -s "$BASE/api/health" | grep -q '"transcribe":true'; then
     *武汉*) ok "transcribe project" ;;
     *) bad "transcribe project: $(printf '%s' "$heard" | head -c 160)" ;;
   esac
+
+  # Dubbing: one WAV per cue from the saved engine and voice.
+  dub_wait() { # dub_wait <id> -> terminal status
+    local id="$1" status=""
+    for _ in $(seq 1 300); do
+      status=$(curl -s "$BASE/api/jobs/$id" \
+        | sed -n 's/.*"status":"\([^"]*\)".*/\1/p')
+      case "$status" in done|error|cancelled) break ;; esac
+      sleep 1
+    done
+    printf '%s' "$status"
+  }
+  pv=$(curl -s -X POST "$BASE/api/profiles" -F 'name=smoke-dub-voice' \
+    -F "prompt=@$DIR/test_wavs/leijun-1.wav" \
+    -F "$(field prompt_text '那还是36年前, 1987年. 我呢考上了武汉大学的计算机系.')" \
+    | project_id)
+  [ -n "$pv" ] && ok "dub voice created" || bad "dub voice"
+  code=$(curl -s -o /dev/null -w '%{http_code}' -X PATCH "$BASE/api/projects/$pj" \
+    -H 'Content-Type: application/json' \
+    -d "{\"engine_id\":\"$MODEL\",\"voice_id\":\"$pv\"}")
+  [ "$code" = "200" ] && ok "dubbing voice saved" || bad "dubbing voice -> $code"
+  code=$(curl -s -o /dev/null -w '%{http_code}' -X PATCH "$BASE/api/projects/$pj" \
+    -H 'Content-Type: application/json' -d '{"engine_id":"no-such-engine"}')
+  [ "$code" = "400" ] && ok "unknown dubbing engine -> 400" \
+    || bad "unknown dubbing engine -> $code"
+  jid=$(curl -s -X POST "$BASE/api/projects/$pj/synthesize" -F 'all=1' \
+    | sed -n 's/.*"job_id":"\([^"]*\)".*/\1/p')
+  [ -n "$jid" ] && ok "start dubbing job ($jid)" || bad "start dubbing job"
+  status=$(dub_wait "$jid")
+  [ "$status" = "done" ] && ok "dubbing finished" || bad "dubbing status: $status"
+  pj_json=$(curl -s "$BASE/api/projects/$pj")
+  case "$pj_json" in
+    *'"tts_path":"segments/s1.wav"'*) ok "cue audio stored" ;;
+    *) bad "cue audio missing: $(printf '%s' "$pj_json" | head -c 160)" ;;
+  esac
+  curl -sf "$BASE/api/projects/$pj/segments/s1/audio" -o "$OUT/dub-s1.wav" \
+    && head -c 4 "$OUT/dub-s1.wav" | grep -q RIFF \
+    && ok "cue audio download" || bad "cue audio download"
+
+  # Editing a cue's wording drops its stale audio.
+  printf '{"segments":[{"id":"s1","start":0.0,"end":1.0,"text":"changed"}]}' \
+    >"$OUT/dub.json"
+  curl -s -o /dev/null -X PATCH "$BASE/api/projects/$pj" \
+    -H 'Content-Type: application/json' --data-binary @"$OUT/dub.json"
+  code=$(curl -s -o /dev/null -w '%{http_code}' "$BASE/api/projects/$pj/segments/s1/audio")
+  [ "$code" = "404" ] && ok "editing a cue drops its audio" \
+    || bad "stale cue audio -> $code"
+
+  # One cue can be re-run without redoing the project.
+  jid=$(curl -s -X POST "$BASE/api/projects/$pj/synthesize" -F 'segment=s1' \
+    | sed -n 's/.*"job_id":"\([^"]*\)".*/\1/p')
+  status=$(dub_wait "$jid")
+  [ "$status" = "done" ] && ok "single-cue dubbing" \
+    || bad "single-cue dubbing: $status"
+
+  curl -s -o /dev/null -X DELETE "$BASE/api/profiles/$pv"
+  for cid in $(curl -s "$BASE/api/captures" | sed 's/},{/}\n{/g' \
+    | grep -F '"name":"smoke-dub-voice"' \
+    | sed -n 's/.*"id":"\([^"]*\)".*/\1/p'); do
+    curl -s -o /dev/null -X DELETE "$BASE/api/captures/$cid"
+  done
 else
   echo "  skip transcribing project (no speech-to-text model)"
 fi
@@ -667,6 +728,10 @@ code=$(curl -s -o /dev/null -w '%{http_code}' \
   "$BASE/api/projects/$empty/subtitles?format=srt")
 [ "$code" = "400" ] && ok "empty project has no subtitles" \
   || bad "empty project export -> $code"
+code=$(curl -s -o /dev/null -w '%{http_code}' -X POST \
+  "$BASE/api/projects/$empty/synthesize" -F 'all=1')
+[ "$code" = "400" ] && ok "dubbing needs an engine" \
+  || bad "dubbing without an engine -> $code"
 printf 'not a wav\n' >"$OUT/not-a-wav-project.txt"
 code=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/projects" \
   -F 'name=bad' -F "audio=@$OUT/not-a-wav-project.txt;filename=note.wav")

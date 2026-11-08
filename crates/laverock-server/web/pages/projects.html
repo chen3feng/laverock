@@ -37,7 +37,24 @@
           <button class="ghost" id="projectClose" type="button" data-i18n="projects.close">关闭</button>
         </div>
         <audio id="projectAudio" controls></audio>
+        <div class="project-dub">
+          <div>
+            <label for="projectEngine" data-i18n="projects.engine">合成引擎</label>
+            <select id="projectEngine"></select>
+          </div>
+          <div>
+            <label for="projectVoice" data-i18n="projects.voice">声音</label>
+            <select id="projectVoice"></select>
+          </div>
+          <div class="project-dub-actions">
+            <button id="projectSynthesize" type="button" data-i18n="projects.synthesize">生成配音</button>
+            <button class="ghost" id="projectSynthCancel" type="button" data-i18n="cancel" hidden>取消</button>
+          </div>
+        </div>
+        <progress id="projectSynthProgress" max="1" value="0" hidden></progress>
+        <div class="hint" id="projectSynthStatus"></div>
         <div class="seg-list" id="projectSegments"></div>
         <button class="ghost small" id="projectAddSegment" type="button" data-i18n="projects.add_segment">＋ 添加分段</button>
+        <audio id="projectSegAudio" hidden></audio>
       </div>
     </section>
