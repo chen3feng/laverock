@@ -430,6 +430,13 @@ async function main() {
     );
     pass('project cues dubbed');
 
+    await page.click('#projectMix');
+    await page.waitForSelector('#projectMixResult:not([hidden])', { timeout: 120_000 });
+    const mixWav = await saveDownload(page, page.locator('#projectMixDownload'), artifacts);
+    assert.ok(fs.statSync(mixWav).size > 44, 'mix is not empty');
+    assert.equal(fs.readFileSync(mixWav).subarray(0, 4).toString(), 'RIFF');
+    pass(`project mix downloaded (${path.basename(mixWav)})`);
+
     await context.request.delete(`${base}/api/projects/${projectId}`);
     await context.request.delete(`${base}/api/profiles/${dubVoice.id}`);
 

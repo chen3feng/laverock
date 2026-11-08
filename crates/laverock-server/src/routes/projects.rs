@@ -7,12 +7,12 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
-use laverock_core::{decode_wav, i18n, CoreError};
+use laverock_core::{decode_wav, encode_wav, i18n, CoreError};
 
 use super::{request_lang, subtitle_response, ApiError, AppState};
 use crate::{
     dubbing,
-    projects::{self, Project, Segment},
+    projects::{self, Mix, Project, Segment},
     subtitles,
 };
 
@@ -38,10 +38,12 @@ pub(crate) fn router() -> Router<AppState> {
         .route("/api/projects/{id}/transcribe", post(transcribe_project))
         .route("/api/projects/{id}/subtitles", get(download_subtitles))
         .route("/api/projects/{id}/synthesize", post(synthesize_project))
+        .route("/api/projects/{id}/mix", post(mix_project))
         .route(
             "/api/projects/{id}/segments/{segment}/audio",
             get(segment_audio),
         )
+        .route("/api/projects/{id}/files/{name}", get(project_file))
 }
 
 async fn list_projects(State(state): State<AppState>) -> Result<Json<Vec<Project>>, ApiError> {
@@ -144,6 +146,7 @@ struct ProjectPatch {
     target_language: Option<String>,
     engine_id: Option<String>,
     voice_id: Option<String>,
+    mix: Option<Mix>,
     segments: Option<Vec<Segment>>,
 }
 
@@ -167,6 +170,7 @@ async fn update_project(
         body.target_language.as_deref(),
         body.engine_id.as_deref(),
         body.voice_id.as_deref(),
+        body.mix,
         body.segments,
     )?;
     Ok(Json(project))
@@ -375,6 +379,131 @@ async fn segment_audio(
     Ok((
         StatusCode::OK,
         [(header::CONTENT_TYPE, "audio/wav".to_string())],
+        bytes,
+    )
+        .into_response())
+}
+
+/// `POST /api/projects/{id}/mix` — lay the dubbed cues over the source.
+///
+/// Multipart fields `background_volume`, `voice_volume` and `ducking` are
+/// optional overrides of the project's saved mix; they are persisted before
+/// mixing so the editor and the export agree. Returns `202` with a
+/// `job_id`; the finished file is both a job artifact and the project export
+/// `mix.wav`.
+async fn mix_project(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    mut multipart: Multipart,
+) -> Result<Response, ApiError> {
+    let mut mix = state.projects.get(&id)?.mix;
+    while let Some(field) = multipart
+        .next_field()
+        .await
+        .map_err(|e| ApiError::bad_request(format!("malformed multipart: {e}")))?
+    {
+        let name = field.name().map(str::to_string);
+        let raw = field
+            .text()
+            .await
+            .map_err(|e| ApiError::bad_request(format!("bad mix field: {e}")))?;
+        match name.as_deref() {
+            Some("background_volume") => mix.background_volume = parse_level(&raw)?,
+            Some("voice_volume") => mix.voice_volume = parse_level(&raw)?,
+            Some("ducking") => {
+                mix.ducking = matches!(
+                    raw.trim().to_ascii_lowercase().as_str(),
+                    "1" | "true" | "on" | "yes"
+                );
+            }
+            _ => {}
+        }
+    }
+    let project = state
+        .projects
+        .update(&id, None, None, None, None, None, Some(mix), None)?;
+    if !project.segments.iter().any(|s| !s.tts_path.is_empty()) {
+        return Err(user_error(i18n::Key::ProjectMixNoAudio));
+    }
+
+    let job = state.jobs.create("mix")?;
+    let worker = job.clone();
+    let supervisor = job.clone();
+    let store = state.projects.clone();
+    let lang = request_lang();
+    let handle = tokio::task::spawn_blocking(move || {
+        worker.start();
+        if worker.is_cancelled() {
+            worker.finish_cancelled(0);
+            return;
+        }
+        worker.set_progress(0.2, None);
+        let audio = match dubbing::mix(&store, &project) {
+            Ok(audio) => audio,
+            Err(e) if worker.is_cancelled() => {
+                worker.log(&render_error(&e, lang));
+                worker.finish_cancelled(0);
+                return;
+            }
+            Err(e) => {
+                worker.fail(&render_error(&e, lang));
+                return;
+            }
+        };
+        let wav = match encode_wav(&audio.samples, audio.sample_rate) {
+            Ok(wav) => wav,
+            Err(e) => {
+                worker.fail(&render_error(&e, lang));
+                return;
+            }
+        };
+        if let Err(e) = store.write_export(&id, "mix.wav", "audio", &wav) {
+            worker.fail(&render_error(&e, lang));
+            return;
+        }
+        worker.set_progress(0.9, None);
+        if let Err(e) = worker.artifact("mix.wav", &wav) {
+            worker.fail(&format!("cannot write mix.wav: {e}"));
+            return;
+        }
+        worker.finish(1);
+    });
+    tokio::spawn(async move {
+        if let Err(e) = handle.await {
+            supervisor.fail(&format!("mix task failed: {e}"));
+        }
+    });
+
+    Ok((
+        StatusCode::ACCEPTED,
+        Json(serde_json::json!({ "job_id": job.id() })),
+    )
+        .into_response())
+}
+
+fn parse_level(raw: &str) -> Result<f32, ApiError> {
+    raw.trim()
+        .parse::<f32>()
+        .ok()
+        .filter(|value| value.is_finite() && (0.0..=4.0).contains(value))
+        .ok_or_else(|| ApiError::bad_request(format!("invalid mix level: {raw}")))
+}
+
+/// A recorded export (currently `mix.wav`), for the editor's player and
+/// download button.
+async fn project_file(
+    State(state): State<AppState>,
+    Path((id, name)): Path<(String, String)>,
+) -> Result<Response, ApiError> {
+    let bytes = state.projects.export_file(&id, &name)?;
+    let content_type = if name.ends_with(".wav") {
+        "audio/wav"
+    } else {
+        "application/octet-stream"
+    };
+    Ok((
+        StatusCode::OK,
+        [(header::CONTENT_TYPE, content_type.to_string())],
         bytes,
     )
         .into_response())

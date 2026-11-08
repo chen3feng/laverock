@@ -60,6 +60,8 @@ describes the loopback listener.
 | POST | `/api/projects/:id/transcribe` | run speech recognition over the source and replace the cues → project |
 | POST | `/api/projects/:id/synthesize` | dubbing job: multipart, optional repeated `segment` ids to re-run only those cues → `202`; writes `segments/<id>.wav` per cue |
 | GET | `/api/projects/:id/segments/:segment/audio` | the generated audio for one cue |
+| POST | `/api/projects/:id/mix` | multipart optional `background_volume`, `voice_volume` (0–4) and `ducking` → `202`; writes and records `mix.wav` |
+| GET | `/api/projects/:id/files/:name` | a recorded export (`mix.wav`) |
 | GET | `/api/projects/:id/subtitles?format=srt\|vtt` | the project's cues as a downloadable file |
 | POST | `/api/transcribe` | multipart `audio` (WAV) → transcript (needs the SenseVoice model) |
 | POST | `/api/transcribe/details` | same input → `{text, segments: [{start, end, text}], language, duration}` |
@@ -110,6 +112,14 @@ one WAV per cue. Sending repeated `segment` fields re-runs just those cues.
 `tts_path`, `tts_duration` and `status` are server-owned: a client cannot
 set them, and editing a cue's text (or its translation) deletes the stale
 audio and resets the cue to `pending`.
+
+`POST /api/projects/:id/mix` lays the dubbed cues over the source clip at
+their start times. The source becomes the background at `background_volume`;
+with `ducking` on it dips to 35 % under the voice with 100 ms ramps. The
+result is mono at the source's sample rate and runs to the end of the last
+cue even when it passes the source, so a long dub is not cut off. The file
+is stored as the project export `mix.wav` (also a job artifact) and served
+by the files endpoint; `PATCH` accepts the same `mix` object.
 
 Engine parameters (`speed`, `num_steps`, `cfg`, `seed`, …) are declared per
 engine by its manifest and validated server-side against the same list the

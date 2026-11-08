@@ -55,6 +55,28 @@
         <div class="hint" id="projectSynthStatus"></div>
         <div class="seg-list" id="projectSegments"></div>
         <button class="ghost small" id="projectAddSegment" type="button" data-i18n="projects.add_segment">＋ 添加分段</button>
+        <div class="project-mix">
+          <div>
+            <label for="projectBg" data-i18n="projects.mix.background">背景音量</label>
+            <input id="projectBg" type="range" min="0" max="2" step="0.05" />
+          </div>
+          <div>
+            <label for="projectVoiceVol" data-i18n="projects.mix.voice">配音音量</label>
+            <input id="projectVoiceVol" type="range" min="0" max="2" step="0.05" />
+          </div>
+          <label class="switch">
+            <input id="projectDucking" type="checkbox" />
+            <span data-i18n="projects.mix.ducking">人声时压低背景</span>
+          </label>
+          <button id="projectMix" type="button" data-i18n="projects.mix.run">混音导出</button>
+        </div>
+        <progress id="projectMixProgress" max="1" value="0" hidden></progress>
+        <div class="hint" id="projectMixStatus"></div>
+        <div class="project-mix-result" id="projectMixResult" hidden>
+          <b data-i18n="projects.mix.result">混音结果</b>
+          <audio id="projectMixAudio" controls></audio>
+          <button class="ghost small" id="projectMixDownload" type="button" data-i18n="projects.mix.download">下载 WAV</button>
+        </div>
         <audio id="projectSegAudio" hidden></audio>
       </div>
     </section>
