@@ -290,6 +290,65 @@ async function main() {
     assert.ok(srtBody.includes(' --> '), 'SRT contains cue timings');
     pass(`subtitle export (${path.basename(srtFile)})`);
 
+    // ----------------------------------------------------------------- tools
+    say('audio tools');
+    await page.click('nav a[data-page="tools"]');
+    await page.waitForSelector('#page-tools.active');
+    const tools = await apiJson(context.request, `${base}/api/tools`);
+    if (!tools.denoise && !tools.separation) {
+      // CI installs the small denoiser; a machine without any pack still
+      // has to explain how to get one instead of failing the run.
+      await page.waitForFunction(
+        () => (document.getElementById('toolModelsHint')?.textContent || '').trim().length > 0,
+        null,
+        { timeout: 10_000 },
+      );
+      assert.equal(await page.locator('#toolRun').isDisabled(), true, 'run is disabled');
+      pass('tools page explains the missing models');
+    } else {
+      const mode = tools.denoise ? 'denoise' : 'vocals';
+      // loadToolsPage() fetches availability asynchronously; wait for the
+      // chosen mode to be enabled before selecting it.
+      await page.waitForFunction(
+        (value) => {
+          const option = document.querySelector(`#toolMode option[value="${value}"]`);
+          return option && !option.disabled;
+        },
+        mode,
+        { timeout: 10_000 },
+      );
+      await page.selectOption('#toolMode', mode);
+      await page.setInputFiles('#toolsCapture .cap-file', ref);
+      await page.click('#toolRun');
+      await page.waitForSelector('#toolResult:not([hidden])', { timeout: 300_000 });
+      const toolWav = await saveDownload(
+        page,
+        page.locator('#toolDownloads button', { hasText: 'WAV' }).first(),
+        artifacts,
+      );
+      assert.ok(fs.statSync(toolWav).size > 44, 'tool output is not empty');
+      assert.equal(fs.readFileSync(toolWav).subarray(0, 4).toString(), 'RIFF');
+      pass(`tool output downloaded (${path.basename(toolWav)})`);
+
+      if (tools.separation) {
+        // `both` renders one player per stem and bundles them in a ZIP.
+        await page.selectOption('#toolMode', 'both');
+        await page.click('#toolRun');
+        await page.waitForFunction(
+          () => document.querySelectorAll('#toolAfterPlayers audio').length === 2,
+          null,
+          { timeout: 300_000 },
+        );
+        const stemsZip = await saveDownload(
+          page,
+          page.locator('#toolDownloads button', { hasText: 'ZIP' }).first(),
+          artifacts,
+        );
+        assert.equal(fs.readFileSync(stemsZip).subarray(0, 2).toString(), 'PK');
+        pass(`both stems downloaded (${path.basename(stemsZip)})`);
+      }
+    }
+
     // ---------------------------------------------------------------- voices
     say('voices');
     await page.click('nav a[data-page="voices"]');

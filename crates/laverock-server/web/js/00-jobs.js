@@ -33,6 +33,7 @@ async function runJob(url, formData, handlers = {}) {
     throw new Error(message);
   }
   const { job_id: id } = await response.json();
+  if (handlers.started) handlers.started({ id });
   return watchJob(id, handlers);
 }
 

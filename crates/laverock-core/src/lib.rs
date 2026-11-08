@@ -28,7 +28,9 @@ pub use audio::{
     silence_profile, trim_reference, trim_silence, trim_trailing_low_level, SilenceProfile,
     VOXCPM2_MAX_REFERENCE_SECS,
 };
-pub use enhance::{EnhanceMode, Enhancer, DENOISE_MODELS, ENHANCE_DIR, SEPARATION_MODEL};
+pub use enhance::{
+    EnhanceMode, Enhancer, StemMode, StemRun, Stems, DENOISE_MODELS, ENHANCE_DIR, SEPARATION_MODEL,
+};
 pub use manager::{
     AudioSink, ConvertRequest, EngineInfo, EngineManager, ProgressEvent, ProgressSink,
     SpeechEngine, SynthRequest,

@@ -10,8 +10,10 @@ async function saveBlob(blob, suggestedName) {
   if (window.showSaveFilePicker) {
     try {
       const ext = (suggestedName.match(/\.([a-z0-9]+)$/i) || [, ''])[1].toLowerCase();
+      const mime = { mp3: 'audio/mpeg', wav: 'audio/wav', zip: 'application/zip' }[ext]
+        || 'application/octet-stream';
       const types = ext
-        ? [{ description: ext.toUpperCase() + ' audio', accept: { [`audio/${ext === 'mp3' ? 'mpeg' : ext}`]: ['.' + ext] } }]
+        ? [{ description: ext.toUpperCase() + ' file', accept: { [mime]: ['.' + ext] } }]
         : [];
       const handle = await window.showSaveFilePicker({ suggestedName, types });
       const writable = await handle.createWritable();

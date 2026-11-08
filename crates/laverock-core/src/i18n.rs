@@ -134,6 +134,16 @@ messages! {
     EnhanceModelsMissing = "enhance_models_missing"
         { en: "Voice enhancement needs its models first; install them from the Models page (about 165 MB).",
           zh: "人声增强需要先安装模型；请在「模型」页下载（约 165 MB）。" },
+    ToolWavOnly = "tool_wav_only"
+        { en: "The tools page accepts WAV files only.", zh: "工具页目前只支持 WAV 文件。" },
+    ToolTooLarge = "tool_too_large"
+        { en: "The audio file exceeds 200 MB.", zh: "音频文件超过 200 MB。" },
+    ToolTooLong = "tool_too_long"
+        { en: "The audio is longer than 30 minutes.", zh: "音频超过 30 分钟。" },
+    ToolStageSeparating = "tool_stage_separating"
+        { en: "Separating vocals and instrumental…", zh: "正在分离人声与伴奏…" },
+    ToolStageDenoising = "tool_stage_denoising"
+        { en: "Removing background noise…", zh: "正在降噪…" },
     ReferenceSilent = "reference_silent"
         { en: "The reference audio is silent; record or upload a clip with speech.",
           zh: "参考音频几乎全是静音，请重新录制或上传一段有人声的音频。" },
