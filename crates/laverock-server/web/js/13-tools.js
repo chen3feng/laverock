@@ -190,6 +190,9 @@ toolsCapture.onChange = () => {
   if (toolBeforeUrl) before.src = toolBeforeUrl;
   else before.removeAttribute('src');
   before.hidden = !toolBeforeUrl;
+  // A different clip invalidates the previous result.
+  $('toolResult').hidden = true;
+  toolArtifacts = [];
 };
 if (!window.isSecureContext) {
   toolsCapture.rec.disabled = true;
