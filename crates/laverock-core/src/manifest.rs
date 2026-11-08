@@ -929,17 +929,160 @@ impl Manifest {
                     min: None,
                     max: None,
                     step: None,
-                    options: vec![ParamOption {
-                        label: ("Text to music", "文本生成音乐").into(),
-                        value: "text2music".into(),
-                    }],
+                    options: vec![
+                        ParamOption {
+                            label: ("Text to music", "文本生成音乐").into(),
+                            value: "text2music".into(),
+                        },
+                        ParamOption {
+                            label: ("Cover", "翻唱").into(),
+                            value: "cover".into(),
+                        },
+                        ParamOption {
+                            label: ("Cover (no FSQ)", "翻唱（无 FSQ）").into(),
+                            value: "cover-nofsq".into(),
+                        },
+                        ParamOption {
+                            label: ("Repaint", "局部重绘").into(),
+                            value: "repaint".into(),
+                        },
+                        ParamOption {
+                            label: ("Complete", "补全").into(),
+                            value: "complete".into(),
+                        },                        ParamOption {
+                            label: ("Lego (track)", "分轨生成").into(),
+                            value: "lego".into(),
+                        },
+                        ParamOption {
+                            label: ("Extract (track)", "分轨提取").into(),
+                            value: "extract".into(),
+                        },
+                    ],
                     default: json!("text2music"),
                     hint: (
-                        "Editing routes (cover, repaint, extend) are planned for a later release.",
-                        "翻唱、重绘、续写等编辑路由将在后续版本加入。",
+                        "Every route except text2music edits a source song and needs an upload.",
+                        "除文本生成音乐外，其余路由都会编辑源音乐，需要先上传。",
                     )
                         .into(),
                 },
+                ParamSpec {
+                    name: "negative_prompt".into(),
+                    label: ("Negative prompt", "反向提示").into(),
+                    kind: ParamKind::Text,
+                    min: None,
+                    max: None,
+                    step: None,
+                    options: Vec::new(),
+                    default: json!(""),
+                    hint: (
+                        "What to avoid; leave empty to use the model default.",
+                        "希望避免的内容；留空使用模型默认值。",
+                    )
+                        .into(),
+                },
+                ParamSpec {
+                    name: "track_name".into(),
+                    label: ("Track", "音轨").into(),
+                    kind: ParamKind::Text,
+                    min: None,
+                    max: None,
+                    step: None,
+                    options: Vec::new(),
+                    default: json!(""),
+                    hint: (
+                        "Target track for the lego and extract routes, e.g. drums or bass.",
+                        "分轨生成 / 提取的目标音轨，例如 drums 或 bass。",
+                    )
+                        .into(),
+                },
+                ParamSpec::slider(
+                    "repainting_start",
+                    ("Repaint start (s)", "重绘起点（秒）"),
+                    0.0,
+                    0.0,
+                    600.0,
+                    0.1,
+                    (
+                        "Start of the region to repaint, in source seconds.",
+                        "要重绘的区间起点，按源音频秒数计。",
+                    ),
+                ),
+                ParamSpec::slider(
+                    "repainting_end",
+                    ("Repaint end (s)", "重绘终点（秒）"),
+                    10.0,
+                    0.0,
+                    600.0,
+                    0.1,
+                    (
+                        "End of the region to repaint, in source seconds.",
+                        "要重绘的区间终点，按源音频秒数计。",
+                    ),
+                ),
+                ParamSpec {
+                    name: "repaint_mode".into(),
+                    label: ("Repaint mode", "重绘模式").into(),
+                    kind: ParamKind::Choice,
+                    min: None,
+                    max: None,
+                    step: None,
+                    options: vec![
+                        ParamOption {
+                            label: ("Balanced", "均衡").into(),
+                            value: "balanced".into(),
+                        },
+                        ParamOption {
+                            label: ("Conservative", "保守").into(),
+                            value: "conservative".into(),
+                        },
+                        ParamOption {
+                            label: ("Aggressive", "激进").into(),
+                            value: "aggressive".into(),
+                        },
+                    ],
+                    default: json!("balanced"),
+                    hint: (
+                        "How far the repainted region may drift from the source.",
+                        "重绘区间允许偏离源音频的程度。",
+                    )
+                        .into(),
+                },
+                ParamSpec::slider(
+                    "repaint_strength",
+                    ("Repaint strength", "重绘强度"),
+                    0.5,
+                    0.0,
+                    1.0,
+                    0.05,
+                    (
+                        "Balanced-mode blend strength; lower stays closer to the source.",
+                        "均衡模式下的混合强度；越低越接近源音频。",
+                    ),
+                ),
+                ParamSpec::slider(
+                    "audio_cover_strength",
+                    ("Cover strength", "翻唱强度"),
+                    1.0,
+                    0.0,
+                    1.0,
+                    0.05,
+                    (
+                        "How strongly cover conditioning follows the source song.",
+                        "翻唱条件跟随源音乐的程度。",
+                    ),
+                ),
+                ParamSpec::slider(
+                    "cover_noise_strength",
+                    ("Cover noise", "翻唱噪声"),
+                    0.0,
+                    0.0,
+                    1.0,
+                    0.05,
+                    (
+                        "Extra noise mixed into cover conditioning.",
+                        "混入翻唱条件的额外噪声。",
+                    ),
+                ),
             ],
             // Preset-voices model: speed is the only built-in control;
             // the speaker (`voice`) choice is model-specific, so manifests

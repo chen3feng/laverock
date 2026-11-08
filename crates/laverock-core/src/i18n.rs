@@ -92,6 +92,9 @@ messages! {
     SourceAudioTooShort = "source_audio_too_short"
         { en: "The source clip is too short to convert; use at least 0.5 s of speech.",
           zh: "源音频太短，至少要 0.5 秒语音才能转换。" },
+    MusicSourceRequired = "music_source_required"
+        { en: "{route} needs a source song to edit; upload one first.",
+          zh: "{route} 需要一段要编辑的源音乐，请先上传。" },
     TranscriptRequired = "transcript_required"
         { en: "{engine} needs the transcript of the reference clip.",
           zh: "{engine} 需要参考音频对应的文字。" },

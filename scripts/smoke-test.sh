@@ -135,6 +135,35 @@ synth mixed "人工智能 artificial intelligence 正在改变生活。" news-fe
   -F 'speed=1.1'
 fi
 
+if want music; then
+echo "music"
+index_html=$(curl -sf "$BASE/")
+case "$index_html" in
+  *'id="musicSourceCard"'*) ok "music editing UI" ;;
+  *) bad "music editing UI" ;;
+esac
+music_id=$(printf '%s' "$engines_json" | sed 's/},{/}\n{/g' \
+  | grep '"task":"music"' | sed -n 's/.*"id":"\([^"]*\)".*/\1/p' | head -1 || true)
+if [ -n "$music_id" ]; then
+  # An editing route without a source song must fail before inference.
+  code=$(curl -s -o /dev/null -w '%{http_code}' -X POST \
+    "$BASE/api/engines/$music_id/synthesize" \
+    -F "$(field text 'warm folk')" -F 'task_route=repaint')
+  [ "$code" = "400" ] && ok "repaint without source -> 400" \
+    || bad "repaint without source -> $code"
+
+  code=$(curl -s -o "$OUT/repaint.wav" -w '%{http_code}' -X POST \
+    "$BASE/api/engines/$music_id/synthesize" \
+    -F "$(field text 'warm folk')" \
+    -F "audio=@$DIR/test_wavs/leijun-1.wav" \
+    -F 'task_route=repaint' -F 'repainting_start=0' -F 'repainting_end=1')
+  [ "$code" = "200" ] && head -c 4 "$OUT/repaint.wav" | grep -q RIFF \
+    && ok "repaint with source" || bad "repaint with source (HTTP $code)"
+else
+  echo "  skip repaint (no music engine installed)"
+fi
+fi
+
 if want jobs; then
 echo "jobs"
 job_json=$(curl -s -X POST "$BASE/api/engines/$MODEL/synthesize" \

@@ -87,6 +87,7 @@ function renderParamGrid(host, specs, prefix, actions = {}) {
   grid.style.marginTop = '10px';
   for (const p of specs) {
     const wrap = document.createElement('div');
+    wrap.dataset.param = p.name;
     // A text area (the music page's lyrics) needs the whole row; sharing
     // one with sliders squeezes it into a narrow column.
     if (p.type === 'text_area') wrap.className = 'param-wide';
@@ -253,6 +254,7 @@ function syncMusicEngine() {
   $('musicEngineHint').textContent =
     `${e.kind} · ${(e.languages || []).join(' / ')} · ${caps}`;
   renderParamGrid($('musicParams'), e.parameters || [], 'music-param-', musicParamActions());
+  syncMusicRoute();
 }
 $('musicEngine').onchange = syncMusicEngine;
 

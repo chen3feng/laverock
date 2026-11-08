@@ -17,6 +17,46 @@ function wireMusicSamplesStepper() {
 }
 wireMusicSamplesStepper();
 
+// Editing routes take a source song instead of starting from silence.
+const musicSourceCapture = new Capture($('musicSource'), {
+  autoTranscribe: false,
+  transcribe: false,
+});
+const MUSIC_SOURCE_ROUTES = new Set([
+  'cover', 'cover-nofsq', 'repaint', 'complete', 'lego', 'extract',
+]);
+// Controls that only matter for some routes. The engine still receives
+// every parameter; the manifest defaults keep the unused ones harmless.
+const MUSIC_PARAM_ROUTES = {
+  repainting_start: ['repaint'],
+  repainting_end: ['repaint'],
+  repaint_mode: ['repaint'],
+  repaint_strength: ['repaint'],
+  track_name: ['lego', 'extract'],
+  audio_cover_strength: ['cover', 'cover-nofsq'],
+  cover_noise_strength: ['cover', 'cover-nofsq'],
+};
+
+function musicRoute() {
+  return $('music-param-task_route')?.value || 'text2music';
+}
+
+function syncMusicRoute() {
+  const route = musicRoute();
+  const editing = MUSIC_SOURCE_ROUTES.has(route);
+  $('musicSourceCard').hidden = !editing;
+  for (const [name, routes] of Object.entries(MUSIC_PARAM_ROUTES)) {
+    const wrap = document.querySelector(`#musicParams [data-param="${name}"]`);
+    if (wrap) wrap.hidden = !routes.includes(route);
+  }
+  const go = $('musicGo');
+  go.textContent = editing ? t('music.edit') : t('music.go');
+}
+
+$('musicParams').addEventListener('change', (e) => {
+  if (e.target.id === 'music-param-task_route') syncMusicRoute();
+});
+
 // Extra buttons for the music page's parameter grid.
 function musicParamActions() {
   return {
@@ -73,8 +113,18 @@ $('musicGo').onclick = async () => {
   }
 
   const params = collectParams('musicParams');
+  const route = params.task_route || 'text2music';
+  const editing = MUSIC_SOURCE_ROUTES.has(route);
+  if (editing && !musicSourceCapture.blob) {
+    status.className = 'err';
+    status.textContent = t('music.source_required');
+    return;
+  }
   const fd = new FormData();
   fd.append('text', caption);
+  if (editing) {
+    fd.append('audio', musicSourceCapture.blob, musicSourceCapture.filename || 'source.wav');
+  }
   for (const [name, value] of Object.entries(params)) fd.append(name, value);
   fd.append('samples', $('musicSamples').value);
 
