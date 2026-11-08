@@ -3,6 +3,8 @@
 # background music from takes before they become voice references.
 #
 #   ENHANCE_DENOISE_URL=...   another sherpa-onnx enhancement model
+#   ENHANCE_ONLY=denoise      skip the 164 MB separator (used by CI, which
+#                             only exercises the denoise path)
 #   AC_VERSION=...            pin the audio.cpp runtime release
 #
 # Disk: ~10 MB denoiser + ~164 MB vocal separator, plus the shared
@@ -19,14 +21,16 @@ DENOISE_URL="${ENHANCE_DENOISE_URL:-https://github.com/k2-fsa/sherpa-onnx/releas
 lv_download "$DENOISE_URL" "$DEST/gtcrn_simple.onnx"
 
 # 2. Vocal separator (BS-RoFormer Q8_0, 44.1 kHz).
-lv_hf_download_file audio-cpp/audio.cpp-gguf \
-  "BS-RoFormer-ep368-GGUF/bs-roformer-ep368-q8_0.gguf" \
-  "$DEST/bs-roformer.gguf" 8 "Downloading the vocal separator (~164 MB)"
+if [ "${ENHANCE_ONLY:-all}" != "denoise" ]; then
+  lv_hf_download_file audio-cpp/audio.cpp-gguf \
+    "BS-RoFormer-ep368-GGUF/bs-roformer-ep368-q8_0.gguf" \
+    "$DEST/bs-roformer.gguf" 8 "Downloading the vocal separator (~164 MB)"
 
-# 3. The separator runs through audio.cpp's CLI, shared with the TTS
-#    engines. Install the runtime only if it is not there yet.
-AC_VERSION="${AC_VERSION:-v0.9.4}"
-lv_audiocpp_bin "$TOOLS" "$AC_VERSION" "$MODELS_DIR" > /dev/null
+  # 3. The separator runs through audio.cpp's CLI, shared with the TTS
+  #    engines. Install the runtime only if it is not there yet.
+  AC_VERSION="${AC_VERSION:-v0.9.4}"
+  lv_audiocpp_bin "$TOOLS" "$AC_VERSION" "$MODELS_DIR" > /dev/null
+fi
 
 echo
 echo "Voice cleanup installed at $DEST"

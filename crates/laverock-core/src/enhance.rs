@@ -13,6 +13,11 @@
 //! enhancement pack when a requested stage is missing. Processing happens
 //! on the stored take, and the untouched upload is kept so the user can
 //! compare or revert.
+//!
+//! [`Enhancer::apply`] is the capture-library entry point, which always
+//! returns one clip for use as a voice reference. [`Enhancer::apply_stems`]
+//! is the standalone-tools entry point: it can also hand back the
+//! instrumental stem the separator already produced.
 
 use crate::{
     audio::{decode_wav, encode_wav, resample_mono},
@@ -94,6 +99,97 @@ impl EnhanceMode {
     }
 }
 
+/// What a standalone audio tool should produce from an uploaded clip.
+///
+/// Unlike [`EnhanceMode`], which is about preparing one reference clip,
+/// this can also keep the instrumental stem and never runs both stages at
+/// once: the tools page runs exactly the stage the user picked.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StemMode {
+    /// Remove room noise; the rest of the clip is unchanged.
+    Denoise,
+    /// Keep the voice and drop the background music.
+    Vocals,
+    /// Keep the background music and drop the voice.
+    Instrumental,
+    /// Both separated stems.
+    Both,
+}
+
+impl StemMode {
+    pub fn parse(raw: &str) -> Option<Self> {
+        match raw.trim().to_ascii_lowercase().as_str() {
+            "denoise" | "noise" => Some(Self::Denoise),
+            "vocals" | "voice" => Some(Self::Vocals),
+            "instrumental" | "music" | "accompaniment" => Some(Self::Instrumental),
+            "both" | "stems" | "all" => Some(Self::Both),
+            _ => None,
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Denoise => "denoise",
+            Self::Vocals => "vocals",
+            Self::Instrumental => "instrumental",
+            Self::Both => "both",
+        }
+    }
+
+    /// Separation is the slow stage; only denoising skips it.
+    pub fn needs_separation(self) -> bool {
+        !matches!(self, Self::Denoise)
+    }
+
+    /// Whether the vocal stem is part of the output.
+    pub fn wants_vocals(self) -> bool {
+        matches!(self, Self::Vocals | Self::Both)
+    }
+
+    /// Whether the instrumental stem is part of the output.
+    pub fn wants_instrumental(self) -> bool {
+        matches!(self, Self::Instrumental | Self::Both)
+    }
+}
+
+/// The output of [`Enhancer::apply_stems`].
+#[derive(Debug, Clone)]
+pub struct Stems {
+    /// The vocal stem, or the denoised input when separation did not run.
+    pub vocals: Audio,
+    /// The background-music stem, present whenever separation ran. The
+    /// `Vocals` mode returns it too: separation produces both at once, and
+    /// the caller can discard what it does not need.
+    pub instrumental: Option<Audio>,
+}
+
+fn no_stage(_: &str) {}
+fn never_cancelled() -> bool {
+    false
+}
+
+/// Progress and cancellation for a stem run.
+///
+/// Separation drives an external process, so the caller can stop it: the
+/// worker polls `cancelled` while the child runs and kills it, after which
+/// the temporary directory is removed as usual.
+pub struct StemRun<'a> {
+    /// Reports a stage id: `"separating"` or `"denoising"`.
+    pub stage: &'a dyn Fn(&str),
+    /// Polled while the separator runs; `true` stops it.
+    pub cancelled: &'a dyn Fn() -> bool,
+}
+
+impl<'a> StemRun<'a> {
+    /// A run that reports nothing and cannot be cancelled.
+    pub fn quiet() -> Self {
+        Self {
+            stage: &no_stage,
+            cancelled: &never_cancelled,
+        }
+    }
+}
+
 struct Separator {
     cli: PathBuf,
     model: PathBuf,
@@ -141,6 +237,60 @@ impl Enhancer {
 
     pub fn has_separation(&self) -> bool {
         self.separator.is_some()
+    }
+
+    /// Whether every stage `mode` asks for is installed.
+    pub fn supports_stems(&self, mode: StemMode) -> bool {
+        if mode.needs_separation() {
+            self.separator.is_some()
+        } else {
+            self.denoise_model.is_some()
+        }
+    }
+
+    /// Run the requested tool stage on mono `samples` at `rate` and return
+    /// the stems. Unlike [`Enhancer::apply`], the instrumental stem is kept
+    /// whenever separation ran.
+    pub fn apply_stems(&self, mode: StemMode, samples: &[f32], rate: u32) -> Result<Stems> {
+        self.apply_stems_with(mode, samples, rate, &StemRun::quiet())
+    }
+
+    /// [`Enhancer::apply_stems`] with stage reporting and cancellation.
+    pub fn apply_stems_with(
+        &self,
+        mode: StemMode,
+        samples: &[f32],
+        rate: u32,
+        run: &StemRun,
+    ) -> Result<Stems> {
+        let input = Audio::mono(samples.to_vec(), rate.max(1) as i32);
+        if samples.is_empty() {
+            return Ok(Stems {
+                vocals: input,
+                instrumental: None,
+            });
+        }
+        if !self.supports_stems(mode) {
+            return Err(CoreError::UserError(i18n::Message::new(
+                Key::EnhanceModelsMissing,
+            )));
+        }
+        if (run.cancelled)() {
+            return Err(CoreError::Synth("vocal separation cancelled".into()));
+        }
+        if !mode.needs_separation() {
+            (run.stage)("denoising");
+            return Ok(Stems {
+                vocals: self.denoise(&input)?,
+                instrumental: None,
+            });
+        }
+        (run.stage)("separating");
+        let (vocals, instrumental) = self.separate_stems(&input, run)?;
+        Ok(Stems {
+            vocals,
+            instrumental: Some(instrumental),
+        })
     }
 
     /// Run the requested stages on mono `samples` at `rate`, returning
@@ -196,6 +346,11 @@ impl Enhancer {
     }
 
     fn separate(&self, audio: &Audio) -> Result<Audio> {
+        let (vocals, _) = self.separate_stems(audio, &StemRun::quiet())?;
+        Ok(vocals)
+    }
+
+    fn separate_stems(&self, audio: &Audio, run: &StemRun) -> Result<(Audio, Audio)> {
         let separator = self
             .separator
             .as_ref()
@@ -210,12 +365,20 @@ impl Enhancer {
                 .unwrap_or(0)
         ));
         fs::create_dir_all(&dir)?;
-        let result = self.run_separation(separator, &dir, audio);
+        let result = self.run_separation(separator, &dir, audio, run);
+        // Cancellation kills the child but leaves whatever it wrote behind;
+        // the directory goes away on every path, success or not.
         let _ = fs::remove_dir_all(&dir);
         result
     }
 
-    fn run_separation(&self, separator: &Separator, dir: &Path, audio: &Audio) -> Result<Audio> {
+    fn run_separation(
+        &self,
+        separator: &Separator,
+        dir: &Path,
+        audio: &Audio,
+        run: &StemRun,
+    ) -> Result<(Audio, Audio)> {
         let input = dir.join("input.wav");
         let rate = SEPARATION_RATE;
         let resampled = resample_mono(&audio.samples, audio.sample_rate as u32, rate);
@@ -257,6 +420,11 @@ impl Enhancer {
                         detail.lines().last().unwrap_or("").trim()
                     )));
                 }
+                None if (run.cancelled)() => {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return Err(CoreError::Synth("vocal separation cancelled".into()));
+                }
                 None if Instant::now() >= deadline => {
                     let _ = child.kill();
                     let _ = child.wait();
@@ -268,15 +436,22 @@ impl Enhancer {
             }
         }
 
-        let vocals = out_dir.join("vocals.wav");
-        let bytes = fs::read(&vocals)
-            .map_err(|e| CoreError::Synth(format!("the separator produced no vocals stem: {e}")))?;
-        let (samples, stem_rate) = decode_wav(&bytes)?;
-        Ok(Audio::mono(
-            resample_mono(&samples, stem_rate.max(1) as u32, audio.sample_rate as u32),
-            audio.sample_rate,
-        ))
+        let vocals = read_stem(&out_dir, "vocals.wav", audio.sample_rate)?;
+        let instrumental = read_stem(&out_dir, "instrumental.wav", audio.sample_rate)?;
+        Ok((vocals, instrumental))
     }
+}
+
+/// Read one separator output and bring it back to the clip's sample rate.
+fn read_stem(dir: &Path, name: &str, target_rate: i32) -> Result<Audio> {
+    let path = dir.join(name);
+    let bytes = fs::read(&path)
+        .map_err(|e| CoreError::Synth(format!("the separator produced no {name}: {e}")))?;
+    let (samples, stem_rate) = decode_wav(&bytes)?;
+    Ok(Audio::mono(
+        resample_mono(&samples, stem_rate.max(1) as u32, target_rate.max(1) as u32),
+        target_rate,
+    ))
 }
 
 fn cli_file() -> &'static str {
@@ -316,6 +491,52 @@ mod tests {
         assert!(EnhanceMode::Denoise.needs_denoise() && !EnhanceMode::Denoise.needs_separation());
         assert!(EnhanceMode::Vocals.needs_separation() && !EnhanceMode::Vocals.needs_denoise());
         assert!(EnhanceMode::Both.needs_denoise() && EnhanceMode::Both.needs_separation());
+    }
+
+    #[test]
+    fn parses_stem_modes_and_routes_outputs() {
+        for (raw, mode) in [
+            ("denoise", StemMode::Denoise),
+            ("Noise", StemMode::Denoise),
+            ("vocals", StemMode::Vocals),
+            ("voice", StemMode::Vocals),
+            ("instrumental", StemMode::Instrumental),
+            ("music", StemMode::Instrumental),
+            ("both", StemMode::Both),
+            ("stems", StemMode::Both),
+        ] {
+            assert_eq!(StemMode::parse(raw), Some(mode), "{raw:?}");
+            assert_eq!(StemMode::parse(mode.as_str()), Some(mode));
+        }
+        assert_eq!(StemMode::parse("off"), None);
+
+        assert!(!StemMode::Denoise.needs_separation());
+        assert!(!StemMode::Denoise.wants_vocals());
+        assert!(StemMode::Vocals.needs_separation() && StemMode::Vocals.wants_vocals());
+        assert!(!StemMode::Vocals.wants_instrumental());
+        assert!(StemMode::Instrumental.needs_separation());
+        assert!(StemMode::Instrumental.wants_instrumental());
+        assert!(StemMode::Both.wants_vocals() && StemMode::Both.wants_instrumental());
+    }
+
+    #[test]
+    fn apply_stems_passes_empty_audio_through() {
+        let enhancer = Enhancer::discover(Path::new("/nonexistent"), None);
+        let stems = enhancer
+            .apply_stems(StemMode::Denoise, &[], 16_000)
+            .unwrap();
+        assert!(stems.vocals.samples.is_empty());
+        assert_eq!(stems.vocals.sample_rate, 16_000);
+        assert!(stems.instrumental.is_none());
+    }
+
+    #[test]
+    fn apply_stems_reports_missing_models() {
+        let enhancer = Enhancer::discover(Path::new("/nonexistent"), None);
+        for mode in [StemMode::Denoise, StemMode::Both] {
+            let err = enhancer.apply_stems(mode, &[0.1, 0.2], 16_000).unwrap_err();
+            assert!(matches!(err, CoreError::UserError(_)), "{mode:?}: {err:?}");
+        }
     }
 
     #[test]

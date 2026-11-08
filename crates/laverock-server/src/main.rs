@@ -34,6 +34,7 @@ mod routes;
 mod settings;
 mod subtitles;
 mod system;
+mod tools;
 
 pub(crate) use routes::AppState;
 

@@ -265,6 +265,7 @@ pub(crate) fn router(state: AppState) -> Router {
         .merge(openai::router())
         .merge(jobs::router())
         .merge(system::router())
+        .merge(crate::tools::router())
         .layer(middleware::from_fn_with_state(
             state.clone(),
             auth_middleware,

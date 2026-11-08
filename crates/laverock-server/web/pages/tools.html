@@ -1,0 +1,44 @@
+    <!-- ================= 音频工具 ================= -->
+    <section id="page-tools" class="page">
+      <div class="page-head">
+        <div><h1 data-i18n="tools.title">音频工具</h1><p class="sub" data-i18n="tools.sub">上传或录制一段音频：去除背景噪音，或把人声与伴奏分开。</p></div>
+      </div>
+
+      <div class="card" id="toolCard">
+        <label data-i18n="tools.audio">音频（WAV）</label>
+        <div id="toolsCapture"></div>
+        <div class="hint" data-i18n="tools.limit">仅支持 WAV，最长 30 分钟，最大 200 MB。处理结果不会存入素材库。</div>
+
+        <label for="toolMode" data-i18n="tools.mode">处理方式</label>
+        <select id="toolMode">
+          <option value="denoise" data-i18n="tools.mode.denoise">降噪（保留人声）</option>
+          <option value="vocals" data-i18n="tools.mode.vocals">保留人声（去除伴奏）</option>
+          <option value="instrumental" data-i18n="tools.mode.instrumental">保留伴奏（去除人声）</option>
+          <option value="both" data-i18n="tools.mode.both">人声 + 伴奏（ZIP）</option>
+        </select>
+        <div class="hint" id="toolModelsHint"></div>
+
+        <div class="actions" style="margin-top:16px">
+          <button id="toolRun" type="button" data-i18n="tools.run">开始处理</button>
+          <button class="ghost" id="toolCancel" type="button" hidden data-i18n="cancel">取消</button>
+          <span class="hint" id="toolStatus"></span>
+        </div>
+        <progress id="toolProgress" max="1" value="0" hidden></progress>
+      </div>
+
+      <div class="card" id="toolResult" hidden>
+        <h2 data-i18n="tools.result">处理结果</h2>
+        <div class="tool-compare">
+          <div class="tool-track">
+            <b data-i18n="tools.before">处理前</b>
+            <audio id="toolBefore" controls></audio>
+          </div>
+          <div class="tool-track" id="toolAfterTrack" hidden>
+            <b data-i18n="tools.after">处理后</b>
+            <div id="toolAfterPlayers"></div>
+          </div>
+        </div>
+        <div class="actions" id="toolDownloads"></div>
+        <div class="hint" data-i18n="tools.ephemeral">结果保存在本机任务目录中，24 小时后自动清理。</div>
+      </div>
+    </section>

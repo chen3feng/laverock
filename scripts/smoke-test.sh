@@ -502,6 +502,103 @@ else
 fi
 fi
 
+if want tools; then
+echo "tools"
+tools_json=$(curl -sf "$BASE/api/tools")
+case "$tools_json" in
+  *'"denoise":'*) ok "tool availability" ;;
+  *) bad "tool availability" ;;
+esac
+case "$tools_json" in
+  *'"separation":'*) ok "separation availability" ;;
+  *) bad "separation availability" ;;
+esac
+case "$tools_json" in
+  *'"mp3":true'*) ok "mp3 availability" ;;
+  *) bad "mp3 availability" ;;
+esac
+
+# The tools page is WAV-only; a renamed text file is rejected before a job
+# is created, and an unknown mode is a client error too.
+printf 'not a wav\n' >"$OUT/not-a-wav.txt"
+code=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/tools/enhance" \
+  -F 'mode=denoise' -F "audio=@$OUT/not-a-wav.txt;filename=note.wav")
+[ "$code" = "400" ] && ok "non-WAV -> 400" || bad "non-WAV -> $code"
+
+code=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/tools/enhance" \
+  -F 'mode=loud' -F "audio=@$DIR/test_wavs/leijun-1.wav")
+[ "$code" = "400" ] && ok "unknown tool mode -> 400" || bad "unknown tool mode -> $code"
+
+tool_job() { # tool_job <mode> -> job id
+  curl -s -X POST "$BASE/api/tools/enhance" \
+    -F "mode=$1" -F "audio=@$DIR/test_wavs/leijun-1.wav" \
+    | sed -n 's/.*"job_id":"\([^"]*\)".*/\1/p'
+}
+tool_wait() { # tool_wait <id> -> terminal status
+  local id="$1" status=""
+  for _ in $(seq 1 300); do
+    status=$(curl -s "$BASE/api/jobs/$id" \
+      | sed -n 's/.*"status":"\([^"]*\)".*/\1/p')
+    case "$status" in done|error|cancelled) break ;; esac
+    sleep 1
+  done
+  printf '%s' "$status"
+}
+
+if case "$tools_json" in *'"denoise":true'*) true ;; *) false ;; esac; then
+  tid=$(tool_job denoise)
+  [ -n "$tid" ] && ok "start denoise job ($tid)" || bad "start denoise job"
+  status=$(tool_wait "$tid")
+  [ "$status" = "done" ] && ok "denoise finished" || bad "denoise status: $status"
+  events=$(curl -sN --max-time 10 "$BASE/api/jobs/$tid/events")
+  case "$events" in
+    *"event: stage"*) ok "tool stage events" ;;
+    *) bad "tool stage events missing" ;;
+  esac
+  code=$(curl -s -o "$OUT/denoised.wav" -w '%{http_code}' \
+    "$BASE/api/jobs/$tid/files/denoised.wav")
+  [ "$code" = "200" ] && head -c 4 "$OUT/denoised.wav" | grep -q RIFF \
+    && ok "denoise artifact" || bad "denoise artifact (HTTP $code)"
+else
+  echo "  skip denoise job (model not installed)"
+fi
+
+if case "$tools_json" in *'"separation":true'*) true ;; *) false ;; esac; then
+  tid=$(tool_job both)
+  [ -n "$tid" ] && ok "start stem job ($tid)" || bad "start stem job"
+  status=$(tool_wait "$tid")
+  [ "$status" = "done" ] && ok "stem separation finished" \
+    || bad "stem separation status: $status"
+  for name in vocals.wav instrumental.wav; do
+    code=$(curl -s -o "$OUT/$name" -w '%{http_code}' \
+      "$BASE/api/jobs/$tid/files/$name")
+    [ "$code" = "200" ] && head -c 4 "$OUT/$name" | grep -q RIFF \
+      && ok "stem artifact $name" || bad "stem artifact $name (HTTP $code)"
+  done
+  code=$(curl -s -o "$OUT/stems.zip" -w '%{http_code}' \
+    "$BASE/api/jobs/$tid/files/stems.zip")
+  [ "$code" = "200" ] && head -c 2 "$OUT/stems.zip" | grep -q PK \
+    && ok "stems zip" || bad "stems zip (HTTP $code)"
+
+  # Separation runs at about twice real time, so cancelling a six-second
+  # clip always lands while the separator is still working.
+  cid=$(tool_job instrumental)
+  code=$(curl -s -o /dev/null -w '%{http_code}' \
+    -X POST "$BASE/api/jobs/$cid/cancel")
+  [ "$code" = "202" ] && ok "tool cancel accepted" || bad "tool cancel -> $code"
+  status=$(tool_wait "$cid")
+  [ "$status" = "cancelled" ] && ok "tool job cancelled" \
+    || bad "tool cancel status: $status"
+else
+  echo "  skip stem separation (model not installed)"
+  # A missing pack is a setup problem, not a server error.
+  code=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/api/tools/enhance" \
+    -F 'mode=vocals' -F "audio=@$DIR/test_wavs/leijun-1.wav")
+  [ "$code" = "400" ] && ok "missing separation model -> 400" \
+    || bad "missing separation model -> $code"
+fi
+fi
+
 if want voxcpm2; then
 if case "$engines_json" in *'"id":"voxcpm2"'*) true ;; *) false ;; esac; then
   echo "voxcpm2"

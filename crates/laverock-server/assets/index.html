@@ -172,6 +172,21 @@
   }
   .capture-bar .hint { margin: 0; }
   .capture-bar button { margin-left: auto; }
+  /* ---------- audio tools ---------- */
+  .tool-compare { display: grid; grid-template-columns: 1fr; gap: 12px; margin-top: 12px; }
+  @media (min-width: 720px) { .tool-compare { grid-template-columns: 1fr 1fr; } }
+  .tool-track {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 12px; padding: 10px 12px;
+  }
+  .tool-track b { font-size: 12.5px; color: var(--muted); font-weight: 600; }
+  .tool-track audio { margin-top: 8px; }
+  .tool-player + .tool-player { margin-top: 8px; }
+  .tool-player b { display: block; font-size: 12px; color: var(--muted); }
+  #toolProgress {
+    width: 100%; height: 6px; margin-top: 12px;
+    accent-color: var(--accent);
+  }
   .empty {
     border: 1px dashed var(--line); border-radius: 14px; padding: 34px 20px;
     text-align: center; color: var(--muted); font-size: 13.5px;
@@ -307,6 +322,10 @@
     <a href="#/captures" data-page="captures">
       <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="4" rx="1"/><rect x="3" y="10" width="18" height="4" rx="1"/><rect x="3" y="16" width="18" height="4" rx="1"/></svg>
       <span data-i18n="nav.captures">素材库</span>
+    </a>
+    <a href="#/tools" data-page="tools">
+      <svg viewBox="0 0 24 24"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
+      <span data-i18n="nav.tools">工具</span>
     </a>
     <a href="#/voices" data-page="voices">
       <svg viewBox="0 0 24 24"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><path d="M12 19v3"/></svg>
@@ -494,6 +513,51 @@
       <div class="grid" id="captureGrid"></div>
       <div class="empty" id="capturesEmpty" data-i18n="captures.empty" hidden>
         还没有素材。点击「添加素材」录音或上传一段参考音频。
+      </div>
+    </section>
+
+    <!-- ================= 音频工具 ================= -->
+    <section id="page-tools" class="page">
+      <div class="page-head">
+        <div><h1 data-i18n="tools.title">音频工具</h1><p class="sub" data-i18n="tools.sub">上传或录制一段音频：去除背景噪音，或把人声与伴奏分开。</p></div>
+      </div>
+
+      <div class="card" id="toolCard">
+        <label data-i18n="tools.audio">音频（WAV）</label>
+        <div id="toolsCapture"></div>
+        <div class="hint" data-i18n="tools.limit">仅支持 WAV，最长 30 分钟，最大 200 MB。处理结果不会存入素材库。</div>
+
+        <label for="toolMode" data-i18n="tools.mode">处理方式</label>
+        <select id="toolMode">
+          <option value="denoise" data-i18n="tools.mode.denoise">降噪（保留人声）</option>
+          <option value="vocals" data-i18n="tools.mode.vocals">保留人声（去除伴奏）</option>
+          <option value="instrumental" data-i18n="tools.mode.instrumental">保留伴奏（去除人声）</option>
+          <option value="both" data-i18n="tools.mode.both">人声 + 伴奏（ZIP）</option>
+        </select>
+        <div class="hint" id="toolModelsHint"></div>
+
+        <div class="actions" style="margin-top:16px">
+          <button id="toolRun" type="button" data-i18n="tools.run">开始处理</button>
+          <button class="ghost" id="toolCancel" type="button" hidden data-i18n="cancel">取消</button>
+          <span class="hint" id="toolStatus"></span>
+        </div>
+        <progress id="toolProgress" max="1" value="0" hidden></progress>
+      </div>
+
+      <div class="card" id="toolResult" hidden>
+        <h2 data-i18n="tools.result">处理结果</h2>
+        <div class="tool-compare">
+          <div class="tool-track">
+            <b data-i18n="tools.before">处理前</b>
+            <audio id="toolBefore" controls></audio>
+          </div>
+          <div class="tool-track" id="toolAfterTrack" hidden>
+            <b data-i18n="tools.after">处理后</b>
+            <div id="toolAfterPlayers"></div>
+          </div>
+        </div>
+        <div class="actions" id="toolDownloads"></div>
+        <div class="hint" data-i18n="tools.ephemeral">结果保存在本机任务目录中，24 小时后自动清理。</div>
       </div>
     </section>
 
@@ -1181,6 +1245,67 @@ addI18n({
 
 addI18n({
   zh: {
+    'nav.tools': '工具',
+    'tools.title': '音频工具',
+    'tools.sub': '上传或录制一段音频：去除背景噪音，或把人声与伴奏分开。',
+    'tools.audio': '音频（WAV）',
+    'tools.limit': '仅支持 WAV，最长 30 分钟，最大 200 MB。处理结果不会存入素材库。',
+    'tools.mode': '处理方式',
+    'tools.mode.denoise': '降噪（保留人声）',
+    'tools.mode.vocals': '保留人声（去除伴奏）',
+    'tools.mode.instrumental': '保留伴奏（去除人声）',
+    'tools.mode.both': '人声 + 伴奏（ZIP）',
+    'tools.run': '开始处理',
+    'tools.starting': '正在准备…',
+    'tools.done': '处理完成',
+    'tools.cancelled': '已取消',
+    'tools.cancelling': '正在取消…',
+    'tools.failed': '处理失败：',
+    'tools.need_audio': '请先选择或录制一段音频。',
+    'tools.result': '处理结果',
+    'tools.before': '处理前',
+    'tools.after': '处理后',
+    'tools.track.vocals': '人声',
+    'tools.track.instrumental': '伴奏',
+    'tools.track.denoised': '已降噪',
+    'tools.ephemeral': '结果保存在本机任务目录中，24 小时后自动清理。',
+    'tools.missing.denoise': '未安装降噪模型。',
+    'tools.missing.separation': '未安装人声分离模型。',
+    'tools.missing.link': '前往「模型」页安装',
+  },
+  en: {
+    'nav.tools': 'Tools',
+    'tools.title': 'Audio tools',
+    'tools.sub': 'Upload or record a clip: remove background noise, or split it into vocals and instrumental.',
+    'tools.audio': 'Audio (WAV)',
+    'tools.limit': 'WAV only, up to 30 minutes and 200 MB. Results are not added to the library.',
+    'tools.mode': 'Action',
+    'tools.mode.denoise': 'Denoise (keep the voice)',
+    'tools.mode.vocals': 'Vocals only (remove the music)',
+    'tools.mode.instrumental': 'Instrumental only (remove the voice)',
+    'tools.mode.both': 'Both stems (ZIP)',
+    'tools.run': 'Run',
+    'tools.starting': 'Preparing…',
+    'tools.done': 'Done',
+    'tools.cancelled': 'Cancelled',
+    'tools.cancelling': 'Cancelling…',
+    'tools.failed': 'Failed: ',
+    'tools.need_audio': 'Choose or record a clip first.',
+    'tools.result': 'Result',
+    'tools.before': 'Before',
+    'tools.after': 'After',
+    'tools.track.vocals': 'Vocals',
+    'tools.track.instrumental': 'Instrumental',
+    'tools.track.denoised': 'Denoised',
+    'tools.ephemeral': 'Results live in the local job directory and are cleaned up after 24 hours.',
+    'tools.missing.denoise': 'The denoise model is not installed.',
+    'tools.missing.separation': 'The vocal-separation model is not installed.',
+    'tools.missing.link': 'Install from the Models page',
+  },
+});
+
+addI18n({
+  zh: {
     'cap.file': '选择文件', 'cap.record': '● 录音', 'cap.stop': '■ 停止', 'cap.none': '未选择',
     'cap.transcribe': '✎ 转写', 'transcribe.busy': '转写中…',
     'preset.official.hf': '官方（huggingface.co）', 'preset.cn': 'hf-mirror.com（国内加速）',
@@ -1479,6 +1604,7 @@ async function runJob(url, formData, handlers = {}) {
     throw new Error(message);
   }
   const { job_id: id } = await response.json();
+  if (handlers.started) handlers.started({ id });
   return watchJob(id, handlers);
 }
 
@@ -1549,7 +1675,7 @@ async function jobSnapshot(id) {
 }
 
 const $ = (id) => document.getElementById(id);
-const PAGES = ["synthesize", "music", "captures", "voices", "models", "history", "settings"];
+const PAGES = ["synthesize", "music", "captures", "tools", "voices", "models", "history", "settings"];
 const HF_PRESETS = [
   { value: '', labelKey: 'preset.official.hf' },
   { value: 'https://hf-mirror.com', labelKey: 'preset.cn' },
@@ -1599,7 +1725,7 @@ async function setLanguage(next, { persist = true } = {}) {
   fillPreset($('hfPreset'), HF_PRESETS);
   fillPreset($('pipPreset'), PIP_PRESETS);
   syncProxyMode();
-  await Promise.all([loadEngines(), loadProfiles(), loadCaptures(), loadSettingsPage()]);
+  await Promise.all([loadEngines(), loadProfiles(), loadCaptures(), loadSettingsPage(), loadToolsPage()]);
   renderHistory();
   await loadModels();
   if (session && session.lan_enabled) loadDevices();
@@ -1664,8 +1790,10 @@ async function saveBlob(blob, suggestedName) {
   if (window.showSaveFilePicker) {
     try {
       const ext = (suggestedName.match(/\.([a-z0-9]+)$/i) || [, ''])[1].toLowerCase();
+      const mime = { mp3: 'audio/mpeg', wav: 'audio/wav', zip: 'application/zip' }[ext]
+        || 'application/octet-stream';
       const types = ext
-        ? [{ description: ext.toUpperCase() + ' audio', accept: { [`audio/${ext === 'mp3' ? 'mpeg' : ext}`]: ['.' + ext] } }]
+        ? [{ description: ext.toUpperCase() + ' file', accept: { [mime]: ['.' + ext] } }]
         : [];
       const handle = await window.showSaveFilePicker({ suggestedName, types });
       const writable = await handle.createWritable();
@@ -4831,6 +4959,210 @@ async function loadDevices() {
   }
 }
 
+// ---------------------------------------------------------------- audio tools
+
+// Standalone denoise / separation page. It reuses the capture component for
+// upload and recording, runs the work as a background job (so a long
+// separation survives a refresh and can be cancelled), and keeps the result
+// in the job directory rather than adding it to the library.
+let toolsStatus = { denoise: false, separation: false, mp3: false };
+let toolJobId = null;
+let toolArtifacts = [];
+let toolBeforeUrl = null;
+
+// Denoising needs only the small denoiser; every other mode runs the
+// separator (which produces both stems).
+const toolModeAvailable = (mode) =>
+  mode === 'denoise' ? toolsStatus.denoise : toolsStatus.separation;
+
+const toolModeEnabled = () =>
+  [...$('toolMode').options].some((opt) => !opt.disabled);
+
+async function loadToolsPage() {
+  try {
+    toolsStatus = await api('/api/tools');
+  } catch (_) {
+    toolsStatus = { denoise: false, separation: false, mp3: false };
+  }
+  const select = $('toolMode');
+  for (const opt of select.options) opt.disabled = !toolModeAvailable(opt.value);
+  if (!toolModeAvailable(select.value)) {
+    const first = [...select.options].find((opt) => !opt.disabled);
+    if (first) select.value = first.value;
+  }
+  const missing = [];
+  if (!toolsStatus.denoise) missing.push(t('tools.missing.denoise'));
+  if (!toolsStatus.separation) missing.push(t('tools.missing.separation'));
+  $('toolModelsHint').innerHTML = missing.length
+    ? `${esc(missing.join(' '))} <a href="#/models">${esc(t('tools.missing.link'))}</a>`
+    : '';
+  $('toolRun').disabled = !toolModeEnabled();
+}
+
+function addToolArtifact(view) {
+  if (!view || !view.name) return;
+  if (!toolArtifacts.some((a) => a.name === view.name)) toolArtifacts.push(view);
+}
+
+function toolArtifactLabel(name) {
+  if (name.includes('vocals')) return t('tools.track.vocals');
+  if (name.includes('instrumental')) return t('tools.track.instrumental');
+  return t('tools.track.denoised');
+}
+
+function toolDownloadButton(artifact, label, mp3 = false) {
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'ghost small';
+  btn.textContent = label;
+  btn.onclick = () => downloadToolArtifact(artifact, mp3);
+  return btn;
+}
+
+async function downloadToolArtifact(artifact, mp3) {
+  try {
+    const res = await apiFetch(artifact.url);
+    if (!res.ok) throw new Error(res.statusText || ('HTTP ' + res.status));
+    let blob = await res.blob();
+    let name = 'laverock-' + artifact.name;
+    if (mp3) {
+      const encoded = await apiFetch('/api/audio/mp3', {
+        method: 'POST',
+        headers: { 'Content-Type': 'audio/wav' },
+        body: blob,
+      });
+      if (!encoded.ok) {
+        const body = await encoded.json().catch(() => ({}));
+        throw new Error(body.error || encoded.statusText || ('HTTP ' + encoded.status));
+      }
+      blob = await encoded.blob();
+      name = name.replace(/\.wav$/i, '.mp3');
+    }
+    await saveBlob(blob, name);
+  } catch (e) {
+    toast(t('ui.download_failed') + e.message, true);
+  }
+}
+
+// Show the uploaded clip next to each produced stem. `both` yields two WAVs
+// plus a ZIP; the players read the WAVs, the ZIP is just a bundle.
+function renderToolResult() {
+  if (!toolArtifacts.length) return;
+  $('toolResult').hidden = false;
+
+  const after = $('toolAfterPlayers');
+  after.innerHTML = '';
+  const wavs = toolArtifacts.filter((a) => /\.wav$/i.test(a.name));
+  $('toolAfterTrack').hidden = wavs.length === 0;
+  for (const artifact of wavs) {
+    const wrap = document.createElement('div');
+    wrap.className = 'tool-player';
+    const label = document.createElement('b');
+    label.textContent = toolArtifactLabel(artifact.name);
+    const player = document.createElement('audio');
+    player.controls = true;
+    player.src = artifact.url;
+    wrap.append(label, player);
+    after.appendChild(wrap);
+  }
+
+  const downloads = $('toolDownloads');
+  downloads.innerHTML = '';
+  for (const artifact of toolArtifacts) {
+    const zip = /\.zip$/i.test(artifact.name);
+    downloads.appendChild(toolDownloadButton(artifact, zip ? 'ZIP' : 'WAV'));
+    if (!zip && toolsStatus.mp3) {
+      downloads.appendChild(toolDownloadButton(artifact, 'MP3', true));
+    }
+  }
+}
+
+async function runTools() {
+  if (!toolsCapture.blob) {
+    toast(t('tools.need_audio'), true);
+    return;
+  }
+  const mode = $('toolMode').value;
+  if (!toolModeAvailable(mode)) {
+    toast(t('tools.missing.denoise'), true);
+    return;
+  }
+  const fd = new FormData();
+  fd.append('audio', toolsCapture.blob, toolsCapture.filename || 'input.wav');
+  fd.append('mode', mode);
+
+  toolArtifacts = [];
+  toolJobId = null;
+  $('toolResult').hidden = true;
+  $('toolDownloads').innerHTML = '';
+  $('toolStatus').textContent = t('tools.starting');
+  $('toolProgress').hidden = false;
+  $('toolProgress').value = 0;
+  $('toolRun').disabled = true;
+  $('toolCancel').hidden = false;
+
+  try {
+    const result = await runJob('/api/tools/enhance', fd, {
+      started: (e) => { toolJobId = e.id; },
+      snapshot: (s) => {
+        $('toolProgress').value = s.progress || 0;
+        for (const artifact of s.artifacts || []) addToolArtifact(artifact);
+      },
+      stage: (e) => { $('toolStatus').textContent = e.message; },
+      progress: (e) => { $('toolProgress').value = e.value; },
+      artifact: (e) => addToolArtifact(e),
+    });
+    if (result && result.cancelled) {
+      $('toolStatus').textContent = t('tools.cancelled');
+      return;
+    }
+    $('toolStatus').textContent = t('tools.done');
+    renderToolResult();
+  } catch (e) {
+    $('toolStatus').textContent = t('tools.failed') + e.message;
+    toast(t('tools.failed') + e.message, true);
+  } finally {
+    $('toolProgress').hidden = true;
+    $('toolCancel').hidden = true;
+    toolJobId = null;
+    $('toolRun').disabled = !toolModeEnabled();
+  }
+}
+
+async function cancelTools() {
+  if (!toolJobId) return;
+  try {
+    await cancelJob(toolJobId);
+    $('toolStatus').textContent = t('tools.cancelling');
+  } catch (e) {
+    toast(t('ui.failed') + e.message, true);
+  }
+}
+
+const toolsCapture = new Capture($('toolsCapture'));
+// The tools page has no use for a transcript; keep that button out of the
+// shared component.
+toolsCapture.syncTranscribeButton = () => { toolsCapture.transBtn.hidden = true; };
+toolsCapture.syncTranscribeButton();
+toolsCapture.onChange = () => {
+  if (toolBeforeUrl) URL.revokeObjectURL(toolBeforeUrl);
+  toolBeforeUrl = toolsCapture.blob ? URL.createObjectURL(toolsCapture.blob) : null;
+  const before = $('toolBefore');
+  if (toolBeforeUrl) before.src = toolBeforeUrl;
+  else before.removeAttribute('src');
+  before.hidden = !toolBeforeUrl;
+  // A different clip invalidates the previous result.
+  $('toolResult').hidden = true;
+  toolArtifacts = [];
+};
+if (!window.isSecureContext) {
+  toolsCapture.rec.disabled = true;
+  toolsCapture.rec.title = t('ui.microphone_access_requires_https_or');
+}
+
+$('toolRun').onclick = runTools;
+$('toolCancel').onclick = cancelTools;
+
 // ---------------------------------------------------------------- routing / boot
 
 function currentPage() {
@@ -4843,6 +5175,7 @@ function showPage(page) {
   document.querySelectorAll('nav a').forEach((a) => a.classList.toggle('active', a.dataset.page === page));
   document.title = `${t('nav.' + page)} · Laverock`;
   if (page === 'captures') { loadCaptures(); loadEnhanceStatus(); }
+  if (page === 'tools') loadToolsPage();
   if (page === 'voices') loadProfiles();
   if (page === 'history') loadHistory();
   // Installs run on the server and can finish while another page is open,

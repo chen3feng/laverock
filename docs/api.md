@@ -49,6 +49,8 @@ describes the loopback listener.
 | GET | `/api/history/:id/audio` | generated audio (`?format=mp3` to export) |
 | DELETE | `/api/history/:id` · `/api/history` | delete one or all generations |
 | POST | `/api/audio/mp3` | body: WAV → MP3 (built-in pure-Rust encoder, no ffmpeg needed) |
+| GET | `/api/tools` | audio tools available on this machine → `{denoise, separation, mp3}` |
+| POST | `/api/tools/enhance` | multipart `audio` (WAV) + `mode` (`denoise`, `vocals`, `instrumental`, `both`) → `202` background job; a single stem is a WAV, `both` also bundles `stems.zip` |
 | POST | `/api/transcribe` | multipart `audio` (WAV) → transcript (needs the SenseVoice model) |
 | POST | `/api/transcribe/details` | same input → `{text, segments: [{start, end, text}], language, duration}` |
 | POST | `/api/transcribe/subtitles?format=srt\|vtt` | same input → downloadable SRT or WebVTT (`vtt`; `srt` is the default) |
@@ -73,6 +75,14 @@ Models without token timestamps fall back to splitting the clip on pauses.
 `POST /api/captures/:id/transcribe` stores both the text and the cues in the
 take, and a manual transcript edit clears the cues because they would no
 longer match. Cue times are seconds from the start of the clip.
+
+`POST /api/tools/enhance` starts a background job instead of returning audio
+directly, because vocal separation runs at roughly twice real time. The job
+reports `stage` events while separating or denoising and writes its output as
+job artifacts: `denoised.wav`, `vocals.wav`, `instrumental.wav`, or — for
+`both` — `vocals.wav`, `instrumental.wav` and `stems.zip`. Uploads must be
+WAV, at most 200 MB and 30 minutes; cancelling kills the separator process
+and removes its temporary directory. MP3 export reuses `POST /api/audio/mp3`.
 
 Engine parameters (`speed`, `num_steps`, `cfg`, `seed`, …) are declared per
 engine by its manifest and validated server-side against the same list the

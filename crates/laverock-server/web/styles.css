@@ -163,6 +163,21 @@
   }
   .capture-bar .hint { margin: 0; }
   .capture-bar button { margin-left: auto; }
+  /* ---------- audio tools ---------- */
+  .tool-compare { display: grid; grid-template-columns: 1fr; gap: 12px; margin-top: 12px; }
+  @media (min-width: 720px) { .tool-compare { grid-template-columns: 1fr 1fr; } }
+  .tool-track {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 12px; padding: 10px 12px;
+  }
+  .tool-track b { font-size: 12.5px; color: var(--muted); font-weight: 600; }
+  .tool-track audio { margin-top: 8px; }
+  .tool-player + .tool-player { margin-top: 8px; }
+  .tool-player b { display: block; font-size: 12px; color: var(--muted); }
+  #toolProgress {
+    width: 100%; height: 6px; margin-top: 12px;
+    accent-color: var(--accent);
+  }
   .empty {
     border: 1px dashed var(--line); border-radius: 14px; padding: 34px 20px;
     text-align: center; color: var(--muted); font-size: 13.5px;

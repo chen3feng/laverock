@@ -108,10 +108,19 @@ jobs:
           path: models/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17-int8
           key: sensevoice-int8-${{ hashFiles('scripts/download-stt.sh') }}
 
+      # Only the 10 MB denoiser: the 164 MB separator and its runtime are
+      # not needed to exercise the tools page's job path in CI.
+      - name: Cache denoise model
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: models/enhance
+          key: enhance-denoise-${{ hashFiles('scripts/download-enhance.sh') }}
+
       - name: Download models
         run: |
           ./scripts/download-zipvoice.sh
           ./scripts/download-stt.sh
+          ENHANCE_ONLY=denoise ./scripts/download-enhance.sh
 
       - name: Build server
         run: |

@@ -47,6 +47,8 @@ Cookie）；以下均指回环监听。
 | GET | `/api/history/:id/audio` | 生成的音频（`?format=mp3` 导出 MP3） |
 | DELETE | `/api/history/:id` · `/api/history` | 删除单条 / 全部生成记录 |
 | POST | `/api/audio/mp3` | 请求体：WAV → MP3（内置纯 Rust 编码器，无需 ffmpeg） |
+| GET | `/api/tools` | 本机可用的音频工具 → `{denoise, separation, mp3}` |
+| POST | `/api/tools/enhance` | multipart：`audio`（WAV）与 `mode`（`denoise` / `vocals` / `instrumental` / `both`）→ `202` 后台任务；单轨为 WAV，`both` 另附 `stems.zip` |
 | POST | `/api/transcribe` | multipart：`audio`（WAV）→ 转写文字（需安装 SenseVoice 模型） |
 | POST | `/api/transcribe/details` | 同样的输入 → `{text, segments: [{start, end, text}], language, duration}` |
 | POST | `/api/transcribe/subtitles?format=srt\|vtt` | 同样的输入 → 可下载的 SRT 或 WebVTT（`format=vtt`；默认 `srt`） |
@@ -68,6 +70,12 @@ Cookie）；以下均指回环监听。
 再聚合成句子级的分段。不提供 token 时间戳的模型则会按停顿切分音频兜底。
 `POST /api/captures/:id/transcribe` 会把文字和分段一起存入素材；手动修改转写
 文字会清空分段，因为它们已不再对应。分段时间是相对音频开头的秒数。
+
+`POST /api/tools/enhance` 不直接返回音频，而是启动后台任务：人声分离大约需要
+两倍实时时间。任务在分离或降噪期间上报 `stage` 事件，结果写成任务文件：
+`denoised.wav`、`vocals.wav`、`instrumental.wav`；`both` 则同时给出
+`vocals.wav`、`instrumental.wav` 与 `stems.zip`。上传仅支持 WAV，最大 200 MB、
+30 分钟；取消会终止分离进程并删除临时目录。MP3 导出复用 `POST /api/audio/mp3`。
 
 引擎参数（`speed`、`num_steps`、`cfg`、`seed` 等）由各引擎的清单声明，服务端按
 同一份列表校验，界面也用同一份列表生成控件；`GET /api/engines` 可查看。每个引擎
