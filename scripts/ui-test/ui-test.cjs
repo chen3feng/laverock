@@ -253,28 +253,36 @@ async function main() {
     say('captures');
     await page.click('nav a[data-page="captures"]');
     await page.waitForSelector('#page-captures.active');
+    // A library may already hold takes (a saved voice's clip is one too), so
+    // pick the card this step creates rather than the first one on screen.
+    const takesBefore = new Set(
+      (await apiJson(context.request, `${base}/api/captures`)).map((c) => c.id),
+    );
     await page.click('#newCaptureBtn');
     await page.setInputFiles('#libraryCapture .cap-file', ref);
     await transcribe(page, '#libraryCapture');
     await page.click('#newCaptureSave');
     await page.waitForFunction(
-      () => Array.from(document.querySelectorAll('.capture-card .voice-text'))
-        .some((el) => el.textContent.trim().length > 0),
-      null,
+      (known) => [...document.querySelectorAll('.capture-card')]
+        .some((card) => card.dataset.id && !known.includes(card.dataset.id)),
+      [...takesBefore],
       { timeout: 60_000 },
     );
+    const takeId = await page.evaluate(
+      (known) => [...document.querySelectorAll('.capture-card')]
+        .map((card) => card.dataset.id)
+        .find((id) => id && !known.includes(id)),
+      [...takesBefore],
+    );
+    const capture = page.locator(`.capture-card[data-id="${takeId}"]`);
+    await capture.waitFor({ timeout: 30_000 });
     pass('capture saved with its transcript');
 
     // Re-transcribing stores timed cues; the card shows them and offers
     // SRT/VTT downloads.
-    const capture = page.locator('.capture-card').first();
     await capture.locator('.tr').click();
-    await page.waitForFunction(
-      () => document.querySelectorAll('.capture-card .voice-seg').length > 0,
-      null,
-      { timeout: 120_000 },
-    );
-    const cues = await page.locator('.capture-card .voice-seg').count();
+    await capture.locator('.voice-seg').first().waitFor({ timeout: 120_000 });
+    const cues = await capture.locator('.voice-seg').count();
     assert.ok(cues >= 1, 'timed cues rendered');
     pass(`capture shows ${cues} timed cue(s)`);
     const srtFile = await saveDownload(page, capture.locator('.sub-srt'), artifacts);

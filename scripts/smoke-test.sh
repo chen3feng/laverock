@@ -339,6 +339,14 @@ code=$(curl -s -o /dev/null -w '%{http_code}' -X DELETE "$BASE/api/profiles/$pid
 [ "$code" = "204" ] && ok "delete profile" || bad "delete profile -> $code"
 curl -sf "$BASE/api/profiles" | grep -q "$pid" \
   && bad "deleted profile still listed" || ok "profile removed"
+# A saved voice's clip is also a library take, and takes outlive voices by
+# design. Clean it up so later groups (and the browser test) see a library
+# with only the takes they created.
+for cid in $(curl -s "$BASE/api/captures" | sed 's/},{/}\n{/g' \
+  | grep -F '"name":"smoke-test-voice"' \
+  | sed -n 's/.*"id":"\([^"]*\)".*/\1/p'); do
+  curl -s -o /dev/null -X DELETE "$BASE/api/captures/$cid"
+done
 fi
 
 if want captures; then
@@ -361,12 +369,12 @@ case "$captures_json" in
   *"{\"code\":\"no_transcript\"}"*) ok "untranscribed take flagged" ;;
   *) bad "take readiness check" ;;
 esac
-# Content de-duplication is checked in the unit tests; a global clean-up
-# here would touch takes that belong to a real library, so this only
-# verifies that the duplicate is reported.
-c3_line=$(printf '%s\n' "$captures_json" | sed 's/},{/}\n{/g' | grep "\"$c3\"")
+# Which of two byte-identical takes is canonical depends on their shared
+# creation second and the directory read order, so only require that the
+# pair reports the duplication at all.
+c3_line=$(printf '%s\n' "$captures_json" | sed 's/},{/}\n{/g' \
+  | grep -E "\"($c1|$c3)\"")
 case "$c3_line" in
-  *'"duplicate_of":null'*|'') bad "duplicate not flagged" ;;
   *'"duplicate_of":"c'*) ok "duplicate take flagged" ;;
   *) bad "duplicate not flagged" ;;
 esac

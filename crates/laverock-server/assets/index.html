@@ -2217,6 +2217,7 @@ function renderCaptures() {
   for (const c of captureList) {
     const el = document.createElement('div');
     el.className = 'voice-card capture-card';
+    el.dataset.id = c.id;
     const name = c.name || t('captures.unnamed');
     const checked = selectedCaptures.has(c.id) ? ' checked' : '';
     const transcript = c.prompt_text
