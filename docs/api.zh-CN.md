@@ -177,8 +177,8 @@ curl -X POST http://127.0.0.1:8787/api/engines/seed-vc/convert \
   -o converted.wav
 ```
 
-只有任务类型为 `vc` 或 `svc` 的引擎接受此接口，语音引擎会返回 `400`。源音频上限
-为 200 MB。加 `x-laverock-job: 1` 后请求变为后台任务，产物为 `converted.wav`，
+只有任务类型为 `vc` 或 `svc` 的引擎接受此接口，语音引擎会返回 `400`。源音频
+至少 0.5 秒，上限为 200 MB。加 `x-laverock-job: 1` 后请求变为后台任务，产物为 `converted.wav`，
 同样适用 `stage`/`progress`/`audio` 事件。
 
 通用 audio.cpp 模型的参数来自模型自带的 `model_spec.json`，而不是应用代码：

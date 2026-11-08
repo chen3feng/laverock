@@ -89,6 +89,9 @@ messages! {
     SourceAudioRequired = "source_audio_required"
         { en: "Voice conversion needs a source clip to convert.",
           zh: "变声需要一段要转换的源音频。" },
+    SourceAudioTooShort = "source_audio_too_short"
+        { en: "The source clip is too short to convert; use at least 0.5 s of speech.",
+          zh: "源音频太短，至少要 0.5 秒语音才能转换。" },
     TranscriptRequired = "transcript_required"
         { en: "{engine} needs the transcript of the reference clip.",
           zh: "{engine} 需要参考音频对应的文字。" },

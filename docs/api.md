@@ -201,7 +201,8 @@ curl -X POST http://127.0.0.1:8787/api/engines/seed-vc/convert \
 ```
 
 Only engines whose task is `vc` or `svc` accept this route; a speech engine
-answers `400`. Source audio is capped at 200 MB. With `x-laverock-job: 1`
+answers `400`. Source audio must be at least 0.5 s and is capped at
+200 MB. With `x-laverock-job: 1`
 the run becomes a background job whose artifact is `converted.wav`, so the
 usual `stage`/`progress`/`audio` events apply.
 

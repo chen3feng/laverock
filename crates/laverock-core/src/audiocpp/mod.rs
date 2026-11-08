@@ -45,6 +45,8 @@ const RESIDENT_IDLE_UNLOAD_MS: u64 = 15 * 60 * 1000;
 const RESIDENT_START_TIMEOUT: Duration = Duration::from_secs(30);
 /// A generation can legitimately run for minutes on long text.
 const RESIDENT_READ_TIMEOUT: Duration = Duration::from_secs(15 * 60);
+/// Shortest source clip a conversion model can work with.
+const MIN_CONVERT_SECS: f32 = 0.5;
 
 /// Which audio.cpp model family an engine wraps.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -668,6 +670,14 @@ impl SpeechEngine for AudioCppEngine {
         if req.input_samples.is_empty() {
             return Err(CoreError::UserError(i18n::Message::new(
                 Key::SourceAudioRequired,
+            )));
+        }
+        // Shorter than this is a click or a fragment, not speech; the
+        // model cannot keep content it never heard.
+        let secs = req.input_samples.len() as f32 / req.input_sr.max(1) as f32;
+        if secs < MIN_CONVERT_SECS {
+            return Err(CoreError::UserError(i18n::Message::new(
+                Key::SourceAudioTooShort,
             )));
         }
         if self.voice_ref && req.prompt_samples.is_empty() {
@@ -1919,7 +1929,7 @@ mod tests {
 
     fn convert_request() -> ConvertRequest {
         ConvertRequest {
-            input_samples: vec![0.3; 2400],
+            input_samples: vec![0.3; 24_000],
             input_sr: 24_000,
             prompt_samples: vec![0.2; 2400],
             prompt_sr: 24_000,
@@ -1957,7 +1967,7 @@ mod tests {
         let bytes = std::fs::read(dir.join("input.wav")).expect("source audio copied");
         let (samples, rate) = crate::decode_wav(&bytes).expect("wav");
         assert_eq!(rate, 24_000);
-        assert_eq!(samples.len(), 2400);
+        assert_eq!(samples.len(), 24_000);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -1969,6 +1979,28 @@ mod tests {
         req.input_samples.clear();
         let err = engine.convert(&req).unwrap_err();
         assert!(err.to_string().contains("source clip"), "{err}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn generic_vc_rejects_a_tiny_source() {
+        let dir = args_dir("generic-vc-short");
+        let engine = fixture(&dir, "audio_cpp");
+        let mut req = convert_request();
+        req.input_samples.truncate(2_400); // 0.1 s at 24 kHz
+        let err = engine.convert(&req).unwrap_err();
+        assert!(err.to_string().contains("too short"), "{err}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn generic_vc_requires_a_target_voice() {
+        let dir = args_dir("generic-vc-no-ref");
+        let engine = fixture(&dir, "audio_cpp");
+        let mut req = convert_request();
+        req.prompt_samples.clear();
+        let err = engine.convert(&req).unwrap_err();
+        assert!(err.to_string().contains("reference clip"), "{err}");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
