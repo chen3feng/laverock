@@ -21,6 +21,8 @@ installs and CI use them directly:
 ./scripts/download-kokoro.sh       # Kokoro-82M, ~135 MB INT8 (~450 MB with fp32), 8 languages, preset voices
 ./scripts/download-stt.sh          # SenseVoice STT, ~234 MB, auto-transcribes clips
 ./scripts/download-stt-firered.sh  # FireRedASR2 CTC STT, ~496 MB, more accurate
+./scripts/download-stt-firered-aed.sh  # FireRedASR2 AED STT, ~799 MB, most accurate
+./scripts/download-stt-qwen3.sh    # Qwen3-ASR 0.6B STT, ~837 MB, punctuation + 30 languages
 ./scripts/download-voxcpm2.sh      # VoxCPM2, ~3.3 GB, 30 languages, GGUF
 ./scripts/download-qwen3tts.sh     # Qwen3-TTS cloning, isolated venv + ~1.5 GB model
 ./scripts/download-longcat.sh      # LongCat-AudioDiT 1B, isolated venv + 5.7 GB weights
@@ -75,6 +77,8 @@ endpoint call the model.
 | `kokoro-int8-multi-lang-v1_0` | Kokoro-82M | 54 preset voices | zh, en, ja, fr, es, it, pt, hi | ~135 MB (INT8) / ~450 MB with fp32 |
 | `sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17-int8` | SenseVoice Small INT8 | speech recognition | zh, en, ja, ko, yue | ~234 MB |
 | `sherpa-onnx-fire-red-asr2-ctc-zh_en-int8-2026-02-25` | FireRedASR2 CTC INT8 | speech recognition | zh, en + 20+ dialects | ~496 MB |
+| `sherpa-onnx-fire-red-asr2-zh_en-int8-2026-02-26` | FireRedASR2 AED INT8 | speech recognition | zh, en + 20+ dialects | ~799 MB |
+| `sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25` | Qwen3-ASR 0.6B INT8 | speech recognition | 30 languages + Chinese dialects | ~837 MB |
 | `voxcpm2` | VoxCPM2 | clone, voice design | 30 languages | ~3.3 GB |
 | `longcat` | LongCat-AudioDiT 1B | clone | zh, en | ~7 GB incl. venv |
 | `dots` | dots.tts SOAR Q8_0 | clone | 24 languages | ~3.1 GB |
@@ -332,12 +336,26 @@ yue, with punctuation and inverse text normalization. Once installed, a
 recorded or uploaded reference clip is transcribed automatically into the
 transcript field.
 
-**FireRedASR2 CTC** — the accuracy-first alternative: zh/en plus 20+ Chinese
-dialects, noticeably better on noisy or accented audio. It reports token
-timestamps (so SRT/WebVTT cues still work) but no punctuation, and is slower
-than SenseVoice. When both are installed, the Transcribe page picks the model
-per run and live dictation keeps using SenseVoice; otherwise the most recently
-installed model is the default. Install it with `./scripts/download-stt-firered.sh`.
+**FireRedASR2 CTC** — a fast accuracy-first alternative: zh/en plus 20+
+Chinese dialects, noticeably better on noisy or accented audio. It reports
+token timestamps (so SRT/WebVTT cues still work) but no punctuation, and is
+slower than SenseVoice. Install it with `./scripts/download-stt-firered.sh`.
+
+**FireRedASR2 AED** — the attention-based sibling of the CTC build: same
+languages, the most accurate of the four on Mandarin, but the slowest and the
+largest (~799 MB). It emits no token timestamps, so subtitle cues come from
+splitting the clip on pauses, and it has no punctuation. Install it with
+`./scripts/download-stt-firered-aed.sh`.
+
+**Qwen3-ASR 0.6B** — the broadest coverage and the only FireRedASR2-era
+model here that keeps punctuation: 30 languages plus 20+ Chinese dialects,
+with roughly a 0.6B decoder. It is fast for its size, but larger on disk
+(~837 MB) and also timestamp-free, so cues fall back to pause splitting.
+Install it with `./scripts/download-stt-qwen3.sh`.
+
+When more than one is installed, the Transcribe page picks the model per run,
+live dictation keeps using SenseVoice, and the most recently installed model
+is the default for a fresh profile.
 
 ## Speed
 
@@ -531,3 +549,9 @@ MOSS-TTS-Delay is released by [OpenMOSS](https://github.com/OpenMOSS) under
 Apache-2.0; the native runtime is built from the OpenMOSS llama.cpp fork.
 
 SenseVoice is released by FunAudioLLM under MIT and packaged by sherpa-onnx.
+
+FireRedASR2 (CTC and AED) is released by
+[FireRedTeam](https://github.com/FireRedTeam/FireRedASR2S) under Apache-2.0.
+
+Qwen3-ASR is released by [QwenLM](https://github.com/QwenLM/Qwen3-ASR) under
+Apache-2.0.

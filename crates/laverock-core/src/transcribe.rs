@@ -27,8 +27,9 @@ use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
 use sherpa_onnx::{
-    OfflineFireRedAsrCtcModelConfig, OfflineRecognizer, OfflineRecognizerConfig,
-    OfflineRecognizerResult, OfflineSenseVoiceModelConfig,
+    OfflineFireRedAsrCtcModelConfig, OfflineFireRedAsrModelConfig, OfflineQwen3ASRModelConfig,
+    OfflineRecognizer, OfflineRecognizerConfig, OfflineRecognizerResult,
+    OfflineSenseVoiceModelConfig,
 };
 
 use crate::i18n::{self, Key};
@@ -243,6 +244,45 @@ impl Transcriber {
     }
 }
 
+/// Resolve a model file named by the manifest, failing before the ONNX
+/// session is created when it is missing.
+fn stt_file(dir: &Path, name: &str, what: &str) -> Result<PathBuf> {
+    if name.is_empty() {
+        return Err(CoreError::Load(format!(
+            "stt manifest is missing the {what} file name"
+        )));
+    }
+    let path = dir.join(name);
+    if !path.is_file() {
+        return Err(CoreError::Load(format!(
+            "missing STT {what} file {}",
+            path.display()
+        )));
+    }
+    Ok(path)
+}
+
+/// Resolve a directory named by the manifest (Qwen3-ASR's tokenizer).
+fn stt_dir(dir: &Path, name: &str, what: &str) -> Result<PathBuf> {
+    if name.is_empty() {
+        return Err(CoreError::Load(format!(
+            "stt manifest is missing the {what} directory name"
+        )));
+    }
+    let path = dir.join(name);
+    if !path.is_dir() {
+        return Err(CoreError::Load(format!(
+            "missing STT {what} directory {}",
+            path.display()
+        )));
+    }
+    Ok(path)
+}
+
+fn path_string(path: &Path) -> String {
+    path.to_string_lossy().into_owned()
+}
+
 impl Recognizer {
     fn load(manifest: &Manifest, dir: &Path) -> Result<Self> {
         let stt = manifest
@@ -250,41 +290,64 @@ impl Recognizer {
             .as_ref()
             .ok_or_else(|| CoreError::Load("stt manifest missing an [stt] section".into()))?;
 
-        let model = dir.join(&stt.model);
-        let tokens = dir.join(&stt.tokens);
-        for path in [&model, &tokens] {
-            if !path.exists() {
-                return Err(CoreError::Load(format!(
-                    "missing STT file {}",
-                    path.display()
-                )));
-            }
-        }
-
         let mut config = OfflineRecognizerConfig::default();
         let language = match stt.engine.as_str() {
             "sense_voice" => {
+                let model = stt_file(dir, &stt.model, "model")?;
                 config.model_config.sense_voice = OfflineSenseVoiceModelConfig {
-                    model: Some(model.to_string_lossy().into_owned()),
+                    model: Some(path_string(&model)),
                     language: Some(stt.language.clone()),
                     use_itn: stt.use_itn,
                 };
+                config.model_config.tokens =
+                    Some(path_string(&stt_file(dir, &stt.tokens, "tokens")?));
                 (stt.language != "auto" && !stt.language.is_empty()).then(|| stt.language.clone())
             }
             "fire_red_asr_ctc" => {
+                let model = stt_file(dir, &stt.model, "model")?;
                 config.model_config.fire_red_asr_ctc = OfflineFireRedAsrCtcModelConfig {
-                    model: Some(model.to_string_lossy().into_owned()),
+                    model: Some(path_string(&model)),
                 };
+                config.model_config.tokens =
+                    Some(path_string(&stt_file(dir, &stt.tokens, "tokens")?));
                 // FireRedASR2 detects the language (zh/en/dialects) itself.
+                None
+            }
+            "fire_red_asr" => {
+                let encoder = stt_file(dir, &stt.encoder, "encoder")?;
+                let decoder = stt_file(dir, &stt.decoder, "decoder")?;
+                config.model_config.fire_red_asr = OfflineFireRedAsrModelConfig {
+                    encoder: Some(path_string(&encoder)),
+                    decoder: Some(path_string(&decoder)),
+                };
+                config.model_config.tokens =
+                    Some(path_string(&stt_file(dir, &stt.tokens, "tokens")?));
+                None
+            }
+            "qwen3_asr" => {
+                let conv_frontend = stt_file(dir, &stt.conv_frontend, "conv frontend")?;
+                let encoder = stt_file(dir, &stt.encoder, "encoder")?;
+                let decoder = stt_file(dir, &stt.decoder, "decoder")?;
+                let tokenizer = stt_dir(dir, &stt.tokenizer, "tokenizer")?;
+                config.model_config.qwen3_asr = OfflineQwen3ASRModelConfig {
+                    conv_frontend: Some(path_string(&conv_frontend)),
+                    encoder: Some(path_string(&encoder)),
+                    decoder: Some(path_string(&decoder)),
+                    tokenizer: Some(path_string(&tokenizer)),
+                    ..Default::default()
+                };
+                // Qwen3-ASR reads its own tokenizer directory; the shared
+                // token table is not used.
+                config.model_config.tokens = Some(String::new());
                 None
             }
             other => {
                 return Err(CoreError::Load(format!(
-                    "unsupported STT engine: {other} (expected sense_voice or fire_red_asr_ctc)"
+                    "unsupported STT engine: {other} (expected sense_voice, fire_red_asr_ctc, \
+                     fire_red_asr or qwen3_asr)"
                 )));
             }
         };
-        config.model_config.tokens = Some(tokens.to_string_lossy().into_owned());
         config.model_config.num_threads = stt.num_threads.max(1);
         config.model_config.debug = false;
 
@@ -725,6 +788,31 @@ mod tests {
         )
         .unwrap();
         assert_eq!(manifest.stt.unwrap().engine, "sense_voice");
+    }
+
+    #[test]
+    fn parses_aed_and_qwen3_manifests() {
+        let manifest: Manifest = serde_json::from_str(
+            r#"{"id":"stt-firered-aed","kind":"stt","name":"FireRedASR2 AED",
+               "stt":{"engine":"fire_red_asr","encoder":"encoder.int8.onnx",
+                      "decoder":"decoder.int8.onnx","tokens":"tokens.txt"}}"#,
+        )
+        .unwrap();
+        let stt = manifest.stt.unwrap();
+        assert_eq!(stt.engine, "fire_red_asr");
+        assert_eq!(stt.encoder, "encoder.int8.onnx");
+
+        let manifest: Manifest = serde_json::from_str(
+            r#"{"id":"stt-qwen3","kind":"stt","name":"Qwen3-ASR",
+               "stt":{"engine":"qwen3_asr","conv_frontend":"conv_frontend.onnx",
+                      "encoder":"encoder.int8.onnx","decoder":"decoder.int8.onnx",
+                      "tokenizer":"tokenizer"}}"#,
+        )
+        .unwrap();
+        let stt = manifest.stt.unwrap();
+        assert_eq!(stt.engine, "qwen3_asr");
+        assert_eq!(stt.tokenizer, "tokenizer");
+        assert!(stt.tokens.is_empty());
     }
 
     #[test]

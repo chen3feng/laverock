@@ -23,6 +23,8 @@
       "../../scripts/download-kokoro.sh": "scripts/download-kokoro.sh",
       "../../scripts/download-stt.sh": "scripts/download-stt.sh",
       "../../scripts/download-stt-firered.sh": "scripts/download-stt-firered.sh",
+      "../../scripts/download-stt-firered-aed.sh": "scripts/download-stt-firered-aed.sh",
+      "../../scripts/download-stt-qwen3.sh": "scripts/download-stt-qwen3.sh",
       "../../scripts/download-voxcpm2.sh": "scripts/download-voxcpm2.sh",
       "../../scripts/download-qwen3tts.sh": "scripts/download-qwen3tts.sh",
       "../../scripts/qwen3tts_runner.py": "scripts/qwen3tts_runner.py",

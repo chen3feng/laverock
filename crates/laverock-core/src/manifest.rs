@@ -53,14 +53,29 @@ pub enum EngineKind {
 /// Backend configuration for a speech-to-text model.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SttManifest {
-    /// Recognizer family: `sense_voice` (default) or
-    /// `fire_red_asr_ctc`.
+    /// Recognizer family: `sense_voice` (default), `fire_red_asr_ctc`,
+    /// `fire_red_asr` (AED) or `qwen3_asr`.
     #[serde(default = "default_stt_engine")]
     pub engine: String,
+    /// Single-file model (SenseVoice, FireRedASR2 CTC).
+    #[serde(default)]
     pub model: String,
+    /// Encoder/decoder pair (FireRedASR2 AED, Qwen3-ASR).
+    #[serde(default)]
+    pub encoder: String,
+    #[serde(default)]
+    pub decoder: String,
+    /// Qwen3-ASR audio frontend and tokenizer directory.
+    #[serde(default)]
+    pub conv_frontend: String,
+    #[serde(default)]
+    pub tokenizer: String,
+    /// Token table (SenseVoice, FireRedASR2). Qwen3-ASR uses its tokenizer
+    /// directory instead.
+    #[serde(default)]
     pub tokens: String,
     /// SenseVoice language hint: `auto`, `zh`, `en`, `ja`, `ko`, `yue`.
-    /// Ignored by FireRedASR2, which detects the language itself.
+    /// Ignored by the other families, which detect the language themselves.
     #[serde(default = "default_stt_language")]
     pub language: String,
     /// Inverse text normalization (digits, dates, punctuation).

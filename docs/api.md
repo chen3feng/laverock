@@ -94,7 +94,8 @@ Timed transcripts come from the installed speech-to-text model, whose CTC
 decoder reports a timestamp per token; the server aggregates them into
 sentence-sized cues. Models without token timestamps fall back to splitting
 the clip on pauses. All four `/api/transcribe*` endpoints accept
-`?model=<id>` to pick an installed model (SenseVoice, FireRedASR2 CTC); when
+`?model=<id>` to pick an installed model (SenseVoice, FireRedASR2 CTC, AED, or
+Qwen3-ASR); when
 omitted, the most recently installed one is used. `GET /api/models` lists
 them with their `engine_id`.
 `POST /api/captures/:id/transcribe` stores both the text and the cues in the
