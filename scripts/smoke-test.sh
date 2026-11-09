@@ -522,6 +522,15 @@ if curl -s "$BASE/api/health" | grep -q '"transcribe":true'; then
     WEBVTT*) ok "vtt header" ;;
     *) bad "vtt: $(printf '%s' "$vtt" | head -c 120)" ;;
   esac
+  # The newest ASR entry exposes its cues as JSON, so the UI can render
+  # SRT/WebVTT without another decode.
+  hid=$(curl -s "$BASE/api/history?task=asr" \
+    | sed -n 's/.*"id":"\([^"]*\)".*/\1/p' | head -1)
+  segs=$(curl -s "$BASE/api/history/$hid/segments")
+  case "$segs" in
+    *'"segments":[{'*'"start":'*) ok "history segments as JSON" ;;
+    *) bad "history segments: $(printf '%s' "$segs" | head -c 160)" ;;
+  esac
   code=$(curl -s -o /dev/null -w '%{http_code}' -X POST \
     "$BASE/api/transcribe/subtitles?format=ass" \
     -F "audio=@$DIR/test_wavs/leijun-1.wav")

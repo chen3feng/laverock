@@ -1,7 +1,13 @@
 // ---------------------------------------------------------------- capture
 
 class Capture {
-  constructor(host, { autoTranscribe = true, transcribe = true, detailed = false, live = false } = {}) {
+  constructor(host, {
+    autoTranscribe = true,
+    transcribe = true,
+    detailed = false,
+    live = false,
+    autoTranscribeFiles = false,
+  } = {}) {
     host.innerHTML = '';
     host.appendChild($('captureTpl').content.cloneNode(true));
     applyI18n(host);
@@ -25,6 +31,9 @@ class Capture {
     // Live mode decodes the current utterance while recording, so text
     // appears with sentence-level latency instead of after the stop.
     this.live = live;
+    // Pages with no separate transcribe button start as soon as a file is
+    // chosen; the explicit click is then unnecessary.
+    this.autoTranscribeFiles = autoTranscribeFiles;
     this.liveState = null;
     this.onChange = () => {};
     this.onTranscribed = () => {};
@@ -45,6 +54,9 @@ class Capture {
       this.setInfo(this.fileLabel);
       this.syncTranscribeButton();
       this.onChange();
+      if (this.autoTranscribeFiles && transcribeAvailable) {
+        this.transcribe({ record: true });
+      }
     };
     this.rec.onclick = () => this.toggle();
   }
@@ -58,7 +70,7 @@ class Capture {
     this.transBtn.disabled = on;
     this.syncTranscribeButton();
     if (on) {
-      this.transBtn.hidden = false;
+      this.transBtn.hidden = !this.showTranscribe;
       this.transBtn.textContent = t('transcribe.busy');
       this.setInfo(t('transcribe.busy'));
     } else {

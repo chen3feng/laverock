@@ -13,6 +13,8 @@ addI18n({
     'transcribe.open': '打开',
     'transcribe.open_history': '查看全部',
     'transcribe.empty': '还没有转写记录。',
+    'transcribe.clear': '清除结果',
+    'transcribe.format_text': '纯文本',
   },
   en: {
     'transcribe.title': 'Transcribe',
@@ -28,5 +30,7 @@ addI18n({
     'transcribe.open': 'Open',
     'transcribe.open_history': 'View all',
     'transcribe.empty': 'No transcripts yet.',
+    'transcribe.clear': 'Clear result',
+    'transcribe.format_text': 'Text',
   },
 });

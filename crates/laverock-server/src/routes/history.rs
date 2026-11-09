@@ -19,6 +19,7 @@ pub(crate) fn router() -> Router<AppState> {
         .route("/api/history/{id}", delete(delete_history))
         .route("/api/history/{id}/audio", get(history_audio))
         .route("/api/history/{id}/text", get(history_text))
+        .route("/api/history/{id}/segments", get(history_segments))
         .route("/api/history/{id}/subtitles", get(history_subtitles))
         .route("/api/history/{id}/input", get(history_input))
 }
@@ -138,6 +139,16 @@ async fn history_text(
         text,
     )
         .into_response())
+}
+
+/// Timed cues as JSON, for viewing a transcript as SRT/WebVTT.
+async fn history_segments(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    Ok(Json(serde_json::json!({
+        "segments": state.history.segments(&id)?,
+    })))
 }
 
 /// Timed cues as an SRT/WebVTT download.
