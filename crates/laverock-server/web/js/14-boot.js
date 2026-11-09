@@ -9,10 +9,16 @@ function showPage(page) {
   for (const p of PAGES) $('page-' + p).classList.toggle('active', p === page);
   document.querySelectorAll('nav a').forEach((a) => a.classList.toggle('active', a.dataset.page === page));
   document.title = `${t('nav.' + page)} · Laverock`;
+  if (page === 'synthesize') loadRecentResults('tts', 'synthRecent', 'synthRecentTitle');
+  if (page === 'music') loadRecentResults('music', 'musicRecent', 'musicRecentTitle');
   if (page === 'captures') { loadCaptures(); loadEnhanceStatus(); }
   if (page === 'tools') loadToolsPage();
   if (page === 'projects') loadProjects();
-  if (page === 'convert') { loadProfiles(); syncConvertEngine(); }
+  if (page === 'convert') {
+    loadProfiles();
+    syncConvertEngine();
+    loadRecentResults('vc', 'convertRecent', 'convertRecentTitle');
+  }
   if (page === 'voices') loadProfiles();
   if (page === 'history') loadHistory();
   if (page === 'transcribe') { syncTranscribePage(); loadRecentTranscriptions(); }
@@ -59,6 +65,8 @@ async function boot() {
   }
   await Promise.all([loadEngines(), loadProfiles()]);
   await restoreSynthDraft();
+  restoreMusicDraft();
+  restoreConvertDraft();
   showPage(currentPage());
 }
 

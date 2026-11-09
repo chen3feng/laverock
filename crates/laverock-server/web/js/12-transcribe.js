@@ -214,9 +214,7 @@ async function loadRecentTranscriptions() {
   link.textContent = t('transcribe.open_history');
   link.onclick = (e) => {
     e.preventDefault();
-    historyTaskFilter = 'asr';
-    try { localStorage.setItem('laverock-history-task', 'asr'); } catch (_) {}
-    location.hash = '#/history';
+    openHistoryTask('asr');
   };
   more.appendChild(link);
   host.appendChild(more);

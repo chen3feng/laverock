@@ -151,7 +151,53 @@ function newest(group) {
   return Math.max(...group.map((x) => x.created_at));
 }
 
-function buildHistoryTake(host, h, engineName, variantLabel) {
+// Jump to the history page already filtered to one task.
+function openHistoryTask(task) {
+  historyTaskFilter = task;
+  try { localStorage.setItem('laverock-history-task', task); } catch (_) {}
+  location.hash = '#/history';
+}
+
+// A compact "recent results" block for task pages: the newest entries for
+// one task, drawn with the same card builder as the history page, plus a
+// link to the full list. `onDeleted` refreshes the block after a delete.
+async function loadRecentResults(task, hostId, titleId, limit = 5, onDeleted) {
+  let items = [];
+  try {
+    const d = await api('/api/history?task=' + encodeURIComponent(task));
+    items = (d.history || []).slice(0, limit);
+  } catch (_) {
+    return;
+  }
+  const host = $(hostId);
+  host.innerHTML = '';
+  $(titleId).hidden = items.length === 0;
+  if (!items.length) return;
+
+  const engineName = Object.fromEntries(engines.map((e) => [e.id, e.name]));
+  const refresh = onDeleted || (() => loadRecentResults(task, hostId, titleId, limit));
+  for (const h of items) {
+    const card = document.createElement('div');
+    card.className = 'card';
+    buildHistoryTake(card, h, engineName, null, refresh);
+    host.appendChild(card);
+  }
+
+  const more = document.createElement('div');
+  more.className = 'actions';
+  const link = document.createElement('a');
+  link.className = 'hint';
+  link.href = '#/history';
+  link.textContent = t('recent.view_all');
+  link.onclick = (e) => {
+    e.preventDefault();
+    openHistoryTask(task);
+  };
+  more.appendChild(link);
+  host.appendChild(more);
+}
+
+function buildHistoryTake(host, h, engineName, variantLabel, onDeleted) {
   const meta = document.createElement('div');
   meta.className = 'hist-meta';
   const chip = document.createElement('span');
@@ -193,7 +239,7 @@ function buildHistoryTake(host, h, engineName, variantLabel) {
 
   // Text results (transcripts) get an editable card instead of a player.
   if (h.output === 'text') {
-    host.append(meta, buildHistoryTranscript(h));
+    host.append(meta, buildHistoryTranscript(h, onDeleted));
     return;
   }
 
@@ -201,7 +247,7 @@ function buildHistoryTake(host, h, engineName, variantLabel) {
   text.className = 'hist-text';
   text.textContent = h.text;
 
-  host.append(meta, text, buildHistoryAudioRow(h));
+  host.append(meta, text, buildHistoryAudioRow(h, onDeleted));
 }
 
 // Save a server-side artifact through the same file picker as downloads.
@@ -221,7 +267,7 @@ async function historySaveFromUrl(el, url, name, busyLabel) {
   }
 }
 
-function historyDeleteButton(h) {
+function historyDeleteButton(h, onDeleted) {
   const del = document.createElement('button');
   del.className = 'ghost danger';
   del.type = 'button';
@@ -238,7 +284,7 @@ function historyDeleteButton(h) {
     try {
       await api(`/api/history/${encodeURIComponent(h.id)}`, { method: 'DELETE' });
       // Simplest correct refresh: re-fetch so grouped cards stay consistent.
-      await loadHistory();
+      await (onDeleted ? onDeleted() : loadHistory());
     } catch (e) {
       del.disabled = false;
       toast((t("ui.delete_failed")) + e.message, true);
@@ -265,7 +311,7 @@ function historyPlayer(label, url) {
   return box;
 }
 
-function buildHistoryAudioRow(h) {
+function buildHistoryAudioRow(h, onDeleted) {
   const id = encodeURIComponent(h.id);
   const row = document.createElement('div');
   row.className = 'hist-row';
@@ -320,11 +366,11 @@ function buildHistoryAudioRow(h) {
     row.appendChild(mp3);
   }
 
-  row.append(historyDeleteButton(h));
+  row.append(historyDeleteButton(h, onDeleted));
   return row;
 }
 
-function buildHistoryTranscript(h) {
+function buildHistoryTranscript(h, onDeleted) {
   const box = document.createElement('div');
   const area = document.createElement('textarea');
   area.className = 'hist-transcript';
@@ -388,7 +434,7 @@ function buildHistoryTranscript(h) {
     }
   }
 
-  row.append(historyDeleteButton(h));
+  row.append(historyDeleteButton(h, onDeleted));
   box.appendChild(row);
   return box;
 }

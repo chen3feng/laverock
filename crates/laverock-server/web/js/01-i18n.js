@@ -43,6 +43,9 @@ async function setLanguage(next, { persist = true } = {}) {
     syncTranscribePage();
     loadRecentTranscriptions();
   }
+  if (currentPage() === 'synthesize') loadRecentResults('tts', 'synthRecent', 'synthRecentTitle');
+  if (currentPage() === 'music') loadRecentResults('music', 'musicRecent', 'musicRecentTitle');
+  if (currentPage() === 'convert') loadRecentResults('vc', 'convertRecent', 'convertRecentTitle');
   await loadModels();
   if (session && session.lan_enabled) loadDevices();
 }

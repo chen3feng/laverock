@@ -10,12 +10,60 @@ function wireMusicSamplesStepper() {
   input.addEventListener('change', clamp);
   $('musicSamplesMinus').onclick = () => {
     input.value = Math.max(1, Number(input.value) - 1);
+    saveMusicDraft();
   };
   $('musicSamplesPlus').onclick = () => {
     input.value = Math.min(2, Number(input.value) + 1);
+    saveMusicDraft();
   };
 }
 wireMusicSamplesStepper();
+
+// ------------------------------------------------------------ music draft
+// The caption and parameters survive reloads; the source clip does not (a
+// Blob cannot be persisted), so editing routes ask for it again.
+const MUSIC_DRAFT_KEY = 'laverock.musicDraft';
+
+function readMusicDraft() {
+  try { return JSON.parse(localStorage.getItem(MUSIC_DRAFT_KEY)) || {}; } catch (_) { return {}; }
+}
+
+let musicDraftScheduled = false;
+function saveMusicDraft() {
+  if (musicDraftScheduled) return;
+  musicDraftScheduled = true;
+  setTimeout(() => {
+    musicDraftScheduled = false;
+    try {
+      localStorage.setItem(MUSIC_DRAFT_KEY, JSON.stringify({
+        engine: $('musicEngine').value,
+        caption: $('musicCaption').value,
+        samples: $('musicSamples').value,
+        params: collectParams('musicParams'),
+      }));
+    } catch (_) {}
+  }, 100);
+}
+
+function restoreMusicDraft() {
+  const d = readMusicDraft();
+  if (!d || !Object.keys(d).length) return;
+  if (d.engine && d.engine !== $('musicEngine').value &&
+      engines.some((e) => e.id === d.engine)) {
+    $('musicEngine').value = d.engine;
+    syncMusicEngine();
+  }
+  if (typeof d.caption === 'string') $('musicCaption').value = d.caption;
+  if (d.samples) $('musicSamples').value = d.samples;
+  applyDraftParams('musicParams', d.params);
+  syncMusicRoute();
+}
+
+$('musicCaption').addEventListener('input', saveMusicDraft);
+$('musicSamples').addEventListener('change', saveMusicDraft);
+$('musicEngine').addEventListener('change', saveMusicDraft);
+$('musicParams').addEventListener('input', saveMusicDraft);
+$('musicParams').addEventListener('change', saveMusicDraft);
 
 // Editing routes take a source song instead of starting from silence.
 const musicSourceCapture = new Capture($('musicSource'), {
@@ -247,6 +295,7 @@ $('musicGo').onclick = async () => {
     if (!got.length) throw new Error(t("ui.no_audio_data_received"));
     setDeterminate(100);
     renderSynthResults(got, engine, 'musicResults');
+    loadRecentResults('music', 'musicRecent', 'musicRecentTitle');
     lastSynthBlob = got[got.length - 1].blob;
     if (engine) engine.loaded = true;
     status.className = 'ok';

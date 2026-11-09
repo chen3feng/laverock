@@ -547,6 +547,8 @@
       <div id="synthProgressLabel" class="pbar-label" hidden><span></span><b></b></div>
       <!-- Each take (or the single result) renders as a card here. -->
       <div id="synthResults" hidden></div>
+      <div class="section-title" id="synthRecentTitle" data-i18n="recent.title" hidden>最近生成</div>
+      <div id="synthRecent"></div>
       <audio id="previewer" hidden></audio>
     </section>
 
@@ -594,6 +596,8 @@
       <div id="musicProgress" class="pbar" hidden><div class="pbar-fill indeterminate"></div></div>
       <div id="musicProgressLabel" class="pbar-label" hidden><span></span><b></b></div>
       <div id="musicResults" hidden></div>
+      <div class="section-title" id="musicRecentTitle" data-i18n="recent.title" hidden>最近生成</div>
+      <div id="musicRecent"></div>
     </section>
 
     <!-- ================= 转写 ================= -->
@@ -650,6 +654,8 @@
       <div id="convertProgress" class="pbar" hidden><div class="pbar-fill indeterminate"></div></div>
       <div id="convertProgressLabel" class="pbar-label" hidden><span></span><b></b></div>
       <div id="convertResults" hidden></div>
+      <div class="section-title" id="convertRecentTitle" data-i18n="recent.title" hidden>最近生成</div>
+      <div id="convertRecent"></div>
     </section>
 
     <!-- ================= 素材库 ================= -->
@@ -1111,6 +1117,7 @@ addI18n({
     'nav.history': '历史', 'nav.settings': '设置', 'state.title': '服务状态',
     'nav.group.create': '创作', 'nav.group.assets': '资源',
     'nav.group.apps': '应用', 'nav.group.system': '系统',
+    'recent.title': '最近生成', 'recent.view_all': '查看全部',
   },
   en: {
     'brand.sub': 'Local voice studio',
@@ -1119,6 +1126,7 @@ addI18n({
     'nav.history': 'History', 'nav.settings': 'Settings', 'state.title': 'Service status',
     'nav.group.create': 'Create', 'nav.group.assets': 'Library',
     'nav.group.apps': 'Apps', 'nav.group.system': 'System',
+    'recent.title': 'Recent results', 'recent.view_all': 'View all',
   },
 });
 
@@ -2290,6 +2298,9 @@ async function setLanguage(next, { persist = true } = {}) {
     syncTranscribePage();
     loadRecentTranscriptions();
   }
+  if (currentPage() === 'synthesize') loadRecentResults('tts', 'synthRecent', 'synthRecentTitle');
+  if (currentPage() === 'music') loadRecentResults('music', 'musicRecent', 'musicRecentTitle');
+  if (currentPage() === 'convert') loadRecentResults('vc', 'convertRecent', 'convertRecentTitle');
   await loadModels();
   if (session && session.lan_enabled) loadDevices();
 }
@@ -3312,6 +3323,24 @@ function wireDraftPersistence() {
   });
 }
 
+// Apply saved values to a rendered parameter grid. Selects only accept one
+// of their option values; checkboxes take a boolean string; ranges and text
+// inputs take the raw value.
+function applyDraftParams(hostId, params) {
+  if (!params) return;
+  for (const [name, value] of Object.entries(params)) {
+    const el = document.querySelector(`#${hostId} [data-param="${name}"]`);
+    if (!el) continue;
+    if (el.dataset.type === 'bool') {
+      el.checked = value === 'true';
+    } else if (el.options) {
+      if ([...el.options].some((o) => o.value === value)) el.value = value;
+    } else {
+      el.value = value;
+    }
+  }
+}
+
 // Full restore after boot: engine first (rebuilds parameter controls),
 // then the saved voice, parameter values and text.
 async function restoreSynthDraft() {
@@ -3326,16 +3355,7 @@ async function restoreSynthDraft() {
     $('profile').value = d.profile;
   }
   syncProfileUI();
-  if (d.params) {
-    for (const [name, value] of Object.entries(d.params)) {
-      const el = document.querySelector(`#engineParams [data-param="${name}"]`);
-      if (!el) continue;
-      // Selects only accept one of their option values; range/text
-      // inputs take the raw value.
-      const acceptable = !el.options || [...el.options].some((o) => o.value === value);
-      if (acceptable) el.value = value;
-    }
-  }
+  applyDraftParams('engineParams', d.params);
   restoreDraftFields();
 }
 
@@ -4195,6 +4215,7 @@ $('go').onclick = async () => {
     streamPlayer?.finish();
     setDeterminate(100);
     renderSynthResults(got, engine);
+    loadRecentResults('tts', 'synthRecent', 'synthRecentTitle');
     // Keep the last take reachable for any downstream helper (e.g. the
     // previous top-level MP3 conversion; the gallery links are the UI).
     lastSynthBlob = got[got.length - 1].blob;
@@ -4791,12 +4812,60 @@ function wireMusicSamplesStepper() {
   input.addEventListener('change', clamp);
   $('musicSamplesMinus').onclick = () => {
     input.value = Math.max(1, Number(input.value) - 1);
+    saveMusicDraft();
   };
   $('musicSamplesPlus').onclick = () => {
     input.value = Math.min(2, Number(input.value) + 1);
+    saveMusicDraft();
   };
 }
 wireMusicSamplesStepper();
+
+// ------------------------------------------------------------ music draft
+// The caption and parameters survive reloads; the source clip does not (a
+// Blob cannot be persisted), so editing routes ask for it again.
+const MUSIC_DRAFT_KEY = 'laverock.musicDraft';
+
+function readMusicDraft() {
+  try { return JSON.parse(localStorage.getItem(MUSIC_DRAFT_KEY)) || {}; } catch (_) { return {}; }
+}
+
+let musicDraftScheduled = false;
+function saveMusicDraft() {
+  if (musicDraftScheduled) return;
+  musicDraftScheduled = true;
+  setTimeout(() => {
+    musicDraftScheduled = false;
+    try {
+      localStorage.setItem(MUSIC_DRAFT_KEY, JSON.stringify({
+        engine: $('musicEngine').value,
+        caption: $('musicCaption').value,
+        samples: $('musicSamples').value,
+        params: collectParams('musicParams'),
+      }));
+    } catch (_) {}
+  }, 100);
+}
+
+function restoreMusicDraft() {
+  const d = readMusicDraft();
+  if (!d || !Object.keys(d).length) return;
+  if (d.engine && d.engine !== $('musicEngine').value &&
+      engines.some((e) => e.id === d.engine)) {
+    $('musicEngine').value = d.engine;
+    syncMusicEngine();
+  }
+  if (typeof d.caption === 'string') $('musicCaption').value = d.caption;
+  if (d.samples) $('musicSamples').value = d.samples;
+  applyDraftParams('musicParams', d.params);
+  syncMusicRoute();
+}
+
+$('musicCaption').addEventListener('input', saveMusicDraft);
+$('musicSamples').addEventListener('change', saveMusicDraft);
+$('musicEngine').addEventListener('change', saveMusicDraft);
+$('musicParams').addEventListener('input', saveMusicDraft);
+$('musicParams').addEventListener('change', saveMusicDraft);
 
 // Editing routes take a source song instead of starting from silence.
 const musicSourceCapture = new Capture($('musicSource'), {
@@ -5028,6 +5097,7 @@ $('musicGo').onclick = async () => {
     if (!got.length) throw new Error(t("ui.no_audio_data_received"));
     setDeterminate(100);
     renderSynthResults(got, engine, 'musicResults');
+    loadRecentResults('music', 'musicRecent', 'musicRecentTitle');
     lastSynthBlob = got[got.length - 1].blob;
     if (engine) engine.loaded = true;
     status.className = 'ok';
@@ -5199,7 +5269,53 @@ function newest(group) {
   return Math.max(...group.map((x) => x.created_at));
 }
 
-function buildHistoryTake(host, h, engineName, variantLabel) {
+// Jump to the history page already filtered to one task.
+function openHistoryTask(task) {
+  historyTaskFilter = task;
+  try { localStorage.setItem('laverock-history-task', task); } catch (_) {}
+  location.hash = '#/history';
+}
+
+// A compact "recent results" block for task pages: the newest entries for
+// one task, drawn with the same card builder as the history page, plus a
+// link to the full list. `onDeleted` refreshes the block after a delete.
+async function loadRecentResults(task, hostId, titleId, limit = 5, onDeleted) {
+  let items = [];
+  try {
+    const d = await api('/api/history?task=' + encodeURIComponent(task));
+    items = (d.history || []).slice(0, limit);
+  } catch (_) {
+    return;
+  }
+  const host = $(hostId);
+  host.innerHTML = '';
+  $(titleId).hidden = items.length === 0;
+  if (!items.length) return;
+
+  const engineName = Object.fromEntries(engines.map((e) => [e.id, e.name]));
+  const refresh = onDeleted || (() => loadRecentResults(task, hostId, titleId, limit));
+  for (const h of items) {
+    const card = document.createElement('div');
+    card.className = 'card';
+    buildHistoryTake(card, h, engineName, null, refresh);
+    host.appendChild(card);
+  }
+
+  const more = document.createElement('div');
+  more.className = 'actions';
+  const link = document.createElement('a');
+  link.className = 'hint';
+  link.href = '#/history';
+  link.textContent = t('recent.view_all');
+  link.onclick = (e) => {
+    e.preventDefault();
+    openHistoryTask(task);
+  };
+  more.appendChild(link);
+  host.appendChild(more);
+}
+
+function buildHistoryTake(host, h, engineName, variantLabel, onDeleted) {
   const meta = document.createElement('div');
   meta.className = 'hist-meta';
   const chip = document.createElement('span');
@@ -5241,7 +5357,7 @@ function buildHistoryTake(host, h, engineName, variantLabel) {
 
   // Text results (transcripts) get an editable card instead of a player.
   if (h.output === 'text') {
-    host.append(meta, buildHistoryTranscript(h));
+    host.append(meta, buildHistoryTranscript(h, onDeleted));
     return;
   }
 
@@ -5249,7 +5365,7 @@ function buildHistoryTake(host, h, engineName, variantLabel) {
   text.className = 'hist-text';
   text.textContent = h.text;
 
-  host.append(meta, text, buildHistoryAudioRow(h));
+  host.append(meta, text, buildHistoryAudioRow(h, onDeleted));
 }
 
 // Save a server-side artifact through the same file picker as downloads.
@@ -5269,7 +5385,7 @@ async function historySaveFromUrl(el, url, name, busyLabel) {
   }
 }
 
-function historyDeleteButton(h) {
+function historyDeleteButton(h, onDeleted) {
   const del = document.createElement('button');
   del.className = 'ghost danger';
   del.type = 'button';
@@ -5286,7 +5402,7 @@ function historyDeleteButton(h) {
     try {
       await api(`/api/history/${encodeURIComponent(h.id)}`, { method: 'DELETE' });
       // Simplest correct refresh: re-fetch so grouped cards stay consistent.
-      await loadHistory();
+      await (onDeleted ? onDeleted() : loadHistory());
     } catch (e) {
       del.disabled = false;
       toast((t("ui.delete_failed")) + e.message, true);
@@ -5313,7 +5429,7 @@ function historyPlayer(label, url) {
   return box;
 }
 
-function buildHistoryAudioRow(h) {
+function buildHistoryAudioRow(h, onDeleted) {
   const id = encodeURIComponent(h.id);
   const row = document.createElement('div');
   row.className = 'hist-row';
@@ -5368,11 +5484,11 @@ function buildHistoryAudioRow(h) {
     row.appendChild(mp3);
   }
 
-  row.append(historyDeleteButton(h));
+  row.append(historyDeleteButton(h, onDeleted));
   return row;
 }
 
-function buildHistoryTranscript(h) {
+function buildHistoryTranscript(h, onDeleted) {
   const box = document.createElement('div');
   const area = document.createElement('textarea');
   area.className = 'hist-transcript';
@@ -5436,7 +5552,7 @@ function buildHistoryTranscript(h) {
     }
   }
 
-  row.append(historyDeleteButton(h));
+  row.append(historyDeleteButton(h, onDeleted));
   box.appendChild(row);
   return box;
 }
@@ -5870,9 +5986,7 @@ async function loadRecentTranscriptions() {
   link.textContent = t('transcribe.open_history');
   link.onclick = (e) => {
     e.preventDefault();
-    historyTaskFilter = 'asr';
-    try { localStorage.setItem('laverock-history-task', 'asr'); } catch (_) {}
-    location.hash = '#/history';
+    openHistoryTask('asr');
   };
   more.appendChild(link);
   host.appendChild(more);
@@ -5954,6 +6068,11 @@ $('convertPreview').onclick = () => {
 
 function syncConvertEngine() {
   const e = engines.find((x) => x.id === $('convertEngine').value);
+  // Re-rendering rebuilds the controls with manifest defaults, so only do
+  // it when the engine actually changed (revisiting the page keeps values).
+  const sig = e ? e.id : '';
+  if (sig === syncConvertEngine.sig && $('convertParams').children.length) return;
+  syncConvertEngine.sig = sig;
   if (!e) {
     $('convertEngineHint').textContent = t('convert.engine.hint');
     renderParamGrid($('convertParams'), [], 'convert-param-');
@@ -5964,6 +6083,51 @@ function syncConvertEngine() {
   renderParamGrid($('convertParams'), e.parameters || [], 'convert-param-');
 }
 $('convertEngine').onchange = syncConvertEngine;
+
+// ---------------------------------------------------------- convert draft
+// The engine, target voice and options survive reloads; the source clip
+// does not (a Blob cannot be persisted), so it is chosen again.
+const CONVERT_DRAFT_KEY = 'laverock.convertDraft';
+
+function readConvertDraft() {
+  try { return JSON.parse(localStorage.getItem(CONVERT_DRAFT_KEY)) || {}; } catch (_) { return {}; }
+}
+
+let convertDraftScheduled = false;
+function saveConvertDraft() {
+  if (convertDraftScheduled) return;
+  convertDraftScheduled = true;
+  setTimeout(() => {
+    convertDraftScheduled = false;
+    try {
+      localStorage.setItem(CONVERT_DRAFT_KEY, JSON.stringify({
+        engine: $('convertEngine').value,
+        profile: $('convertProfile').value,
+        params: collectParams('convertParams'),
+      }));
+    } catch (_) {}
+  }, 100);
+}
+
+function restoreConvertDraft() {
+  const d = readConvertDraft();
+  if (!d || !Object.keys(d).length) return;
+  if (d.engine && d.engine !== $('convertEngine').value &&
+      engines.some((e) => e.id === d.engine)) {
+    $('convertEngine').value = d.engine;
+    syncConvertEngine();
+  }
+  if (d.profile && profiles.some((p) => p.id === d.profile)) {
+    $('convertProfile').value = d.profile;
+  }
+  syncConvertProfileUI();
+  applyDraftParams('convertParams', d.params);
+}
+
+$('convertEngine').addEventListener('change', saveConvertDraft);
+$('convertProfile').addEventListener('change', saveConvertDraft);
+$('convertParams').addEventListener('input', saveConvertDraft);
+$('convertParams').addEventListener('change', saveConvertDraft);
 
 function convertBlobFromEvent(p) {
   const bytes = Uint8Array.from(atob(p.wav), (c) => c.charCodeAt(0));
@@ -6028,6 +6192,7 @@ $('convertGo').onclick = async () => {
     });
     if (!result) throw new Error(t('ui.no_audio_data_received'));
     renderSynthResults([result], engine, 'convertResults');
+    loadRecentResults('vc', 'convertRecent', 'convertRecentTitle');
     lastSynthBlob = result.blob;
     engine.loaded = true;
     status.className = 'ok';
@@ -7071,10 +7236,16 @@ function showPage(page) {
   for (const p of PAGES) $('page-' + p).classList.toggle('active', p === page);
   document.querySelectorAll('nav a').forEach((a) => a.classList.toggle('active', a.dataset.page === page));
   document.title = `${t('nav.' + page)} · Laverock`;
+  if (page === 'synthesize') loadRecentResults('tts', 'synthRecent', 'synthRecentTitle');
+  if (page === 'music') loadRecentResults('music', 'musicRecent', 'musicRecentTitle');
   if (page === 'captures') { loadCaptures(); loadEnhanceStatus(); }
   if (page === 'tools') loadToolsPage();
   if (page === 'projects') loadProjects();
-  if (page === 'convert') { loadProfiles(); syncConvertEngine(); }
+  if (page === 'convert') {
+    loadProfiles();
+    syncConvertEngine();
+    loadRecentResults('vc', 'convertRecent', 'convertRecentTitle');
+  }
   if (page === 'voices') loadProfiles();
   if (page === 'history') loadHistory();
   if (page === 'transcribe') { syncTranscribePage(); loadRecentTranscriptions(); }
@@ -7121,6 +7292,8 @@ async function boot() {
   }
   await Promise.all([loadEngines(), loadProfiles()]);
   await restoreSynthDraft();
+  restoreMusicDraft();
+  restoreConvertDraft();
   showPage(currentPage());
 }
 

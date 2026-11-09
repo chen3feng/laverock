@@ -69,6 +69,24 @@ function wireDraftPersistence() {
   });
 }
 
+// Apply saved values to a rendered parameter grid. Selects only accept one
+// of their option values; checkboxes take a boolean string; ranges and text
+// inputs take the raw value.
+function applyDraftParams(hostId, params) {
+  if (!params) return;
+  for (const [name, value] of Object.entries(params)) {
+    const el = document.querySelector(`#${hostId} [data-param="${name}"]`);
+    if (!el) continue;
+    if (el.dataset.type === 'bool') {
+      el.checked = value === 'true';
+    } else if (el.options) {
+      if ([...el.options].some((o) => o.value === value)) el.value = value;
+    } else {
+      el.value = value;
+    }
+  }
+}
+
 // Full restore after boot: engine first (rebuilds parameter controls),
 // then the saved voice, parameter values and text.
 async function restoreSynthDraft() {
@@ -83,16 +101,7 @@ async function restoreSynthDraft() {
     $('profile').value = d.profile;
   }
   syncProfileUI();
-  if (d.params) {
-    for (const [name, value] of Object.entries(d.params)) {
-      const el = document.querySelector(`#engineParams [data-param="${name}"]`);
-      if (!el) continue;
-      // Selects only accept one of their option values; range/text
-      // inputs take the raw value.
-      const acceptable = !el.options || [...el.options].some((o) => o.value === value);
-      if (acceptable) el.value = value;
-    }
-  }
+  applyDraftParams('engineParams', d.params);
   restoreDraftFields();
 }
 

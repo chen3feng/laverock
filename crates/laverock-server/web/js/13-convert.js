@@ -74,6 +74,11 @@ $('convertPreview').onclick = () => {
 
 function syncConvertEngine() {
   const e = engines.find((x) => x.id === $('convertEngine').value);
+  // Re-rendering rebuilds the controls with manifest defaults, so only do
+  // it when the engine actually changed (revisiting the page keeps values).
+  const sig = e ? e.id : '';
+  if (sig === syncConvertEngine.sig && $('convertParams').children.length) return;
+  syncConvertEngine.sig = sig;
   if (!e) {
     $('convertEngineHint').textContent = t('convert.engine.hint');
     renderParamGrid($('convertParams'), [], 'convert-param-');
@@ -84,6 +89,51 @@ function syncConvertEngine() {
   renderParamGrid($('convertParams'), e.parameters || [], 'convert-param-');
 }
 $('convertEngine').onchange = syncConvertEngine;
+
+// ---------------------------------------------------------- convert draft
+// The engine, target voice and options survive reloads; the source clip
+// does not (a Blob cannot be persisted), so it is chosen again.
+const CONVERT_DRAFT_KEY = 'laverock.convertDraft';
+
+function readConvertDraft() {
+  try { return JSON.parse(localStorage.getItem(CONVERT_DRAFT_KEY)) || {}; } catch (_) { return {}; }
+}
+
+let convertDraftScheduled = false;
+function saveConvertDraft() {
+  if (convertDraftScheduled) return;
+  convertDraftScheduled = true;
+  setTimeout(() => {
+    convertDraftScheduled = false;
+    try {
+      localStorage.setItem(CONVERT_DRAFT_KEY, JSON.stringify({
+        engine: $('convertEngine').value,
+        profile: $('convertProfile').value,
+        params: collectParams('convertParams'),
+      }));
+    } catch (_) {}
+  }, 100);
+}
+
+function restoreConvertDraft() {
+  const d = readConvertDraft();
+  if (!d || !Object.keys(d).length) return;
+  if (d.engine && d.engine !== $('convertEngine').value &&
+      engines.some((e) => e.id === d.engine)) {
+    $('convertEngine').value = d.engine;
+    syncConvertEngine();
+  }
+  if (d.profile && profiles.some((p) => p.id === d.profile)) {
+    $('convertProfile').value = d.profile;
+  }
+  syncConvertProfileUI();
+  applyDraftParams('convertParams', d.params);
+}
+
+$('convertEngine').addEventListener('change', saveConvertDraft);
+$('convertProfile').addEventListener('change', saveConvertDraft);
+$('convertParams').addEventListener('input', saveConvertDraft);
+$('convertParams').addEventListener('change', saveConvertDraft);
 
 function convertBlobFromEvent(p) {
   const bytes = Uint8Array.from(atob(p.wav), (c) => c.charCodeAt(0));
@@ -148,6 +198,7 @@ $('convertGo').onclick = async () => {
     });
     if (!result) throw new Error(t('ui.no_audio_data_received'));
     renderSynthResults([result], engine, 'convertResults');
+    loadRecentResults('vc', 'convertRecent', 'convertRecentTitle');
     lastSynthBlob = result.blob;
     engine.loaded = true;
     status.className = 'ok';

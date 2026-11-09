@@ -451,6 +451,7 @@ $('go').onclick = async () => {
     streamPlayer?.finish();
     setDeterminate(100);
     renderSynthResults(got, engine);
+    loadRecentResults('tts', 'synthRecent', 'synthRecentTitle');
     // Keep the last take reachable for any downstream helper (e.g. the
     // previous top-level MP3 conversion; the gallery links are the UI).
     lastSynthBlob = got[got.length - 1].blob;
