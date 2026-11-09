@@ -50,6 +50,7 @@ describes the loopback listener.
 | GET | `/api/history/:id/audio` | generated audio (`?format=mp3` to export) |
 | GET | `/api/history/:id/input` | the source clip kept for a voice-conversion entry |
 | GET | `/api/history/:id/text` | the full result text: transcript or prompt |
+| GET | `/api/history/:id/segments` | timed transcript cues as JSON |
 | GET | `/api/history/:id/subtitles?format=srt\|vtt` | timed transcript cues as a downloadable file |
 | DELETE | `/api/history/:id` · `/api/history` | delete one or all entries |
 | POST | `/api/audio/mp3` | body: WAV → MP3 (built-in pure-Rust encoder, no ffmpeg needed) |

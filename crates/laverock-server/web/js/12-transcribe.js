@@ -1,9 +1,13 @@
 // ---------------------------------------------------------------- transcribe
 
 const asrCapture = new Capture($('transcribeCapture'), {
+  // No separate Transcribe button: a chosen file or a finished recording
+  // starts transcribing on its own.
   autoTranscribe: false,
   detailed: true,
   live: true,
+  transcribe: false,
+  autoTranscribeFiles: true,
 });
 
 // The result card shows cues from a fresh run, or a history id when the
@@ -17,20 +21,26 @@ let transcribeStreaming = false;
 // stop replaces it with the final transcript.
 let transcribeLiveText = '';
 let transcribeLive = false;
+// Which view the result textarea shows: plain text, SRT or WebVTT.
+let transcribeFormat = 'txt';
+let transcribePlainText = '';
 
 asrCapture.onLiveText = (text) => {
+  const starting = !transcribeLive;
   transcribeLive = true;
   transcribeLiveText = text;
   transcribeStreaming = false;
   transcribeSegments = [];
   transcribeHistoryId = null;
   transcribeHasCues = false;
+  if (starting) transcribeFormat = 'txt';
   showTranscribeResult(text, 'live');
 };
 
 asrCapture.onProgress = (segment) => {
   // The live text stays on screen until the final pass finishes.
   if (transcribeLiveText) return;
+  if (!transcribeStreaming) transcribeFormat = 'txt';
   transcribeStreaming = true;
   transcribeHistoryId = null;
   transcribeHasCues = true;
@@ -67,11 +77,8 @@ function syncTranscribePage() {
 
 function showTranscribeResult(text, state = 'done') {
   $('transcribeResultCard').hidden = false;
-  const area = $('transcribeText');
-  const atBottom = area.scrollTop + area.clientHeight >= area.scrollHeight - 4;
-  area.value = text || '';
-  // Follow the growing text unless the user scrolled up to read.
-  if (state !== 'done' && atBottom) area.scrollTop = area.scrollHeight;
+  transcribePlainText = text || '';
+  applyTranscribeFormat(state);
   const meta = $('transcribeResultMeta');
   meta.innerHTML = '';
   const chip = document.createElement('span');
@@ -85,6 +92,42 @@ function showTranscribeResult(text, state = 'done') {
     : state === 'streaming' ? t('transcribe.streaming') : t('transcribe.saved');
   meta.appendChild(hint);
   renderTranscribeActions();
+}
+
+// Timed cues are available for a fresh run or an opened history entry.
+function transcribeCuesReady() {
+  return transcribeSegments.length > 0 || (transcribeHistoryId && transcribeHasCues);
+}
+
+// Fill the textarea from the current format and build the format chips.
+function applyTranscribeFormat(state = 'done') {
+  const area = $('transcribeText');
+  const cues = transcribeCuesReady();
+  if (transcribeFormat !== 'txt' && !cues) transcribeFormat = 'txt';
+  const follow = state !== 'done'
+    && area.scrollTop + area.clientHeight >= area.scrollHeight - 4;
+  if (transcribeFormat === 'srt') area.value = cuesToSrt(transcribeSegments);
+  else if (transcribeFormat === 'vtt') area.value = cuesToVtt(transcribeSegments);
+  else area.value = transcribePlainText;
+  area.readOnly = transcribeFormat !== 'txt';
+  // Follow the growing text unless the user scrolled up to read.
+  if (follow) area.scrollTop = area.scrollHeight;
+
+  const row = $('transcribeFormats');
+  row.innerHTML = '';
+  row.hidden = !cues;
+  if (!cues) return;
+  for (const format of ['txt', 'srt', 'vtt']) {
+    const chip = document.createElement('button');
+    chip.type = 'button';
+    chip.className = 'filter-chip' + (transcribeFormat === format ? ' active' : '');
+    chip.textContent = format === 'txt' ? t('transcribe.format_text') : format.toUpperCase();
+    chip.onclick = () => {
+      transcribeFormat = format;
+      applyTranscribeFormat();
+    };
+    row.appendChild(chip);
+  }
 }
 
 // Timed cues are rendered here rather than fetched back, so a fresh
@@ -141,7 +184,7 @@ function renderTranscribeActions() {
   txt.onclick = async (e) => {
     e.preventDefault();
     await saveBlob(
-      new Blob([area.value], { type: 'text/plain;charset=utf-8' }),
+      new Blob([transcribePlainText], { type: 'text/plain;charset=utf-8' }),
       'laverock-transcript.txt',
     );
   };
@@ -179,20 +222,61 @@ function renderTranscribeActions() {
       row.appendChild(link);
     }
   }
+
+  const clear = document.createElement('button');
+  clear.type = 'button';
+  clear.className = 'ghost small';
+  clear.textContent = t('transcribe.clear');
+  clear.onclick = () => clearTranscribeResult();
+  row.appendChild(clear);
+}
+
+// Hide the result card and forget everything shown in it; history keeps
+// its copy, so the recent list below is untouched. The selected clip is
+// dropped too, leaving the page ready for a new recording or file.
+function clearTranscribeResult() {
+  transcribeSegments = [];
+  transcribeHistoryId = null;
+  transcribeHasCues = false;
+  transcribeStreaming = false;
+  transcribeLive = false;
+  transcribeLiveText = '';
+  transcribePlainText = '';
+  transcribeFormat = 'txt';
+  asrCapture.clear();
+  const area = $('transcribeText');
+  area.value = '';
+  area.readOnly = false;
+  $('transcribeFormats').innerHTML = '';
+  $('transcribeFormats').hidden = true;
+  $('transcribeResultMeta').innerHTML = '';
+  $('transcribeActions').innerHTML = '';
+  $('transcribeResultCard').hidden = true;
 }
 
 async function openTranscribeEntry(h, button) {
   button.disabled = true;
+  const id = encodeURIComponent(h.id);
   try {
-    const res = await apiFetch(`/api/history/${encodeURIComponent(h.id)}/text`);
-    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const text = await api(`/api/history/${id}/text`);
+    // Cues stay on the server for older entries; fetch them so the result
+    // can be viewed and exported as SRT/WebVTT too.
+    let segments = [];
+    if (h.has_segments) {
+      try {
+        segments = (await api(`/api/history/${id}/segments`)).segments || [];
+      } catch (_) {
+        // The plain text is still worth showing.
+      }
+    }
     transcribeLive = false;
     transcribeLiveText = '';
     transcribeStreaming = false;
-    transcribeSegments = [];
+    transcribeSegments = segments;
     transcribeHistoryId = h.id;
-    transcribeHasCues = !!h.has_segments;
-    showTranscribeResult(await res.text());
+    transcribeHasCues = segments.length > 0;
+    transcribeFormat = 'txt';
+    showTranscribeResult(text);
     $('transcribeResultCard').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   } catch (e) {
     toast(t('ui.failed_to_load_history') + e.message, true);

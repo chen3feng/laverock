@@ -48,6 +48,7 @@ Cookie）；以下均指回环监听。
 | GET | `/api/history/:id/audio` | 生成的音频（`?format=mp3` 导出 MP3） |
 | GET | `/api/history/:id/input` | 声音转换记录保留的源音频 |
 | GET | `/api/history/:id/text` | 完整结果文本：转写内容或提示词 |
+| GET | `/api/history/:id/segments` | 带时间轴的转写片段（JSON） |
 | GET | `/api/history/:id/subtitles?format=srt\|vtt` | 带时间戳的转写分段 → 可下载的字幕文件 |
 | DELETE | `/api/history/:id` · `/api/history` | 删除单条 / 全部记录 |
 | POST | `/api/audio/mp3` | 请求体：WAV → MP3（内置纯 Rust 编码器，无需 ffmpeg） |

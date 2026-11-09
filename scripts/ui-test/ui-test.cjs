@@ -245,7 +245,11 @@ async function main() {
     await page.click('nav a[data-page="transcribe"]');
     await page.waitForSelector('#page-transcribe.active');
     await page.setInputFiles('#transcribeCapture .cap-file', ref);
-    await page.click('#transcribeCapture .cap-transcribe');
+    // No separate Transcribe button: choosing a file starts the run.
+    assert.equal(
+      await page.locator('#transcribeCapture .cap-transcribe:visible').count(), 0,
+      'the transcribe page has no separate Transcribe button',
+    );
     await page.waitForSelector('#transcribeResultCard:not([hidden])', { timeout: 60_000 });
     await page.waitForFunction(
       () => (document.getElementById('transcribeText')?.value || '').trim().length > 0,
@@ -255,6 +259,34 @@ async function main() {
     // Exports appear only after the stream's done event.
     await page.waitForSelector('#transcribeActions button', { timeout: 120_000 });
     pass('transcribe streams and finishes');
+
+    // The result reads as plain text, SRT or WebVTT.
+    const formats = page.locator('#transcribeFormats .filter-chip');
+    assert.equal(await formats.count(), 3, 'three result formats are offered');
+    await page.click('#transcribeFormats .filter-chip:nth-child(2)');
+    const srt = await page.inputValue('#transcribeText');
+    assert.ok(
+      /^\d+\n\d{2}:\d{2}:\d{2},\d{3} --> \d{2}:\d{2}:\d{2},\d{3}/.test(srt),
+      `SRT view has numbered cues: ${JSON.stringify(srt.slice(0, 40))}`,
+    );
+    await page.click('#transcribeFormats .filter-chip:nth-child(3)');
+    const vtt = await page.inputValue('#transcribeText');
+    assert.ok(vtt.startsWith('WEBVTT'), 'WebVTT view has a WEBVTT header');
+    await page.click('#transcribeFormats .filter-chip:nth-child(1)');
+    assert.ok(
+      (await page.inputValue('#transcribeText')).trim().length > 0,
+      'text view is restored',
+    );
+    pass('transcribe shows text, SRT and WebVTT');
+
+    // Clearing hides the result and drops the chosen clip.
+    await page.locator('#transcribeActions button').last().click();
+    await page.waitForSelector('#transcribeResultCard', { state: 'hidden', timeout: 10_000 });
+    assert.equal(
+      await page.$eval('#transcribeCapture .cap-file', (el) => el.value), '',
+      'the chosen clip is cleared with the result',
+    );
+    pass('transcribe result clears');
 
     // ---------------------------------------------------------------- models
     say('models');
