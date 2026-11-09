@@ -36,7 +36,7 @@ async function loadHealth() {
     transcribeAvailable = !!h.transcribe;
     ffmpegAvailable = !!h.ffmpeg;
     syncProjectMediaInput();
-    for (const cap of [synthCapture, voiceCapture, libraryCapture, transcribeCapture]) {
+    for (const cap of [synthCapture, voiceCapture, libraryCapture, asrCapture]) {
       cap.syncTranscribeButton();
     }
     syncTranscribePage();

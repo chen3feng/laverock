@@ -1,6 +1,6 @@
 // ---------------------------------------------------------------- transcribe
 
-const transcribeCapture = new Capture($('transcribeCapture'), {
+const asrCapture = new Capture($('transcribeCapture'), {
   autoTranscribe: false,
   detailed: true,
 });
@@ -11,7 +11,7 @@ let transcribeSegments = [];
 let transcribeHistoryId = null;
 let transcribeHasCues = false;
 
-transcribeCapture.onTranscribed = (text, transcript) => {
+asrCapture.onTranscribed = (text, transcript) => {
   transcribeSegments = (transcript && transcript.segments) || [];
   transcribeHistoryId = null;
   transcribeHasCues = transcribeSegments.length > 0;
@@ -25,7 +25,7 @@ function syncTranscribePage() {
   hint.textContent = transcribeAvailable
     ? t('transcribe.hint')
     : t('transcribe.no_model');
-  transcribeCapture.syncTranscribeButton();
+  asrCapture.syncTranscribeButton();
 }
 
 function showTranscribeResult(text) {
