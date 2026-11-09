@@ -1,7 +1,7 @@
 // ---------------------------------------------------------------- capture
 
 class Capture {
-  constructor(host, { autoTranscribe = true, transcribe = true, detailed = false } = {}) {
+  constructor(host, { autoTranscribe = true, transcribe = true, detailed = false, live = false } = {}) {
     host.innerHTML = '';
     host.appendChild($('captureTpl').content.cloneNode(true));
     applyI18n(host);
@@ -22,11 +22,17 @@ class Capture {
     // Detailed mode returns timed cues (and always records in history);
     // the plain endpoint is enough for filling a reference's text.
     this.detailed = detailed;
+    // Live mode decodes the current utterance while recording, so text
+    // appears with sentence-level latency instead of after the stop.
+    this.live = live;
+    this.liveState = null;
     this.onChange = () => {};
     this.onTranscribed = () => {};
     // Detailed transcription streams; each finished cue is reported here
     // while the request is still running.
     this.onProgress = () => {};
+    // Live partial/final text while recording.
+    this.onLiveText = () => {};
 
     this.pick.onclick = () => this.file.click();
     this.transBtn.onclick = () => this.transcribe({ record: true });
@@ -166,7 +172,11 @@ class Capture {
     const TARGET = 24000;
     const node = ctx.createScriptProcessor(4096, 1, 1);
     const chunks = [];
-    node.onaudioprocess = (e) => chunks.push(new Float32Array(e.inputBuffer.getChannelData(0)));
+    node.onaudioprocess = (e) => {
+      const data = new Float32Array(e.inputBuffer.getChannelData(0));
+      chunks.push(data);
+      if (this.liveState) this.feedLive(data);
+    };
     src.connect(node);
     node.connect(ctx.destination);
 
@@ -176,15 +186,123 @@ class Capture {
     this.node = node;
     this.chunks = chunks;
     this.ratio = ctx.sampleRate / TARGET;
+    if (this.live) {
+      this.liveState = {
+        utterance: [],
+        length: 0,
+        text: '',
+        busy: false,
+        lastLen: 0,
+        speech: 0,
+        silent: 0,
+        pending: false,
+        timer: setInterval(() => {
+          if (this.liveState) this.pumpLive(this.liveState.pending);
+        }, 1200),
+      };
+      // Drop the previous transcript while the new one is being spoken.
+      this.onLiveText('');
+    }
     this.recording = true;
     this.rec.classList.add('on');
     this.rec.textContent = t('cap.stop');
     this.setInfo(t("ui.recording_click_again_to_stop"));
   }
 
+  // ------------------------------------------------------------ live text
+  //
+  // While recording, the current utterance is decoded every ~1.2 s and
+  // shown as partial text. A pause finalizes it into the transcript, so
+  // the delay stays at sentence level even though the model is offline.
+
+  feedLive(data) {
+    const st = this.liveState;
+    const rate = this.ctx.sampleRate;
+    st.utterance.push(data);
+    st.length += data.length;
+    let sum = 0;
+    for (let i = 0; i < data.length; i++) sum += data[i] * data[i];
+    const rms = Math.sqrt(sum / data.length);
+    if (rms < LIVE_SILENCE_RMS) {
+      st.silent += data.length;
+    } else {
+      st.silent = 0;
+      st.speech += data.length;
+    }
+    const paused =
+      st.silent >= rate * LIVE_PAUSE_SECS && st.speech >= rate * LIVE_MIN_SPEECH_SECS;
+    const tooLong = st.length >= rate * LIVE_MAX_UTTERANCE_SECS;
+    if (paused || tooLong) {
+      st.pending = true;
+      if (!st.busy) this.pumpLive(true);
+    }
+  }
+
+  async pumpLive(finalize) {
+    const st = this.liveState;
+    if (!st || st.busy) return;
+    if (st.length < this.ctx.sampleRate * 0.4) {
+      st.pending = false;
+      return;
+    }
+    if (!finalize && st.length === st.lastLen) return;
+    st.busy = true;
+    st.pending = false;
+    st.lastLen = st.length;
+    const take = st.length;
+    const snapshot = concatFloat(st.utterance);
+    try {
+      const text = await this.decodeLive(snapshot);
+      if (this.liveState !== st) return;
+      if (finalize) {
+        if (text) st.text = joinCjk(st.text, text);
+        // Audio recorded during the request starts the next utterance.
+        dropSamples(st, take);
+        st.speech = 0;
+        st.silent = 0;
+        st.lastLen = 0;
+        this.onLiveText(st.text);
+      } else if (text) {
+        this.onLiveText(joinCjk(st.text, text));
+      }
+    } catch (_) {
+      // A failed partial keeps the previous text; the pass after stop is
+      // authoritative anyway.
+    } finally {
+      if (this.liveState === st) {
+        st.busy = false;
+        if (st.pending) this.pumpLive(true);
+      }
+    }
+  }
+
+  async decodeLive(samples) {
+    const down = downsample(samples, this.ctx.sampleRate / 24000);
+    const fd = new FormData();
+    fd.append('audio', new Blob([encodeWav(down, 24000)], { type: 'audio/wav' }), 'live.wav');
+    const res = await apiFetch('/api/transcribe', { method: 'POST', body: fd });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.error || res.statusText);
+    }
+    return (((await res.json()).text) || '').trim();
+  }
+
+  stopLive() {
+    if (!this.liveState) return;
+    clearInterval(this.liveState.timer);
+    this.liveState = null;
+  }
+
   stop({ autoTranscribe = true } = {}) {
     if (!this.recording) return;
     this.recording = false;
+    // A tap of the record button should not start a decode of silence.
+    const live = this.liveState;
+    const spoke = live
+      ? live.speech > this.ctx.sampleRate * LIVE_MIN_SPEECH_SECS
+      : false;
+    this.stopLive();
     try { this.node.disconnect(); this.srcNode.disconnect(); } catch (_) { /* already closed */ }
     this.stream.getTracks().forEach((tr) => tr.stop());
     this.ctx.close();
@@ -200,8 +318,46 @@ class Capture {
     this.rec.textContent = t('cap.record');
     this.syncTranscribeButton();
     this.onChange();
-    if (autoTranscribe && this.autoTranscribe && transcribeAvailable) this.transcribe();
+    if (autoTranscribe && transcribeAvailable) {
+      // Live dictation already produced text; the pass after stop refines
+      // it with cues and keeps the result in history.
+      if (this.live && (spoke || (live && live.text))) this.transcribe({ record: true });
+      else if (this.autoTranscribe) this.transcribe();
+    }
   }
+}
+
+// Live dictation: decode the current utterance periodically, finalize it
+// after this much silence, and force a break for very long speech.
+const LIVE_SILENCE_RMS = 0.0056;
+const LIVE_PAUSE_SECS = 0.6;
+const LIVE_MIN_SPEECH_SECS = 0.5;
+const LIVE_MAX_UTTERANCE_SECS = 20;
+
+// Drop the first `count` samples from the utterance buffers.
+function dropSamples(st, count) {
+  let left = count;
+  while (left > 0 && st.utterance.length) {
+    const first = st.utterance[0];
+    if (first.length <= left) {
+      left -= first.length;
+      st.utterance.shift();
+    } else {
+      st.utterance[0] = first.subarray(left);
+      left = 0;
+    }
+  }
+  st.length = Math.max(0, st.length - count);
+}
+
+// Join two text pieces: CJK needs no space, Latin words do.
+function joinCjk(a, b) {
+  a = (a || '').trim();
+  b = (b || '').trim();
+  if (!a) return b;
+  if (!b) return a;
+  const cjk = (c) => /[　-〿぀-ヿ㐀-䶿一-鿿豈-﫿＀-￯]/.test(c);
+  return a + (!cjk(a[a.length - 1]) && !cjk(b[0]) ? ' ' : '') + b;
 }
 
 function concatFloat(arrs) {
