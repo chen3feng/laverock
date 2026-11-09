@@ -23,6 +23,9 @@ class Capture {
     this.filename = null;
     this.recording = false;
     this.transcribing = false;
+    // Guards the async decode when the user picks a second file before
+    // the first one finishes converting.
+    this.loadSeq = 0;
     // Voice conversion records source audio, not a reference clip: there
     // is nothing to transcribe.
     this.autoTranscribe = autoTranscribe;
@@ -53,16 +56,7 @@ class Capture {
     this.transBtn.onclick = () => this.transcribe({ record: true });
     this.file.onchange = () => {
       const f = this.file.files[0];
-      if (!f) return;
-      this.blob = f;
-      this.filename = f.name;
-      this.fileLabel = `${f.name} · ${fmtBytes(f.size)}`;
-      this.setInfo(this.fileLabel);
-      this.syncTranscribeButton();
-      this.onChange();
-      if (this.autoTranscribeFiles && transcribeAvailable) {
-        this.transcribe({ record: true });
-      }
+      if (f) this.loadFile(f);
     };
     this.rec.onclick = () => this.toggle();
   }
@@ -154,8 +148,47 @@ class Capture {
     return transcript.text;
   }
 
+  // Take the picked file as the current clip. WAV uploads pass through;
+  // anything else the browser can decode (MP3, M4A/AAC, FLAC, Ogg) is
+  // converted here to mono 24 kHz WAV — the same shape as a microphone
+  // recording — so the server keeps its single WAV parser.
+  async loadFile(f) {
+    const seq = (this.loadSeq += 1);
+    this.blob = null;
+    this.filename = null;
+    this.fileLabel = '';
+    this.setInfo(`${f.name} · ${fmtBytes(f.size)}`);
+    this.syncTranscribeButton();
+    this.onChange();
+    let blob = f;
+    try {
+      if (!(await isWavFile(f))) {
+        this.setInfo(`${t('cap.decoding')} ${f.name}`);
+        blob = await decodeToWav(f);
+      }
+    } catch (_) {
+      if (this.loadSeq !== seq) return;
+      this.file.value = '';
+      this.setInfo(t('cap.none'));
+      toast(t('cap.decode_failed'), true);
+      return;
+    }
+    if (this.loadSeq !== seq) return;
+    this.blob = blob;
+    this.filename = f.name;
+    this.fileLabel = `${f.name} · ${fmtBytes(f.size)}`;
+    this.setInfo(this.fileLabel);
+    this.syncTranscribeButton();
+    this.onChange();
+    if (this.autoTranscribeFiles && transcribeAvailable) {
+      this.transcribe({ record: true });
+    }
+  }
+
   clear() {
     if (this.recording) this.stop({ autoTranscribe: false });
+    // Drop an in-flight file decode so it cannot restore the clip.
+    this.loadSeq += 1;
     this.blob = null;
     this.filename = null;
     this.fileLabel = '';
@@ -400,6 +433,50 @@ function concatFloat(arrs) {
   for (const a of arrs) { out.set(a, o); o += a.length; }
   return out;
 }
+// Sniff the RIFF/WAVE header instead of trusting the extension: a
+// mislabeled file would otherwise reach the server's WAV parser.
+function isWavFile(file) {
+  return file
+    .slice(0, 12)
+    .arrayBuffer()
+    .then((buf) => {
+      if (buf.byteLength < 12) return false;
+      const v = new DataView(buf);
+      return (
+        v.getUint32(0, false) === 0x52494646 && // RIFF
+        v.getUint32(8, false) === 0x57415645 // WAVE
+      );
+    })
+    .catch(() => false);
+}
+
+// Decode any browser-supported audio container to mono 24 kHz WAV. An
+// OfflineAudioContext needs no audio device and is not affected by
+// autoplay policy; browsers decode into its sample rate where they can.
+async function decodeToWav(file) {
+  const Offline = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+  const Ctx = Offline || window.AudioContext || window.webkitAudioContext;
+  if (!Ctx) throw new Error('AudioContext is unavailable');
+  const ctx = Offline ? new Offline(1, 1, 24000) : new Ctx();
+  let audio;
+  try {
+    audio = await ctx.decodeAudioData(await file.arrayBuffer());
+  } finally {
+    try { ctx.close().catch(() => {}); } catch (_) { /* already closed */ }
+  }
+  const channels = audio.numberOfChannels;
+  const mono = new Float32Array(audio.length);
+  for (let c = 0; c < channels; c++) {
+    const data = audio.getChannelData(c);
+    for (let i = 0; i < data.length; i++) mono[i] += data[i] / channels;
+  }
+  // Match the recording pipeline; lower-rate sources keep their rate
+  // rather than being upsampled.
+  const sr = Math.min(audio.sampleRate, 24000);
+  const out = sr === audio.sampleRate ? mono : downsample(mono, audio.sampleRate / sr);
+  return new Blob([encodeWav(out, sr)], { type: 'audio/wav' });
+}
+
 function downsample(input, ratio) {
   const outLen = Math.floor(input.length / ratio);
   const out = new Float32Array(outLen);

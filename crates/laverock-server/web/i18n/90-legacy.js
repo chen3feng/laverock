@@ -2,6 +2,8 @@ addI18n({
   zh: {
     'cap.file': '选择文件', 'cap.record': '● 录音', 'cap.stop': '■ 停止', 'cap.none': '未选择',
     'cap.transcribe': '✎ 转写', 'transcribe.busy': '转写中…',
+    'cap.decoding': '正在解码音频…',
+    'cap.decode_failed': '无法解码这个音频文件，请改用 WAV、MP3、M4A、FLAC 或 Ogg。',
     'preset.official.hf': '官方（huggingface.co）', 'preset.cn': 'hf-mirror.com（国内加速）',
     'preset.official.pip': '官方（pypi.org）', 'preset.custom': '自定义…',
     "ui.en_us": "zh-CN",
@@ -133,6 +135,8 @@ addI18n({
   en: {
     'cap.file': 'Choose file', 'cap.record': '● Record', 'cap.stop': '■ Stop', 'cap.none': 'None',
     'cap.transcribe': '✎ Transcribe', 'transcribe.busy': 'Transcribing…',
+    'cap.decoding': 'Decoding audio…',
+    'cap.decode_failed': 'Could not decode this audio file; try WAV, MP3, M4A, FLAC or Ogg.',
     'preset.official.hf': 'Official (huggingface.co)', 'preset.cn': 'hf-mirror.com (faster in China)',
     'preset.official.pip': 'Official (pypi.org)', 'preset.custom': 'Custom…',
     "ui.en_us": "en-US",

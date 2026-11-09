@@ -288,6 +288,26 @@ async function main() {
     );
     pass('transcribe result clears');
 
+    // Other browser-decodable formats are converted to WAV in the page, so
+    // an MP3 upload transcribes like a WAV one.
+    const accept = await page.$eval('#transcribeCapture .cap-file', (el) => el.accept);
+    assert.ok(accept.includes('.mp3'), `the picker accepts MP3 (accept=${accept})`);
+    const mp3Res = await context.request.post(`${base}/api/audio/mp3`, {
+      data: fs.readFileSync(ref),
+      headers: { 'content-type': 'audio/wav' },
+    });
+    assert.ok(mp3Res.ok(), `wav -> mp3 -> HTTP ${mp3Res.status()}`);
+    const mp3Path = path.join(artifacts, 'transcribe-source.mp3');
+    fs.writeFileSync(mp3Path, await mp3Res.body());
+    await page.setInputFiles('#transcribeCapture .cap-file', mp3Path);
+    await page.waitForSelector('#transcribeResultCard:not([hidden])', { timeout: 60_000 });
+    await page.waitForFunction(
+      () => (document.getElementById('transcribeText')?.value || '').trim().length > 0,
+      null,
+      { timeout: 120_000 },
+    );
+    pass('transcribe accepts an MP3 upload');
+
     // ---------------------------------------------------------------- models
     say('models');
     await page.click('nav a[data-page="models"]');
