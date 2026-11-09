@@ -44,9 +44,12 @@ Cookie）；以下均指回环监听。
 | GET | `/api/captures/:id/subtitles?format=srt\|vtt` | 将该素材已存的分段导出为字幕文件 |
 | DELETE | `/api/captures/:id` | 删除素材（引用它的声音同步去掉这一段） |
 | POST | `/api/captures/dedupe` | 删除内容完全相同的素材并重指向声音 → `{removed}` |
-| GET | `/api/history` | 已生成音频，最新在前 |
+| GET | `/api/history` | 已生成的音频与转写文本，最新在前（`?task=asr` 按任务筛选） |
 | GET | `/api/history/:id/audio` | 生成的音频（`?format=mp3` 导出 MP3） |
-| DELETE | `/api/history/:id` · `/api/history` | 删除单条 / 全部生成记录 |
+| GET | `/api/history/:id/input` | 声音转换记录保留的源音频 |
+| GET | `/api/history/:id/text` | 完整结果文本：转写内容或提示词 |
+| GET | `/api/history/:id/subtitles?format=srt\|vtt` | 带时间戳的转写分段 → 可下载的字幕文件 |
+| DELETE | `/api/history/:id` · `/api/history` | 删除单条 / 全部记录 |
 | POST | `/api/audio/mp3` | 请求体：WAV → MP3（内置纯 Rust 编码器，无需 ffmpeg） |
 | GET | `/api/tools` | 本机可用的音频工具 → `{denoise, separation, mp3}` |
 | POST | `/api/tools/enhance` | multipart：`audio`（WAV）与 `mode`（`denoise` / `vocals` / `instrumental` / `both`）→ `202` 后台任务；单轨为 WAV，`both` 另附 `stems.zip` |
@@ -57,7 +60,7 @@ Cookie）；以下均指回环监听。
 | DELETE | `/api/projects/:id` | 删除项目及其源音频 |
 | GET | `/api/projects/:id/source` | 项目的音轨（WAV） |
 | GET | `/api/projects/:id/media` | 上传的原始媒体文件（视频或压缩音频） |
-| POST | `/api/projects/:id/transcribe` | 对源音频重新语音识别并替换全部分段 → 项目 |
+| POST | `/api/projects/:id/transcribe` | 对源音频重新语音识别并替换全部分段 → 项目；转写结果同时写入历史 |
 | POST | `/api/projects/:id/synthesize` | 配音后台任务：multipart，可重复 `segment` 只重跑指定分段 → `202`；为每段写出 `segments/<id>.wav` |
 | GET | `/api/projects/:id/segments/:segment/audio` | 某一段已生成的配音 |
 | POST | `/api/projects/:id/mix` | multipart：可选 `background_volume`、`voice_volume`（0–4）与 `ducking` → `202`；写出并记录 `mix.wav` |
@@ -65,8 +68,8 @@ Cookie）；以下均指回环监听。
 | GET | `/api/projects/:id/export?format=srt\|vtt` | 项目的分段 → 可下载的 SRT 或 WebVTT |
 | GET | `/api/projects/:id/files/:name` | 已记录的导出文件（`mix.wav`、`export.mp4`） |
 | GET | `/api/projects/:id/subtitles?format=srt\|vtt` | 项目的分段 → 可下载的 SRT 或 WebVTT |
-| POST | `/api/transcribe` | multipart：`audio`（WAV）→ 转写文字（需安装 SenseVoice 模型） |
-| POST | `/api/transcribe/details` | 同样的输入 → `{text, segments: [{start, end, text}], language, duration}` |
+| POST | `/api/transcribe` | multipart：`audio`（WAV）→ 转写文字（需安装 SenseVoice 模型）；`record=1` 同时写入历史 |
+| POST | `/api/transcribe/details` | 同样的输入 → `{text, segments: [{start, end, text}], language, duration}`；结果自动写入历史 |
 | POST | `/api/transcribe/subtitles?format=srt\|vtt` | 同样的输入 → 可下载的 SRT 或 WebVTT（`format=vtt`；默认 `srt`） |
 | GET | `/api/session` | 回环/配对状态（公开） |
 | POST | `/api/pair/start` | 仅桌面：生成五分钟配对码 + 二维码 |

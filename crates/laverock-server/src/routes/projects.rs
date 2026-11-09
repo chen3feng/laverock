@@ -390,6 +390,7 @@ async fn transcribe_project(
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> Result<Json<Project>, ApiError> {
+    let project = state.projects.get(&id)?;
     let (_, bytes) = state.projects.source(&id)?;
     if !is_wav(&bytes) {
         return Err(ApiError::bad_request(
@@ -406,6 +407,7 @@ async fn transcribe_project(
     if transcript.segments.is_empty() {
         return Err(ApiError::bad_request("no speech recognized"));
     }
+    super::audio::record_transcript(&state, &transcript, Some(&project.name));
     let segments = projects::from_transcript(&transcript.segments);
     Ok(Json(state.projects.set_segments(&id, segments)?))
 }

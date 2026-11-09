@@ -1,10 +1,14 @@
-//! Generation history: every successful synthesis is saved here.
+//! Generation history: every successful synthesis or transcription is saved
+//! here.
 //!
 //! Layout (one directory per entry):
 //!   <data_dir>/history/<id>/meta.json
-//!   <data_dir>/history/<id>/audio.wav
+//!   <data_dir>/history/<id>/audio.wav      (audio results)
+//!   <data_dir>/history/<id>/text.txt       (text results, untruncated)
+//!   <data_dir>/history/<id>/segments.json  (timed transcript cues, optional)
+//!   <data_dir>/history/<id>/input.wav      (voice conversion source, optional)
 
-use laverock_core::{decode_wav, CoreError, Result, TaskKind};
+use laverock_core::{decode_wav, CoreError, Result, TaskKind, TranscriptSegment};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
@@ -14,9 +18,10 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-/// Keep at most this many generations.
+/// Keep at most this many entries.
 const MAX_ENTRIES: usize = 100;
-/// Keep at most this much audio in total (1 GiB).
+/// Keep at most this much result data in total (1 GiB), including source
+/// clips attached to conversions.
 const MAX_TOTAL_BYTES: u64 = 1024 * 1024 * 1024;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -30,6 +35,10 @@ pub struct HistoryMeta {
     /// predate the field and default to speech).
     #[serde(default = "default_kind")]
     pub kind: String,
+    /// What the entry produced: `"audio"` for a rendered take, `"text"` for
+    /// a transcript. Older entries predate the field and are audio.
+    #[serde(default = "default_output")]
+    pub output: String,
     /// The operation that produced the entry. `kind` only says what the
     /// output is; future transcription and voice-conversion entries need
     /// the task to pick a card renderer and a filter.
@@ -40,10 +49,19 @@ pub struct HistoryMeta {
     /// `None` for speech and for music engines without routes.
     #[serde(default)]
     pub route: Option<String>,
+    /// Where the result came from, when `text` is not the input: the source
+    /// clip or project name for transcription, the source file for voice
+    /// conversion.
+    #[serde(default)]
+    pub input: Option<HistoryInput>,
+    /// Whether the entry directory also holds timed transcript cues.
+    #[serde(default)]
+    pub has_segments: bool,
     pub text: String,
     pub duration_secs: f32,
     pub bytes: u64,
-    /// 1 for speech, 2 for music. The WAV in the entry keeps this shape.
+    /// 1 for speech, 2 for music, 0 for text-only results. The WAV in the
+    /// entry keeps this shape.
     #[serde(default = "default_channels")]
     pub channels: u16,
     /// Shared id for a batch of variants produced by one request.
@@ -57,6 +75,21 @@ pub struct HistoryMeta {
 
 fn default_kind() -> String {
     "speech".to_string()
+}
+
+fn default_output() -> String {
+    "audio".to_string()
+}
+
+/// Where a task's input came from, for the history card.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HistoryInput {
+    /// Source clip filename, project name or other human label.
+    #[serde(default)]
+    pub name: Option<String>,
+    /// The entry directory also holds `input.wav`.
+    #[serde(default)]
+    pub audio: bool,
 }
 
 fn default_channels() -> u16 {
@@ -80,7 +113,11 @@ impl HistoryStore {
                 continue;
             }
             let manifest = entry.path().join("meta.json");
-            if !manifest.is_file() || !entry.path().join("audio.wav").is_file() {
+            let has_audio = entry.path().join("audio.wav").is_file();
+            let has_text = entry.path().join("text.txt").is_file();
+            // A directory needs its manifest and at least one result file;
+            // text-only entries are valid.
+            if !manifest.is_file() || (!has_audio && !has_text) {
                 continue;
             }
             match fs::read_to_string(&manifest)
@@ -93,6 +130,12 @@ impl HistoryStore {
                     if meta.task == TaskKind::Tts {
                         meta.task = TaskKind::from_output_kind(&meta.kind);
                     }
+                    // An entry whose audio was pruned by hand but whose
+                    // transcript survived is still a text result.
+                    if !has_audio && has_text {
+                        meta.output = "text".to_string();
+                    }
+                    meta.has_segments = entry.path().join("segments.json").is_file();
                     entries.push(meta);
                 }
                 Err(e) => tracing::warn!(
@@ -161,8 +204,11 @@ impl HistoryStore {
             engine_id: engine_id.to_string(),
             engine_name: engine_name.to_string(),
             kind: kind.to_string(),
+            output: "audio".to_string(),
             task,
             route: route.map(str::to_string),
+            input: None,
+            has_segments: false,
             text: text.chars().take(2000).collect(),
             duration_secs,
             bytes: wav.len() as u64,
@@ -173,7 +219,90 @@ impl HistoryStore {
 
         fs::write(dir.join("audio.wav"), wav)?;
         write_atomic(&dir.join("meta.json"), &serde_json::to_vec_pretty(&meta)?)?;
+        self.remember(&meta);
+        Ok(meta)
+    }
 
+    /// Add a text-only result (a transcript). The full text is kept in
+    /// `text.txt`; `meta.text` is a preview for the history list. Timed cues,
+    /// when the engine reports them, go to `segments.json` for SRT/VTT
+    /// export.
+    pub fn add_text(
+        &self,
+        engine_id: &str,
+        engine_name: &str,
+        text: &str,
+        segments: &[TranscriptSegment],
+        duration_secs: f32,
+        input_name: Option<&str>,
+    ) -> Result<HistoryMeta> {
+        let created_at = now_secs();
+        let id = format!("h{created_at}-{:04x}", random_suffix());
+        let dir = self.root.join(&id);
+        fs::create_dir_all(&dir)?;
+
+        let segments_bytes = if segments.is_empty() {
+            Vec::new()
+        } else {
+            serde_json::to_vec(segments)?
+        };
+        let meta = HistoryMeta {
+            id: id.clone(),
+            created_at,
+            engine_id: engine_id.to_string(),
+            engine_name: engine_name.to_string(),
+            kind: "transcript".to_string(),
+            output: "text".to_string(),
+            task: TaskKind::Asr,
+            route: None,
+            input: input_name.map(|name| HistoryInput {
+                name: Some(name.to_string()),
+                audio: false,
+            }),
+            has_segments: !segments_bytes.is_empty(),
+            text: text.chars().take(2000).collect(),
+            duration_secs,
+            bytes: (text.len() + segments_bytes.len()) as u64,
+            channels: 0,
+            generation: None,
+            index: None,
+        };
+
+        fs::write(dir.join("text.txt"), text.as_bytes())?;
+        if !segments_bytes.is_empty() {
+            fs::write(dir.join("segments.json"), &segments_bytes)?;
+        }
+        write_atomic(&dir.join("meta.json"), &serde_json::to_vec_pretty(&meta)?)?;
+        self.remember(&meta);
+        Ok(meta)
+    }
+
+    /// Keep the source clip of a voice conversion next to its result, so the
+    /// history card can play both. `bytes` grows to include the extra file.
+    pub fn attach_input(&self, id: &str, wav: &[u8], name: Option<&str>) -> Result<()> {
+        if !is_valid_id(id) {
+            return Err(CoreError::NotFound(format!("history {id}")));
+        }
+        let dir = self.root.join(id);
+        if !dir.is_dir() {
+            return Err(CoreError::NotFound(format!("history {id}")));
+        }
+        fs::write(dir.join("input.wav"), wav)?;
+        let mut entries = self.entries.lock().expect("history lock");
+        let meta = entries
+            .iter_mut()
+            .find(|m| m.id == id)
+            .ok_or_else(|| CoreError::NotFound(format!("history {id}")))?;
+        meta.input = Some(HistoryInput {
+            name: name.map(str::to_string),
+            audio: true,
+        });
+        meta.bytes += wav.len() as u64;
+        write_atomic(&dir.join("meta.json"), &serde_json::to_vec_pretty(&meta)?)
+    }
+
+    /// Insert into the in-memory list and drop entries over the budget.
+    fn remember(&self, meta: &HistoryMeta) {
         let prune = {
             let mut entries = self.entries.lock().expect("history lock");
             entries.insert(0, meta.clone());
@@ -184,7 +313,6 @@ impl HistoryStore {
             let mut entries = self.entries.lock().expect("history lock");
             entries.retain(|m| m.id != old_id);
         }
-        Ok(meta)
     }
 
     /// Choose oldest entries that exceed the count or size budgets.
@@ -213,6 +341,48 @@ impl HistoryStore {
             return Err(CoreError::NotFound(format!("history {id}")));
         }
         let path = self.root.join(id).join("audio.wav");
+        if !path.is_file() {
+            return Err(CoreError::NotFound(format!("history {id}")));
+        }
+        Ok(path)
+    }
+
+    /// The untruncated result text: `text.txt` for a transcript, or the
+    /// prompt stored in the metadata for an audio entry.
+    pub fn text(&self, id: &str) -> Result<String> {
+        if !is_valid_id(id) {
+            return Err(CoreError::NotFound(format!("history {id}")));
+        }
+        let path = self.root.join(id).join("text.txt");
+        if path.is_file() {
+            return Ok(fs::read_to_string(path)?);
+        }
+        let entries = self.entries.lock().expect("history lock");
+        entries
+            .iter()
+            .find(|m| m.id == id)
+            .map(|m| m.text.clone())
+            .ok_or_else(|| CoreError::NotFound(format!("history {id}")))
+    }
+
+    /// Timed cues for subtitle export; empty for entries without them.
+    pub fn segments(&self, id: &str) -> Result<Vec<TranscriptSegment>> {
+        if !is_valid_id(id) {
+            return Err(CoreError::NotFound(format!("history {id}")));
+        }
+        let path = self.root.join(id).join("segments.json");
+        if !path.is_file() {
+            return Ok(Vec::new());
+        }
+        Ok(serde_json::from_slice(&fs::read(path)?)?)
+    }
+
+    /// The source clip of a voice conversion, when one was attached.
+    pub fn input_path(&self, id: &str) -> Result<PathBuf> {
+        if !is_valid_id(id) {
+            return Err(CoreError::NotFound(format!("history {id}")));
+        }
+        let path = self.root.join(id).join("input.wav");
         if !path.is_file() {
             return Err(CoreError::NotFound(format!("history {id}")));
         }
@@ -459,6 +629,95 @@ mod tests {
             .find(|m| m.id == entry.id)
             .unwrap();
         assert_eq!(meta.task, TaskKind::Music);
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn text_entries_keep_the_full_transcript_and_cues() {
+        let dir = temp_dir();
+        let store = HistoryStore::open(&dir).unwrap();
+        let segments = vec![
+            TranscriptSegment {
+                start: 0.0,
+                end: 1.5,
+                text: "hello".into(),
+            },
+            TranscriptSegment {
+                start: 1.5,
+                end: 3.0,
+                text: "world".into(),
+            },
+        ];
+        // Longer than the list preview, so the file must hold the full text.
+        let full = "a".repeat(2_500);
+        let entry = store
+            .add_text(
+                "sensevoice",
+                "SenseVoice",
+                &full,
+                &segments,
+                3.0,
+                Some("talk.wav"),
+            )
+            .unwrap();
+        assert_eq!(entry.output, "text");
+        assert_eq!(entry.task, TaskKind::Asr);
+        assert_eq!(entry.kind, "transcript");
+        assert!(entry.has_segments);
+        assert_eq!(
+            entry.input.as_ref().and_then(|i| i.name.as_deref()),
+            Some("talk.wav")
+        );
+        assert_eq!(entry.text.len(), 2_000);
+        assert_eq!(store.text(&entry.id).unwrap(), full);
+        assert_eq!(store.segments(&entry.id).unwrap().len(), 2);
+
+        // Reopening accepts the text-only directory and keeps the cues.
+        let reopened = HistoryStore::open(&dir).unwrap();
+        let meta = reopened
+            .list_by_task(Some(TaskKind::Asr))
+            .into_iter()
+            .find(|m| m.id == entry.id)
+            .unwrap();
+        assert_eq!(meta.output, "text");
+        assert!(meta.has_segments);
+        assert_eq!(reopened.text(&entry.id).unwrap(), full);
+        assert_eq!(reopened.segments(&entry.id).unwrap().len(), 2);
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn conversion_entries_can_keep_the_source_clip() {
+        let dir = temp_dir();
+        let store = HistoryStore::open(&dir).unwrap();
+        let entry = store
+            .add_typed(
+                "seed-vc",
+                "Seed-VC",
+                TaskKind::Vc,
+                "speech",
+                None,
+                "source.wav",
+                &wav_bytes(),
+                24_000,
+                1,
+                None,
+            )
+            .unwrap();
+        assert!(entry.input.is_none());
+        store
+            .attach_input(&entry.id, &wav_bytes(), Some("source.wav"))
+            .unwrap();
+
+        let reopened = HistoryStore::open(&dir).unwrap();
+        let meta = reopened.list_by_task(Some(TaskKind::Vc)).pop().unwrap();
+        let input = meta.input.expect("source recorded");
+        assert!(input.audio);
+        assert_eq!(input.name.as_deref(), Some("source.wav"));
+        assert!(reopened.input_path(&entry.id).unwrap().is_file());
+        assert!(reopened.audio_path(&entry.id).unwrap().is_file());
 
         let _ = fs::remove_dir_all(&dir);
     }

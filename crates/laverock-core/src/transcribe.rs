@@ -92,6 +92,13 @@ impl Transcriber {
         model_manifest_in(&self.models_roots).is_ok()
     }
 
+    /// Manifest id and display name of the installed recognizer, for
+    /// labelling results in history.
+    pub fn model_info(&self) -> Option<(String, String)> {
+        let (manifest, _) = model_manifest_in(&self.models_roots).ok()?;
+        Some((manifest.id, manifest.name))
+    }
+
     /// Transcribe a WAV clip to text, loading the model on first call.
     pub fn transcribe(&self, wav: &[u8]) -> Result<String> {
         let (samples, sample_rate) = decode_clip(wav)?;

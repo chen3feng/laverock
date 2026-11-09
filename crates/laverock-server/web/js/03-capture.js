@@ -23,7 +23,7 @@ class Capture {
     this.onTranscribed = () => {};
 
     this.pick.onclick = () => this.file.click();
-    this.transBtn.onclick = () => this.transcribe();
+    this.transBtn.onclick = () => this.transcribe({ record: true });
     this.file.onchange = () => {
       const f = this.file.files[0];
       if (!f) return;
@@ -56,7 +56,8 @@ class Capture {
 
   // Send the current clip to the on-device STT model. Resolves with the
   // text; null when nothing is selected or transcription is unavailable.
-  async transcribe() {
+  // `record` keeps the result in history; automatic passes skip it.
+  async transcribe({ record = false } = {}) {
     if (!this.blob || this.transcribing) return null;
     if (!transcribeAvailable) {
       toast(t("ui.install_the_sensevoice_speech_to"), true);
@@ -66,6 +67,7 @@ class Capture {
     try {
       const fd = new FormData();
       fd.append('audio', this.blob, this.filename || 'reference.wav');
+      if (record) fd.append('record', '1');
       const res = await apiFetch('/api/transcribe', { method: 'POST', body: fd });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
