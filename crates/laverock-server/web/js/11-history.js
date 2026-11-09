@@ -18,6 +18,14 @@ function taskLabel(task) {
   return t('history.task.' + (task || 'tts'));
 }
 
+// Music routes are stored as stable ids; unknown ones (a manifest added
+// later) fall back to the raw value instead of an i18n key.
+function routeLabel(route) {
+  const key = 'history.route.' + route;
+  const label = t(key);
+  return label === key ? route : label;
+}
+
 async function loadHistory() {
   try {
     const d = await api('/api/history');
@@ -150,6 +158,14 @@ function buildHistoryTake(host, h, engineName, variantLabel) {
   task.className = 'chip';
   task.textContent = taskLabel(taskOf(h));
   meta.appendChild(task);
+  // Editing routes are the interesting part of a music entry; the default
+  // text-to-music route adds nothing beyond the "Music" chip.
+  if (h.route && h.route !== 'text2music') {
+    const route = document.createElement('span');
+    route.className = 'chip';
+    route.textContent = routeLabel(h.route);
+    meta.appendChild(route);
+  }
   if (variantLabel) {
     const take = document.createElement('span');
     take.className = 'chip';

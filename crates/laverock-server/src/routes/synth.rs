@@ -309,6 +309,7 @@ async fn synthesize(
             &engine_name,
             task,
             &engine_kind,
+            history_route(&params).as_deref(),
             &text,
             &wav,
             sample_rate,
@@ -351,6 +352,7 @@ async fn synthesize(
             let _ = tx2.try_send(Ok(frame));
         });
         let mut params = params;
+        let route = history_route(&params);
         // One shared group id ties all takes of this request together in
         // history, so the UI can show them as variants of a single try.
         let generation = history.new_generation_id();
@@ -382,6 +384,7 @@ async fn synthesize(
                             &engine_name,
                             task,
                             &engine_kind,
+                            route.as_deref(),
                             &history_text,
                             &wav,
                             sample_rate,
@@ -445,6 +448,7 @@ async fn synthesize(
                             &engine_name,
                             task,
                             &engine_kind,
+                            route.as_deref(),
                             &history_text,
                             &wav,
                             sample_rate,
@@ -655,6 +659,7 @@ async fn convert(
         &engine_name,
         TaskKind::Vc,
         &engine_kind,
+        None,
         &history_text,
         &wav,
         sample_rate,
@@ -735,6 +740,7 @@ fn start_convert_job(
             &engine_name,
             TaskKind::Vc,
             &engine_kind,
+            None,
             &history_text,
             &wav,
             sample_rate,
@@ -819,6 +825,7 @@ fn start_job(
         worker.start();
         let generation = history.new_generation_id();
         let mut params = params;
+        let route = history_route(&params);
         let mut produced = 0u32;
         let mut cancelled = false;
 
@@ -888,6 +895,7 @@ fn start_job(
                 &engine_name,
                 task,
                 &engine_kind,
+                route.as_deref(),
                 &text,
                 &wav,
                 sample_rate,
@@ -1059,6 +1067,19 @@ fn error_frame(message: &str) -> Bytes {
 /// Parse and range-check raw form fields against the engine's declared
 /// parameter list. Unknown fields are rejected; absent fields take the
 /// manifest defaults.
+/// The music route to record in history: ACE-Step's `task_route`, or the
+/// Stable Audio source mode when it conditions on an uploaded song.
+/// Speech requests carry neither parameter and record `None`.
+fn history_route(params: &std::collections::BTreeMap<String, serde_json::Value>) -> Option<String> {
+    if let Some(route) = params.get("task_route").and_then(|v| v.as_str()) {
+        return Some(route.to_string());
+    }
+    match params.get("audio_input_kind").and_then(|v| v.as_str()) {
+        Some(kind) if kind != "none" => Some(kind.to_string()),
+        _ => None,
+    }
+}
+
 fn resolve_params(
     specs: &[laverock_core::ParamSpec],
     raw: &std::collections::BTreeMap<String, String>,
