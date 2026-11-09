@@ -2,24 +2,33 @@
 //!
 //! A recorder clip is normally transcribed by hand, which is the most
 //! tedious step of the cloning flow. The transcriber wraps sherpa-onnx's
-//! offline recognizer (SenseVoice: zh/en/ja/ko/yue, with inverse text
-//! normalization), loading the model lazily on first use from a directory
-//! whose manifest is `kind = "stt"`.
+//! offline recognizer. Two model families are supported:
+//!
+//! - SenseVoice (`engine = "sense_voice"`): zh/en/ja/ko/yue, inverse text
+//!   normalization and punctuation, very fast on CPU.
+//! - FireRedASR2 CTC (`engine = "fire_red_asr_ctc"`): zh/en plus Chinese
+//!   dialects, more accurate than SenseVoice but larger and without
+//!   punctuation.
+//!
+//! Models are loaded lazily on first use from directories whose manifest
+//! is `kind = "stt"`. Several models can be installed; a request may name
+//! one (`model`), otherwise the most recently installed wins.
 //!
 //! [`Transcriber::transcribe`] keeps the original text-only contract used
 //! for prompt texts. [`Transcriber::transcribe_detailed`] returns timed
-//! segments for subtitles: SenseVoice's CTC decoder reports one timestamp
+//! segments for subtitles: models with a CTC decoder report one timestamp
 //! per token, which is aggregated into sentence-sized segments here. When
 //! a model reports no token timestamps, the audio is split on pauses and
 //! each chunk is recognized on its own instead.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
 use sherpa_onnx::{
-    OfflineRecognizer, OfflineRecognizerConfig, OfflineRecognizerResult,
-    OfflineSenseVoiceModelConfig,
+    OfflineFireRedAsrCtcModelConfig, OfflineRecognizer, OfflineRecognizerConfig,
+    OfflineRecognizerResult, OfflineSenseVoiceModelConfig,
 };
 
 use crate::i18n::{self, Key};
@@ -48,15 +57,18 @@ pub struct Transcript {
     pub duration: f32,
 }
 
-/// Holds an optional loaded recognizer; one model at a time.
+/// Holds the loaded recognizers; one per model id, so switching between a
+/// fast model for live partials and an accurate one for the final pass
+/// does not reload the weights on every request.
 pub struct Transcriber {
     models_roots: Vec<PathBuf>,
-    inner: Mutex<Option<Recognizer>>,
+    inner: Mutex<HashMap<String, Recognizer>>,
 }
 
 struct Recognizer {
     recognizer: OfflineRecognizer,
-    /// `None` when the manifest uses `auto`.
+    /// `None` when the manifest uses `auto`, or when the family has no
+    /// language hint (FireRedASR2 detects it itself).
     language: Option<String>,
 }
 
@@ -93,32 +105,34 @@ impl Transcriber {
     pub fn new_all(models_roots: Vec<PathBuf>) -> Self {
         Self {
             models_roots,
-            inner: Mutex::new(None),
+            inner: Mutex::new(HashMap::new()),
         }
     }
 
     /// Whether an STT model directory exists (cheap, no model load).
     pub fn available(&self) -> bool {
-        model_manifest_in(&self.models_roots).is_ok()
+        model_manifest_in(&self.models_roots, None).is_ok()
     }
 
-    /// Manifest id and display name of the installed recognizer, for
-    /// labelling results in history.
-    pub fn model_info(&self) -> Option<(String, String)> {
-        let (manifest, _) = model_manifest_in(&self.models_roots).ok()?;
+    /// Manifest id and display name of the recognizer a request would use,
+    /// for labelling results in history.
+    pub fn model_info(&self, model: Option<&str>) -> Option<(String, String)> {
+        let (manifest, _) = model_manifest_in(&self.models_roots, model).ok()?;
         Some((manifest.id, manifest.name))
     }
 
     /// Transcribe a WAV clip to text, loading the model on first call.
-    pub fn transcribe(&self, wav: &[u8]) -> Result<String> {
+    pub fn transcribe(&self, wav: &[u8], model: Option<&str>) -> Result<String> {
         let (samples, sample_rate) = decode_clip(wav)?;
-        self.with_recognizer(|recognizer| Ok(recognizer.text(&samples, sample_rate)))
+        self.with_recognizer(model, |recognizer| {
+            Ok(recognizer.text(&samples, sample_rate))
+        })
     }
 
     /// Transcribe with per-segment timings, for subtitles.
-    pub fn transcribe_detailed(&self, wav: &[u8]) -> Result<Transcript> {
+    pub fn transcribe_detailed(&self, wav: &[u8], model: Option<&str>) -> Result<Transcript> {
         let (samples, sample_rate) = decode_clip(wav)?;
-        self.with_recognizer(|recognizer| {
+        self.with_recognizer(model, |recognizer| {
             let duration = samples.len() as f32 / sample_rate.max(1) as f32;
             let result = recognizer.run(&samples, sample_rate);
             let (text, tokens, times) = match result {
@@ -152,12 +166,17 @@ impl Transcriber {
     /// pass. The returned transcript has the same shape as
     /// [`Self::transcribe_detailed`]; its text is assembled from the cues
     /// because every chunk is decoded on its own.
-    pub fn transcribe_progressive<F>(&self, wav: &[u8], mut on_segment: F) -> Result<Transcript>
+    pub fn transcribe_progressive<F>(
+        &self,
+        wav: &[u8],
+        model: Option<&str>,
+        mut on_segment: F,
+    ) -> Result<Transcript>
     where
         F: FnMut(&TranscriptSegment),
     {
         let (samples, sample_rate) = decode_clip(wav)?;
-        self.with_recognizer(|recognizer| {
+        self.with_recognizer(model, |recognizer| {
             let rate = sample_rate.max(1);
             let duration = samples.len() as f32 / rate as f32;
             let mut segments = Vec::new();
@@ -201,33 +220,35 @@ impl Transcriber {
         })
     }
 
-    /// Run `f` with the model loaded, keeping load and decode under the
-    /// same lock so two requests never load twice.
-    fn with_recognizer<T>(&self, f: impl FnOnce(&Recognizer) -> Result<T>) -> Result<T> {
+    /// Run `f` with the requested model loaded (or the default when
+    /// `model` is `None`), keeping load and decode under the same lock so
+    /// two requests never load the same model twice. Loaded models stay
+    /// cached: a live partial on the fast model and the final pass on the
+    /// accurate one alternate without re-reading the weights.
+    fn with_recognizer<T>(
+        &self,
+        model: Option<&str>,
+        f: impl FnOnce(&Recognizer) -> Result<T>,
+    ) -> Result<T> {
+        let (manifest, dir) = model_manifest_in(&self.models_roots, model)?;
+        let key = manifest.id.clone();
         let mut guard = self
             .inner
             .lock()
             .map_err(|_| CoreError::Load("transcriber lock poisoned".into()))?;
-        if guard.is_none() {
-            *guard = Some(Recognizer::load(&self.models_roots)?);
+        if !guard.contains_key(&key) {
+            guard.insert(key.clone(), Recognizer::load(&manifest, &dir)?);
         }
-        f(guard.as_ref().expect("loaded above"))
+        f(guard.get(&key).expect("loaded above"))
     }
 }
 
 impl Recognizer {
-    fn load(models_roots: &[PathBuf]) -> Result<Self> {
-        let (manifest, dir) = model_manifest_in(models_roots)?;
+    fn load(manifest: &Manifest, dir: &Path) -> Result<Self> {
         let stt = manifest
             .stt
             .as_ref()
             .ok_or_else(|| CoreError::Load("stt manifest missing an [stt] section".into()))?;
-        if stt.engine != "sense_voice" {
-            return Err(CoreError::Load(format!(
-                "unsupported STT engine: {}",
-                stt.engine
-            )));
-        }
 
         let model = dir.join(&stt.model);
         let tokens = dir.join(&stt.tokens);
@@ -241,22 +262,39 @@ impl Recognizer {
         }
 
         let mut config = OfflineRecognizerConfig::default();
-        config.model_config.sense_voice = OfflineSenseVoiceModelConfig {
-            model: Some(model.to_string_lossy().into_owned()),
-            language: Some(stt.language.clone()),
-            use_itn: stt.use_itn,
+        let language = match stt.engine.as_str() {
+            "sense_voice" => {
+                config.model_config.sense_voice = OfflineSenseVoiceModelConfig {
+                    model: Some(model.to_string_lossy().into_owned()),
+                    language: Some(stt.language.clone()),
+                    use_itn: stt.use_itn,
+                };
+                (stt.language != "auto" && !stt.language.is_empty()).then(|| stt.language.clone())
+            }
+            "fire_red_asr_ctc" => {
+                config.model_config.fire_red_asr_ctc = OfflineFireRedAsrCtcModelConfig {
+                    model: Some(model.to_string_lossy().into_owned()),
+                };
+                // FireRedASR2 detects the language (zh/en/dialects) itself.
+                None
+            }
+            other => {
+                return Err(CoreError::Load(format!(
+                    "unsupported STT engine: {other} (expected sense_voice or fire_red_asr_ctc)"
+                )));
+            }
         };
         config.model_config.tokens = Some(tokens.to_string_lossy().into_owned());
         config.model_config.num_threads = stt.num_threads.max(1);
         config.model_config.debug = false;
 
-        let recognizer = crate::onnx::with_fallback("sensevoice", |provider| {
+        let recognizer = crate::onnx::with_fallback("stt", |provider| {
             config.model_config.provider = Some(provider.to_string());
             OfflineRecognizer::create(&config)
         })
-        .ok_or_else(|| CoreError::Load("failed to create the SenseVoice recognizer".into()))?;
-        let language =
-            (stt.language != "auto" && !stt.language.is_empty()).then(|| stt.language.clone());
+        .ok_or_else(|| {
+            CoreError::Load(format!("failed to create the {} recognizer", stt.engine))
+        })?;
         Ok(Self {
             recognizer,
             language,
@@ -534,21 +572,24 @@ fn monotonic(mut segments: Vec<TranscriptSegment>, duration: f32) -> Vec<Transcr
     segments
 }
 
-/// Find the newest STT manifest across several models directories. The
-/// highest-priority directory wins; within it, the most recently installed
-/// STT model wins.
-pub fn model_manifest_in(models_roots: &[PathBuf]) -> Result<(Manifest, PathBuf)> {
+/// Find an installed STT manifest across several models directories. The
+/// highest-priority directory wins. Within it, an explicitly requested
+/// model id wins; otherwise the most recently installed model does.
+pub fn model_manifest_in(
+    models_roots: &[PathBuf],
+    preferred: Option<&str>,
+) -> Result<(Manifest, PathBuf)> {
     for root in models_roots {
-        if let Ok(found) = model_manifest_one(root) {
+        if let Ok(found) = model_manifest_one(root, preferred) {
             return Ok(found);
         }
     }
     Err(CoreError::Load(
-        "no speech-to-text model installed; download SenseVoice from the Models page".into(),
+        "no speech-to-text model installed; download one from the Models page".into(),
     ))
 }
 
-fn model_manifest_one(models_root: &Path) -> Result<(Manifest, PathBuf)> {
+fn model_manifest_one(models_root: &Path, preferred: Option<&str>) -> Result<(Manifest, PathBuf)> {
     let mut found: Vec<(PathBuf, Manifest)> = Vec::new();
     if let Ok(entries) = std::fs::read_dir(models_root) {
         for entry in entries.flatten() {
@@ -566,14 +607,26 @@ fn model_manifest_one(models_root: &Path) -> Result<(Manifest, PathBuf)> {
             }
         }
     }
-    match found.into_iter().max_by_key(|(p, _)| {
-        std::fs::metadata(p.join("engine.json"))
-            .and_then(|m| m.modified())
-            .ok()
-    }) {
+    // An id that is not installed falls back to the default rather than
+    // failing: the UI can keep a stale choice without breaking a run.
+    let chosen = preferred
+        .and_then(|id| {
+            found
+                .iter()
+                .find(|(_, manifest)| manifest.id == id)
+                .cloned()
+        })
+        .or_else(|| {
+            found.into_iter().max_by_key(|(p, _)| {
+                std::fs::metadata(p.join("engine.json"))
+                    .and_then(|m| m.modified())
+                    .ok()
+            })
+        });
+    match chosen {
         Some((dir, manifest)) => Ok((manifest, dir)),
         None => Err(CoreError::Load(
-            "no speech-to-text model installed; download SenseVoice from the Models page".into(),
+            "no speech-to-text model installed; download one from the Models page".into(),
         )),
     }
 }
@@ -590,7 +643,7 @@ mod tests {
     fn empty_dir_has_no_model() {
         let dir = std::env::temp_dir().join(format!("laverock-stt-empty-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
-        assert!(model_manifest_in(std::slice::from_ref(&dir)).is_err());
+        assert!(model_manifest_in(std::slice::from_ref(&dir), None).is_err());
         assert!(!Transcriber::new(&dir).available());
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -613,11 +666,65 @@ mod tests {
         )
         .unwrap();
 
-        let (manifest, path) = model_manifest_in(std::slice::from_ref(&dir)).unwrap();
+        let (manifest, path) = model_manifest_in(std::slice::from_ref(&dir), None).unwrap();
         assert_eq!(manifest.kind, crate::manifest::EngineKind::Stt);
         assert_eq!(path, stt);
         assert!(Transcriber::new(&dir).available());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn prefers_the_requested_model_and_falls_back_when_missing() {
+        let dir = std::env::temp_dir().join(format!("laverock-stt-prefer-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        for id in ["stt-fast", "stt-accurate"] {
+            let model = dir.join(id);
+            std::fs::create_dir_all(&model).unwrap();
+            std::fs::write(
+                model.join("engine.json"),
+                format!(
+                    r#"{{"id":"{id}","kind":"stt","name":"{id}",
+                       "stt":{{"model":"model.int8.onnx","tokens":"tokens.txt"}}}}"#
+                ),
+            )
+            .unwrap();
+        }
+
+        let (manifest, path) =
+            model_manifest_in(std::slice::from_ref(&dir), Some("stt-fast")).unwrap();
+        assert_eq!(manifest.id, "stt-fast");
+        assert_eq!(path, dir.join("stt-fast"));
+
+        // A stale id (model deleted) falls back to an installed model.
+        let (manifest, _) =
+            model_manifest_in(std::slice::from_ref(&dir), Some("stt-gone")).unwrap();
+        assert!(
+            manifest.id == "stt-fast" || manifest.id == "stt-accurate",
+            "fell back to an installed model, got {}",
+            manifest.id
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn parses_both_stt_engine_manifests() {
+        let manifest: Manifest = serde_json::from_str(
+            r#"{"id":"stt-firered","kind":"stt","name":"FireRedASR2",
+               "stt":{"engine":"fire_red_asr_ctc","model":"model.int8.onnx",
+                      "tokens":"tokens.txt","num_threads":4}}"#,
+        )
+        .unwrap();
+        let stt = manifest.stt.unwrap();
+        assert_eq!(stt.engine, "fire_red_asr_ctc");
+        assert_eq!(stt.num_threads, 4);
+
+        // The older SenseVoice manifest still parses with its defaults.
+        let manifest: Manifest = serde_json::from_str(
+            r#"{"id":"stt-sensevoice","kind":"stt","name":"SenseVoice",
+               "stt":{"model":"model.int8.onnx","tokens":"tokens.txt"}}"#,
+        )
+        .unwrap();
+        assert_eq!(manifest.stt.unwrap().engine, "sense_voice");
     }
 
     #[test]

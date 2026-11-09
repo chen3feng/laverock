@@ -69,7 +69,7 @@ Cookie）；以下均指回环监听。
 | GET | `/api/projects/:id/export?format=srt\|vtt` | 项目的分段 → 可下载的 SRT 或 WebVTT |
 | GET | `/api/projects/:id/files/:name` | 已记录的导出文件（`mix.wav`、`export.mp4`） |
 | GET | `/api/projects/:id/subtitles?format=srt\|vtt` | 项目的分段 → 可下载的 SRT 或 WebVTT |
-| POST | `/api/transcribe` | multipart：`audio`（WAV）→ 转写文字（需安装 SenseVoice 模型）；`record=1` 同时写入历史 |
+| POST | `/api/transcribe` | multipart：`audio`（WAV）→ 转写文字（需安装语音识别模型）；`record=1` 同时写入历史 |
 | POST | `/api/transcribe/details` | 同样的输入 → `{text, segments: [{start, end, text}], language, duration}`；结果自动写入历史 |
 | POST | `/api/transcribe/stream` | 同样的输入 → Server-Sent Events：每段识别完成发一个 `segment`，最后发 `done`（完整转写）；`record=1` 同时写入历史 |
 | POST | `/api/transcribe/subtitles?format=srt\|vtt` | 同样的输入 → 可下载的 SRT 或 WebVTT（`format=vtt`；默认 `srt`） |
@@ -87,8 +87,11 @@ Cookie）；以下均指回环监听。
 `capture` 字段即可；`GET /api/engines` 返回的 `reference_limit_secs` 是拼接时的
 长度上限，因为每个引擎只在那段长度内取条件。
 
-带时间戳的转写来自 SenseVoice：它的 CTC 解码器会为每个 token 给出时间，服务端
-再聚合成句子级的分段。不提供 token 时间戳的模型则会按停顿切分音频兜底。
+带时间戳的转写来自已安装的语音识别模型：CTC 解码器会为每个 token 给出时间，
+服务端再聚合成句子级的分段。不提供 token 时间戳的模型则会按停顿切分音频兜底。
+四个 `/api/transcribe*` 接口都接受 `?model=<id>` 选择已安装的模型（SenseVoice、
+FireRedASR2 CTC）；省略时使用最后安装的那个。`GET /api/models` 会列出它们及其
+`engine_id`。
 `POST /api/captures/:id/transcribe` 会把文字和分段一起存入素材；手动修改转写
 文字会清空分段，因为它们已不再对应。分段时间是相对音频开头的秒数。
 

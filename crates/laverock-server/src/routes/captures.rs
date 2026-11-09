@@ -237,12 +237,13 @@ async fn transcribe_capture(
 ) -> Result<Json<CaptureMeta>, ApiError> {
     let (_, wav) = state.profiles.captures().get(&id)?;
     let transcriber = state.transcriber.clone();
-    let transcript = tokio::task::spawn_blocking(move || transcriber.transcribe_detailed(&wav))
-        .await
-        .map_err(|e| ApiError {
-            status: StatusCode::INTERNAL_SERVER_ERROR,
-            message: format!("transcribe task panicked: {e}"),
-        })??;
+    let transcript =
+        tokio::task::spawn_blocking(move || transcriber.transcribe_detailed(&wav, None))
+            .await
+            .map_err(|e| ApiError {
+                status: StatusCode::INTERNAL_SERVER_ERROR,
+                message: format!("transcribe task panicked: {e}"),
+            })??;
     if transcript.text.trim().is_empty() {
         return Err(ApiError::bad_request("no speech recognized"));
     }

@@ -398,16 +398,17 @@ async fn transcribe_project(
         ));
     }
     let transcriber = state.transcriber.clone();
-    let transcript = tokio::task::spawn_blocking(move || transcriber.transcribe_detailed(&bytes))
-        .await
-        .map_err(|e| ApiError {
-            status: StatusCode::INTERNAL_SERVER_ERROR,
-            message: format!("transcribe task panicked: {e}"),
-        })??;
+    let transcript =
+        tokio::task::spawn_blocking(move || transcriber.transcribe_detailed(&bytes, None))
+            .await
+            .map_err(|e| ApiError {
+                status: StatusCode::INTERNAL_SERVER_ERROR,
+                message: format!("transcribe task panicked: {e}"),
+            })??;
     if transcript.segments.is_empty() {
         return Err(ApiError::bad_request("no speech recognized"));
     }
-    super::audio::record_transcript(&state, &transcript, Some(&project.name));
+    super::audio::record_transcript(&state, &transcript, Some(&project.name), None);
     let segments = projects::from_transcript(&transcript.segments);
     Ok(Json(state.projects.set_segments(&id, segments)?))
 }

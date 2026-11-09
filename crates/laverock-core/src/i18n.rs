@@ -128,8 +128,8 @@ messages! {
     EmptyClip = "empty_clip"
         { en: "The audio clip is empty.", zh: "音频为空。" },
     SttModelMissing = "stt_model_missing"
-        { en: "No speech-to-text model installed; download SenseVoice from the Models page.",
-          zh: "未安装语音识别模型；请在「模型」页下载 SenseVoice。" },
+        { en: "No speech-to-text model installed; download one from the Models page.",
+          zh: "未安装语音识别模型；请在「模型」页下载一个。" },
     SttFileMissing = "stt_file_missing"
         { en: "Speech-to-text model file missing: {path}",
           zh: "语音识别模型文件缺失：{path}" },

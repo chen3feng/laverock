@@ -7,6 +7,8 @@ class Capture {
     detailed = false,
     live = false,
     autoTranscribeFiles = false,
+    model = null,
+    liveModel = null,
   } = {}) {
     host.innerHTML = '';
     host.appendChild($('captureTpl').content.cloneNode(true));
@@ -34,6 +36,10 @@ class Capture {
     // Pages with no separate transcribe button start as soon as a file is
     // chosen; the explicit click is then unnecessary.
     this.autoTranscribeFiles = autoTranscribeFiles;
+    // Installed STT model id for final passes, and the one used for live
+    // partials (the fast model when both are installed). Null = default.
+    this.model = model;
+    this.liveModel = liveModel;
     this.liveState = null;
     this.onChange = () => {};
     this.onTranscribed = () => {};
@@ -93,7 +99,10 @@ class Capture {
       const fd = new FormData();
       fd.append('audio', this.blob, this.filename || 'reference.wav');
       if (record) fd.append('record', '1');
-      const res = await apiFetch('/api/transcribe', { method: 'POST', body: fd });
+      const res = await apiFetch('/api/transcribe' + modelQuery(this.model), {
+        method: 'POST',
+        body: fd,
+      });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         throw new Error(body.error || res.statusText);
@@ -119,7 +128,10 @@ class Capture {
     const fd = new FormData();
     fd.append('audio', this.blob, this.filename || 'reference.wav');
     if (record) fd.append('record', '1');
-    const res = await apiFetch('/api/transcribe/stream', { method: 'POST', body: fd });
+    const res = await apiFetch('/api/transcribe/stream' + modelQuery(this.model), {
+      method: 'POST',
+      body: fd,
+    });
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
       throw new Error(body.error || res.statusText);
@@ -292,7 +304,11 @@ class Capture {
     const down = downsample(samples, this.ctx.sampleRate / 24000);
     const fd = new FormData();
     fd.append('audio', new Blob([encodeWav(down, 24000)], { type: 'audio/wav' }), 'live.wav');
-    const res = await apiFetch('/api/transcribe', { method: 'POST', body: fd });
+    const model = this.liveModel || this.model;
+    const res = await apiFetch('/api/transcribe' + modelQuery(model), {
+      method: 'POST',
+      body: fd,
+    });
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
       throw new Error(body.error || res.statusText);
@@ -360,6 +376,11 @@ function dropSamples(st, count) {
     }
   }
   st.length = Math.max(0, st.length - count);
+}
+
+// Query suffix naming an installed STT model; empty keeps the default.
+function modelQuery(model) {
+  return model ? '?model=' + encodeURIComponent(model) : '';
 }
 
 // Join two text pieces: CJK needs no space, Latin words do.

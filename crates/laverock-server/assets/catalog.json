@@ -83,6 +83,36 @@
     }
   },
   {
+    "id": "stt-fireredasr2-ctc",
+    "task": "asr",
+    "dir": "sherpa-onnx-fire-red-asr2-ctc-zh_en-int8-2026-02-25",
+    "name": "FireRedASR2 CTC (INT8)",
+    "description": {
+      "en": "More accurate Chinese/English speech recognition, including 20+ Chinese dialects. Larger and slower than SenseVoice, but noticeably better on hard audio. No punctuation of its own.",
+      "zh": "更准确的中英文语音识别，覆盖 20 多种中文方言。比 SenseVoice 更大、更慢，但嘈杂或口音重时明显更准；输出不带标点。"
+    },
+    "size": "~496 MB",
+    "languages": [
+      "zh",
+      "en"
+    ],
+    "capabilities": [
+      "stt"
+    ],
+    "license": {
+      "name": "Apache-2.0",
+      "url": "https://github.com/FireRedTeam/FireRedASR2S",
+      "noncommercial": false
+    },
+    "min_memory_gb": 2,
+    "script": "download-stt-firered.sh",
+    "env": {},
+    "note": {
+      "en": "Accuracy-first alternative to SenseVoice. The Transcribe page lets you pick the model per run; live dictation keeps using SenseVoice when both are installed. Pure ONNX, no Python needed.",
+      "zh": "偏重准确率的替代模型。转写页可以按次选择模型；两个都安装时，实时出字仍走 SenseVoice。纯 ONNX，无需 Python。"
+    }
+  },
+  {
     "id": "voxcpm2",
     "task": "tts",
     "dir": "voxcpm2",

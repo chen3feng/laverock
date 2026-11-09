@@ -25,6 +25,75 @@ let transcribeLive = false;
 let transcribeFormat = 'txt';
 let transcribePlainText = '';
 
+// Installed STT models and the one used for final passes. Live partials
+// prefer SenseVoice when it is installed: the larger model is too slow to
+// decode every 1.2 s, so it only handles the pass after stop.
+let sttModels = [];
+let sttModelId = null;
+const STT_MODEL_KEY = 'laverock-stt-model';
+const STT_FAST_MODEL = 'stt-sensevoice';
+
+function sttModelIds() {
+  return sttModels.map((m) => m.engine_id || m.id);
+}
+
+// The catalog id is `stt-sensevoice`, while its manifest id (written by the
+// download script) is the model directory name.
+function isSenseVoice(model) {
+  return model.id === STT_FAST_MODEL || (model.engine_id || '').includes('sense-voice');
+}
+
+function applySttModel() {
+  asrCapture.model = sttModelId;
+  const fast = sttModels.find(isSenseVoice);
+  asrCapture.liveModel = fast ? fast.engine_id || fast.id : sttModelId;
+}
+
+async function loadSttModels() {
+  let models = [];
+  try {
+    const data = await api(`/api/models?lang=${lang}`);
+    models = (data.models || []).filter(
+      (m) => m.installed && (m.capabilities || []).includes('stt'),
+    );
+  } catch (_) {
+    return;
+  }
+  sttModels = models;
+  const ids = sttModelIds();
+  const row = $('transcribeModelRow');
+  const select = $('transcribeModel');
+  row.hidden = ids.length < 2;
+  select.innerHTML = '';
+  for (const model of models) {
+    const option = document.createElement('option');
+    option.value = model.engine_id || model.id;
+    option.textContent = model.name;
+    select.appendChild(option);
+  }
+  let stored = null;
+  try {
+    stored = localStorage.getItem(STT_MODEL_KEY);
+  } catch (_) {
+    // Private mode or blocked storage: fall back to the default.
+  }
+  if (stored && ids.includes(stored)) sttModelId = stored;
+  else if (ids.includes('stt-fireredasr2-ctc')) sttModelId = 'stt-fireredasr2-ctc';
+  else sttModelId = ids[0] || null;
+  select.value = sttModelId || '';
+  applySttModel();
+}
+
+$('transcribeModel').onchange = () => {
+  sttModelId = $('transcribeModel').value || null;
+  try {
+    localStorage.setItem(STT_MODEL_KEY, sttModelId || '');
+  } catch (_) {
+    // The choice still applies to this session.
+  }
+  applySttModel();
+};
+
 asrCapture.onLiveText = (text) => {
   const starting = !transcribeLive;
   transcribeLive = true;
@@ -73,6 +142,7 @@ function syncTranscribePage() {
     ? t('transcribe.hint')
     : t('transcribe.no_model');
   asrCapture.syncTranscribeButton();
+  loadSttModels();
 }
 
 function showTranscribeResult(text, state = 'done') {

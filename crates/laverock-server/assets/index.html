@@ -608,6 +608,11 @@
       <div class="card">
         <label data-i18n="transcribe.audio">音频</label>
         <div id="transcribeCapture"></div>
+        <div class="hist-row" id="transcribeModelRow" hidden>
+          <label for="transcribeModel" data-i18n="transcribe.model">识别模型</label>
+          <select id="transcribeModel"></select>
+          <span class="hint" data-i18n="transcribe.model_hint">更大的模型更准；实时出字仍优先使用 SenseVoice。</span>
+        </div>
         <p class="hint" id="transcribeHint" data-i18n="transcribe.hint">转写在本机完成；首次使用需要先到「模型」页安装 SenseVoice。</p>
       </div>
       <div class="card" id="transcribeResultCard" hidden>
@@ -1256,7 +1261,7 @@ addI18n({
     'captures.new': '＋ 添加素材',
     'captures.dedupe': '去重',
     'captures.audio': '录音或上传 WAV',
-    'captures.hint': '录音会在浏览器内转成 24kHz 单声道 WAV；安装了 SenseVoice 会自动转写。',
+    'captures.hint': '录音会在浏览器内转成 24kHz 单声道 WAV；安装了语音识别模型会自动转写。',
     'captures.save': '加入素材库',
     'captures.saved': '已加入素材库',
     'captures.toVoice': '用选中的素材新建声音',
@@ -1339,7 +1344,7 @@ addI18n({
     'captures.new': '+ Add take',
     'captures.dedupe': 'De-duplicate',
     'captures.audio': 'Record or upload a WAV',
-    'captures.hint': 'Recordings become 24 kHz mono WAV in the browser; SenseVoice transcribes them when installed.',
+    'captures.hint': 'Recordings become 24 kHz mono WAV in the browser; the installed speech model transcribes them.',
     'captures.save': 'Add to library',
     'captures.saved': 'Added to the library',
     'captures.toVoice': 'New voice from selected',
@@ -1681,7 +1686,7 @@ addI18n({
     'projects.name': '项目名称',
     'projects.name.ph': '例如：访谈第一期',
     'projects.import': '已有字幕（可选）',
-    'projects.hint': '导入字幕后不再自动转写；没有字幕时会用 SenseVoice 转写。',
+    'projects.hint': '导入字幕后不再自动转写；没有字幕时会用已安装的语音识别模型转写。',
     'projects.create': '创建项目',
     'projects.creating': '正在创建…',
     'projects.default_name': '未命名项目',
@@ -1746,7 +1751,7 @@ addI18n({
     'projects.name': 'Project name',
     'projects.name.ph': 'e.g. Interview, episode 1',
     'projects.import': 'Existing subtitles (optional)',
-    'projects.hint': 'With a subtitle file the clip is not transcribed; without one SenseVoice transcribes it.',
+    'projects.hint': 'With a subtitle file the clip is not transcribed; without one the installed speech model transcribes it.',
     'projects.create': 'Create project',
     'projects.creating': 'Creating…',
     'projects.default_name': 'Untitled project',
@@ -1848,8 +1853,8 @@ addI18n({
     'transcribe.title': '转写',
     'transcribe.sub': '把一段录音或音频转成文字，带时间轴，可复制或导出 TXT / SRT / VTT。',
     'transcribe.audio': '音频',
-    'transcribe.hint': '转写在本机完成；首次使用需要先到「模型」页安装 SenseVoice。',
-    'transcribe.no_model': '还没有安装语音识别模型，请先到「模型」页安装 SenseVoice。',
+    'transcribe.hint': '转写在本机完成；首次使用需要先到「模型」页安装语音识别模型（SenseVoice 或 FireRedASR2）。',
+    'transcribe.no_model': '还没有安装语音识别模型，请先到「模型」页安装 SenseVoice 或 FireRedASR2。',
     'transcribe.result': '转写结果',
     'transcribe.live': '正在识别，说完一句就会补全…',
     'transcribe.streaming': '正在识别，文字会逐段出现…',
@@ -1860,13 +1865,15 @@ addI18n({
     'transcribe.empty': '还没有转写记录。',
     'transcribe.clear': '清除结果',
     'transcribe.format_text': '纯文本',
+    'transcribe.model': '识别模型',
+    'transcribe.model_hint': '更大的模型更准；实时出字仍优先使用 SenseVoice。',
   },
   en: {
     'transcribe.title': 'Transcribe',
     'transcribe.sub': 'Turn a recording or audio file into text with timings, ready to copy or export as TXT / SRT / VTT.',
     'transcribe.audio': 'Audio',
-    'transcribe.hint': 'Transcription runs on this computer; install SenseVoice from the Models page first.',
-    'transcribe.no_model': 'No speech recognition model installed yet. Install SenseVoice from the Models page first.',
+    'transcribe.hint': 'Transcription runs on this computer; install a speech model (SenseVoice or FireRedASR2) from the Models page first.',
+    'transcribe.no_model': 'No speech recognition model installed yet. Install SenseVoice or FireRedASR2 from the Models page first.',
     'transcribe.result': 'Transcript',
     'transcribe.live': 'Transcribing live; each sentence is filled in as you pause…',
     'transcribe.streaming': 'Transcribing; text appears as each passage finishes…',
@@ -1877,6 +1884,8 @@ addI18n({
     'transcribe.empty': 'No transcripts yet.',
     'transcribe.clear': 'Clear result',
     'transcribe.format_text': 'Text',
+    'transcribe.model': 'Recognition model',
+    'transcribe.model_hint': 'Larger models are more accurate; live text still prefers SenseVoice.',
   },
 });
 
@@ -1888,7 +1897,7 @@ addI18n({
     'preset.official.pip': '官方（pypi.org）', 'preset.custom': '自定义…',
     "ui.en_us": "zh-CN",
     "ui.please_confirm": "请确认",
-    "ui.install_the_sensevoice_speech_to": "请先在「模型」页下载 SenseVoice 语音识别模型。",
+    "ui.install_the_sensevoice_speech_to": "请先在「模型」页下载语音识别模型。",
     "ui.no_speech_recognized": "未识别到语音",
     "ui.transcription_failed": "转写失败：",
     "ui.microphone_recording_is_unavailable_here": "当前环境不支持麦克风录音，请改用「选择文件」上传 WAV",
@@ -2019,7 +2028,7 @@ addI18n({
     'preset.official.pip': 'Official (pypi.org)', 'preset.custom': 'Custom…',
     "ui.en_us": "en-US",
     "ui.please_confirm": "Please confirm",
-    "ui.install_the_sensevoice_speech_to": "Install the SenseVoice speech-to-text model under Models first.",
+    "ui.install_the_sensevoice_speech_to": "Install a speech-to-text model under Models first.",
     "ui.no_speech_recognized": "No speech recognized",
     "ui.transcription_failed": "Transcription failed: ",
     "ui.microphone_recording_is_unavailable_here": "Microphone recording is unavailable here; use \"Choose file\" to upload a WAV.",
@@ -2626,6 +2635,8 @@ class Capture {
     detailed = false,
     live = false,
     autoTranscribeFiles = false,
+    model = null,
+    liveModel = null,
   } = {}) {
     host.innerHTML = '';
     host.appendChild($('captureTpl').content.cloneNode(true));
@@ -2653,6 +2664,10 @@ class Capture {
     // Pages with no separate transcribe button start as soon as a file is
     // chosen; the explicit click is then unnecessary.
     this.autoTranscribeFiles = autoTranscribeFiles;
+    // Installed STT model id for final passes, and the one used for live
+    // partials (the fast model when both are installed). Null = default.
+    this.model = model;
+    this.liveModel = liveModel;
     this.liveState = null;
     this.onChange = () => {};
     this.onTranscribed = () => {};
@@ -2712,7 +2727,10 @@ class Capture {
       const fd = new FormData();
       fd.append('audio', this.blob, this.filename || 'reference.wav');
       if (record) fd.append('record', '1');
-      const res = await apiFetch('/api/transcribe', { method: 'POST', body: fd });
+      const res = await apiFetch('/api/transcribe' + modelQuery(this.model), {
+        method: 'POST',
+        body: fd,
+      });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         throw new Error(body.error || res.statusText);
@@ -2738,7 +2756,10 @@ class Capture {
     const fd = new FormData();
     fd.append('audio', this.blob, this.filename || 'reference.wav');
     if (record) fd.append('record', '1');
-    const res = await apiFetch('/api/transcribe/stream', { method: 'POST', body: fd });
+    const res = await apiFetch('/api/transcribe/stream' + modelQuery(this.model), {
+      method: 'POST',
+      body: fd,
+    });
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
       throw new Error(body.error || res.statusText);
@@ -2911,7 +2932,11 @@ class Capture {
     const down = downsample(samples, this.ctx.sampleRate / 24000);
     const fd = new FormData();
     fd.append('audio', new Blob([encodeWav(down, 24000)], { type: 'audio/wav' }), 'live.wav');
-    const res = await apiFetch('/api/transcribe', { method: 'POST', body: fd });
+    const model = this.liveModel || this.model;
+    const res = await apiFetch('/api/transcribe' + modelQuery(model), {
+      method: 'POST',
+      body: fd,
+    });
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
       throw new Error(body.error || res.statusText);
@@ -2979,6 +3004,11 @@ function dropSamples(st, count) {
     }
   }
   st.length = Math.max(0, st.length - count);
+}
+
+// Query suffix naming an installed STT model; empty keeps the default.
+function modelQuery(model) {
+  return model ? '?model=' + encodeURIComponent(model) : '';
 }
 
 // Join two text pieces: CJK needs no space, Latin words do.
@@ -6034,6 +6064,75 @@ let transcribeLive = false;
 let transcribeFormat = 'txt';
 let transcribePlainText = '';
 
+// Installed STT models and the one used for final passes. Live partials
+// prefer SenseVoice when it is installed: the larger model is too slow to
+// decode every 1.2 s, so it only handles the pass after stop.
+let sttModels = [];
+let sttModelId = null;
+const STT_MODEL_KEY = 'laverock-stt-model';
+const STT_FAST_MODEL = 'stt-sensevoice';
+
+function sttModelIds() {
+  return sttModels.map((m) => m.engine_id || m.id);
+}
+
+// The catalog id is `stt-sensevoice`, while its manifest id (written by the
+// download script) is the model directory name.
+function isSenseVoice(model) {
+  return model.id === STT_FAST_MODEL || (model.engine_id || '').includes('sense-voice');
+}
+
+function applySttModel() {
+  asrCapture.model = sttModelId;
+  const fast = sttModels.find(isSenseVoice);
+  asrCapture.liveModel = fast ? fast.engine_id || fast.id : sttModelId;
+}
+
+async function loadSttModels() {
+  let models = [];
+  try {
+    const data = await api(`/api/models?lang=${lang}`);
+    models = (data.models || []).filter(
+      (m) => m.installed && (m.capabilities || []).includes('stt'),
+    );
+  } catch (_) {
+    return;
+  }
+  sttModels = models;
+  const ids = sttModelIds();
+  const row = $('transcribeModelRow');
+  const select = $('transcribeModel');
+  row.hidden = ids.length < 2;
+  select.innerHTML = '';
+  for (const model of models) {
+    const option = document.createElement('option');
+    option.value = model.engine_id || model.id;
+    option.textContent = model.name;
+    select.appendChild(option);
+  }
+  let stored = null;
+  try {
+    stored = localStorage.getItem(STT_MODEL_KEY);
+  } catch (_) {
+    // Private mode or blocked storage: fall back to the default.
+  }
+  if (stored && ids.includes(stored)) sttModelId = stored;
+  else if (ids.includes('stt-fireredasr2-ctc')) sttModelId = 'stt-fireredasr2-ctc';
+  else sttModelId = ids[0] || null;
+  select.value = sttModelId || '';
+  applySttModel();
+}
+
+$('transcribeModel').onchange = () => {
+  sttModelId = $('transcribeModel').value || null;
+  try {
+    localStorage.setItem(STT_MODEL_KEY, sttModelId || '');
+  } catch (_) {
+    // The choice still applies to this session.
+  }
+  applySttModel();
+};
+
 asrCapture.onLiveText = (text) => {
   const starting = !transcribeLive;
   transcribeLive = true;
@@ -6082,6 +6181,7 @@ function syncTranscribePage() {
     ? t('transcribe.hint')
     : t('transcribe.no_model');
   asrCapture.syncTranscribeButton();
+  loadSttModels();
 }
 
 function showTranscribeResult(text, state = 'done') {
