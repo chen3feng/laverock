@@ -151,13 +151,40 @@ impl HistoryStore {
         })
     }
 
-    /// Entries for one task, or all of them when `task` is `None`.
-    pub fn list_by_task(&self, task: Option<TaskKind>) -> Vec<HistoryMeta> {
+    /// Entries matching a task and a free-text query. The query is matched
+    /// case-insensitively against the preview, engine name, input name and,
+    /// for transcripts, the full text file.
+    pub fn list(&self, task: Option<TaskKind>, query: Option<&str>) -> Vec<HistoryMeta> {
+        let needle = query
+            .map(|q| q.trim().to_lowercase())
+            .filter(|q| !q.is_empty());
         let entries = self.entries.lock().expect("history lock");
-        match task {
-            Some(task) => entries.iter().filter(|m| m.task == task).cloned().collect(),
-            None => entries.clone(),
+        entries
+            .iter()
+            .filter(|m| task.is_none_or(|t| m.task == t))
+            .filter(|m| needle.as_deref().is_none_or(|q| self.matches(m, q)))
+            .cloned()
+            .collect()
+    }
+
+    fn matches(&self, meta: &HistoryMeta, needle: &str) -> bool {
+        if meta.text.to_lowercase().contains(needle)
+            || meta.engine_name.to_lowercase().contains(needle)
+        {
+            return true;
         }
+        if let Some(name) = meta.input.as_ref().and_then(|i| i.name.as_deref()) {
+            if name.to_lowercase().contains(needle) {
+                return true;
+            }
+        }
+        if meta.output == "text" {
+            let path = self.root.join(&meta.id).join("text.txt");
+            if let Ok(full) = fs::read_to_string(path) {
+                return full.to_lowercase().contains(needle);
+            }
+        }
+        false
     }
 
     /// A fresh group id so several `add_variant` calls from one request can
@@ -575,13 +602,13 @@ mod tests {
         assert_eq!(music.route.as_deref(), Some("text2music"));
         assert_eq!(music.channels, 2);
         assert_eq!(a.task, TaskKind::Tts);
-        assert_eq!(store.list_by_task(Some(TaskKind::Music)).len(), 1);
-        assert_eq!(store.list_by_task(Some(TaskKind::Tts)).len(), 3);
-        assert_eq!(store.list_by_task(None).len(), 4);
+        assert_eq!(store.list(Some(TaskKind::Music), None).len(), 1);
+        assert_eq!(store.list(Some(TaskKind::Tts), None).len(), 3);
+        assert_eq!(store.list(None, None).len(), 4);
 
         // Reload from disk preserves the grouping fields.
         let reopened = HistoryStore::open(&dir).unwrap();
-        let metas = reopened.list_by_task(None);
+        let metas = reopened.list(None, None);
         assert!(metas
             .iter()
             .any(|m| m.id == a.id && m.generation.as_deref() == Some(gen.as_str())));
@@ -591,6 +618,81 @@ mod tests {
         assert!(metas
             .iter()
             .any(|m| m.id == single.id && m.generation.is_none()));
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn search_matches_preview_engine_source_and_full_text() {
+        let dir = temp_dir();
+        let store = HistoryStore::open(&dir).unwrap();
+        let speech = store
+            .add_typed(
+                "zipvoice",
+                "ZipVoice",
+                TaskKind::Tts,
+                "speech",
+                None,
+                "Morning light",
+                &wav_bytes(),
+                24_000,
+                1,
+                None,
+            )
+            .unwrap();
+        let music = store
+            .add_typed(
+                "ace-step",
+                "ACE-Step",
+                TaskKind::Music,
+                "music",
+                None,
+                "Calm piano",
+                &wav_bytes(),
+                48_000,
+                1,
+                None,
+            )
+            .unwrap();
+        let asr = store
+            .add_text(
+                "sensevoice",
+                "SenseVoice",
+                "the quick brown fox",
+                &[],
+                1.0,
+                Some("Interview.WAV"),
+            )
+            .unwrap();
+
+        let ids = |metas: Vec<HistoryMeta>| metas.into_iter().map(|m| m.id).collect::<Vec<_>>();
+
+        // Case-insensitive preview and engine name.
+        assert_eq!(
+            ids(store.list(None, Some("morning"))),
+            vec![speech.id.clone()]
+        );
+        assert_eq!(ids(store.list(None, Some("ace"))), vec![music.id.clone()]);
+        // Source file name.
+        assert_eq!(
+            ids(store.list(None, Some("interview"))),
+            vec![asr.id.clone()]
+        );
+
+        // The query also reaches text beyond the 2,000-char list preview.
+        let long = format!("{}needle", "a".repeat(2_500));
+        let long_entry = store
+            .add_text("sensevoice", "SenseVoice", &long, &[], 1.0, None)
+            .unwrap();
+        assert_eq!(
+            ids(store.list(None, Some("needle"))),
+            vec![long_entry.id.clone()]
+        );
+
+        // Task and query filters combine; a blank query lists everything.
+        assert!(store.list(Some(TaskKind::Tts), Some("needle")).is_empty());
+        assert_eq!(store.list(Some(TaskKind::Asr), Some("needle")).len(), 1);
+        assert_eq!(store.list(None, Some("   ")).len(), 4);
 
         let _ = fs::remove_dir_all(&dir);
     }
@@ -624,7 +726,7 @@ mod tests {
 
         let reopened = HistoryStore::open(&dir).unwrap();
         let meta = reopened
-            .list_by_task(None)
+            .list(None, None)
             .into_iter()
             .find(|m| m.id == entry.id)
             .unwrap();
@@ -676,7 +778,7 @@ mod tests {
         // Reopening accepts the text-only directory and keeps the cues.
         let reopened = HistoryStore::open(&dir).unwrap();
         let meta = reopened
-            .list_by_task(Some(TaskKind::Asr))
+            .list(Some(TaskKind::Asr), None)
             .into_iter()
             .find(|m| m.id == entry.id)
             .unwrap();
@@ -712,7 +814,7 @@ mod tests {
             .unwrap();
 
         let reopened = HistoryStore::open(&dir).unwrap();
-        let meta = reopened.list_by_task(Some(TaskKind::Vc)).pop().unwrap();
+        let meta = reopened.list(Some(TaskKind::Vc), None).pop().unwrap();
         let input = meta.input.expect("source recorded");
         assert!(input.audio);
         assert_eq!(input.name.as_deref(), Some("source.wav"));

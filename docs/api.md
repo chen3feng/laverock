@@ -46,7 +46,7 @@ describes the loopback listener.
 | GET | `/api/captures/:id/subtitles?format=srt\|vtt` | the take's stored timed cues as a downloadable file |
 | DELETE | `/api/captures/:id` | delete a take (it is removed from the voices using it) |
 | POST | `/api/captures/dedupe` | delete byte-identical takes, repointing voices → `{removed}` |
-| GET | `/api/history` | generated audio and transcripts, newest first (`?task=asr` filters) |
+| GET | `/api/history` | generated audio and transcripts, newest first (`?task=asr` filters, `?q=` searches text, source name and engine) |
 | GET | `/api/history/:id/audio` | generated audio (`?format=mp3` to export) |
 | GET | `/api/history/:id/input` | the source clip kept for a voice-conversion entry |
 | GET | `/api/history/:id/text` | the full result text: transcript or prompt |
