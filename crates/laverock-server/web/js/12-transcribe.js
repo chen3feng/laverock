@@ -10,14 +10,41 @@ const asrCapture = new Capture($('transcribeCapture'), {
 let transcribeSegments = [];
 let transcribeHistoryId = null;
 let transcribeHasCues = false;
+// True while a streaming request is still delivering cues.
+let transcribeStreaming = false;
+
+asrCapture.onProgress = (segment) => {
+  transcribeStreaming = true;
+  transcribeHistoryId = null;
+  transcribeHasCues = true;
+  transcribeSegments.push(segment);
+  showTranscribeResult(segmentsText(transcribeSegments), true);
+};
 
 asrCapture.onTranscribed = (text, transcript) => {
+  transcribeStreaming = false;
   transcribeSegments = (transcript && transcript.segments) || [];
   transcribeHistoryId = null;
   transcribeHasCues = transcribeSegments.length > 0;
   showTranscribeResult(text);
   loadRecentTranscriptions();
 };
+
+// Mirror the server's cue join: CJK needs no space, Latin words do.
+function segmentsText(segments) {
+  const cjk = (c) => /[　-〿぀-ヿ㐀-䶿一-鿿豈-﫿＀-￯]/.test(c);
+  let out = '';
+  for (const segment of segments) {
+    const piece = (segment.text || '').trim();
+    if (!piece) continue;
+    if (out) {
+      const previous = out[out.length - 1];
+      if (!cjk(previous) && !cjk(piece[0]) && !/\s/.test(previous)) out += ' ';
+    }
+    out += piece;
+  }
+  return out;
+}
 
 function syncTranscribePage() {
   const hint = $('transcribeHint');
@@ -28,9 +55,13 @@ function syncTranscribePage() {
   asrCapture.syncTranscribeButton();
 }
 
-function showTranscribeResult(text) {
-  $('transcribeText').value = text || '';
+function showTranscribeResult(text, streaming = false) {
   $('transcribeResultCard').hidden = false;
+  const area = $('transcribeText');
+  const atBottom = area.scrollTop + area.clientHeight >= area.scrollHeight - 4;
+  area.value = text || '';
+  // Follow the growing text unless the user scrolled up to read.
+  if (streaming && atBottom) area.scrollTop = area.scrollHeight;
   const meta = $('transcribeResultMeta');
   meta.innerHTML = '';
   const chip = document.createElement('span');
@@ -39,7 +70,7 @@ function showTranscribeResult(text) {
   meta.appendChild(chip);
   const hint = document.createElement('span');
   hint.className = 'hint';
-  hint.textContent = t('transcribe.saved');
+  hint.textContent = streaming ? t('transcribe.streaming') : t('transcribe.saved');
   meta.appendChild(hint);
   renderTranscribeActions();
 }
@@ -71,6 +102,8 @@ function cuesToVtt(segments) {
 function renderTranscribeActions() {
   const row = $('transcribeActions');
   row.innerHTML = '';
+  // Exports only make sense once the transcript is complete.
+  if (transcribeStreaming) return;
   const area = $('transcribeText');
 
   const copy = document.createElement('button');
@@ -141,6 +174,7 @@ async function openTranscribeEntry(h, button) {
   try {
     const res = await apiFetch(`/api/history/${encodeURIComponent(h.id)}/text`);
     if (!res.ok) throw new Error('HTTP ' + res.status);
+    transcribeStreaming = false;
     transcribeSegments = [];
     transcribeHistoryId = h.id;
     transcribeHasCues = !!h.has_segments;

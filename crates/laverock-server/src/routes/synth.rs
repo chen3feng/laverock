@@ -15,7 +15,7 @@ use laverock_core::{
 };
 use std::sync::Arc;
 
-use super::{ApiError, AppState};
+use super::{error_frame, sse_frame, ApiError, AppState};
 
 /// Upper bound on how many variant takes one streaming request may ask
 /// for. Kept small because each take is a full inference run.
@@ -1071,18 +1071,6 @@ fn send_audio_frame(
     });
     tx.blocking_send(Ok(sse_frame("audio", &payload.to_string())))
         .is_ok()
-}
-
-/// One framed Server-Sent Event.
-fn sse_frame(event: &str, data: &str) -> Bytes {
-    Bytes::from(format!("event: {event}\ndata: {data}\n\n"))
-}
-
-fn error_frame(message: &str) -> Bytes {
-    sse_frame(
-        "error",
-        &serde_json::json!({ "message": message }).to_string(),
-    )
 }
 
 /// Parse and range-check raw form fields against the engine's declared

@@ -1850,6 +1850,7 @@ addI18n({
     'transcribe.hint': '转写在本机完成；首次使用需要先到「模型」页安装 SenseVoice。',
     'transcribe.no_model': '还没有安装语音识别模型，请先到「模型」页安装 SenseVoice。',
     'transcribe.result': '转写结果',
+    'transcribe.streaming': '正在识别，文字会逐段出现…',
     'transcribe.saved': '结果已保存到历史，可随时回来复制或导出。',
     'transcribe.recent': '最近转写',
     'transcribe.open': '打开',
@@ -1863,6 +1864,7 @@ addI18n({
     'transcribe.hint': 'Transcription runs on this computer; install SenseVoice from the Models page first.',
     'transcribe.no_model': 'No speech recognition model installed yet. Install SenseVoice from the Models page first.',
     'transcribe.result': 'Transcript',
+    'transcribe.streaming': 'Transcribing; text appears as each passage finishes…',
     'transcribe.saved': 'Saved to history, so you can come back to copy or export it.',
     'transcribe.recent': 'Recent transcripts',
     'transcribe.open': 'Open',
@@ -2634,6 +2636,9 @@ class Capture {
     this.detailed = detailed;
     this.onChange = () => {};
     this.onTranscribed = () => {};
+    // Detailed transcription streams; each finished cue is reported here
+    // while the request is still running.
+    this.onProgress = () => {};
 
     this.pick.onclick = () => this.file.click();
     this.transBtn.onclick = () => this.transcribe({ record: true });
@@ -2678,11 +2683,11 @@ class Capture {
     }
     this.setTranscribing(true);
     try {
+      if (this.detailed) return await this.transcribeStream(record);
       const fd = new FormData();
       fd.append('audio', this.blob, this.filename || 'reference.wav');
       if (record) fd.append('record', '1');
-      const url = this.detailed ? '/api/transcribe/details' : '/api/transcribe';
-      const res = await apiFetch(url, { method: 'POST', body: fd });
+      const res = await apiFetch('/api/transcribe', { method: 'POST', body: fd });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         throw new Error(body.error || res.statusText);
@@ -2690,7 +2695,7 @@ class Capture {
       const body = await res.json();
       const text = body.text;
       if (!text) throw new Error(t("ui.no_speech_recognized"));
-      this.onTranscribed(text, this.detailed ? body : null);
+      this.onTranscribed(text, null);
       if (this.fileLabel) this.setInfo(this.fileLabel);
       return text;
     } catch (e) {
@@ -2700,6 +2705,35 @@ class Capture {
     } finally {
       this.setTranscribing(false);
     }
+  }
+
+  // Detailed mode streams: cues arrive while the model works through the
+  // clip, and the `done` event carries the finished transcript.
+  async transcribeStream(record) {
+    const fd = new FormData();
+    fd.append('audio', this.blob, this.filename || 'reference.wav');
+    if (record) fd.append('record', '1');
+    const res = await apiFetch('/api/transcribe/stream', { method: 'POST', body: fd });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.error || res.statusText);
+    }
+    let transcript = null;
+    let failure = null;
+    await readSse(res, {
+      segment: (segment) => this.onProgress(segment),
+      done: (body) => { transcript = body; },
+      error: (body) => {
+        failure = new Error((body && body.message) || t('ui.transcription_failed'));
+      },
+    });
+    if (failure) throw failure;
+    if (!transcript || !transcript.text) {
+      throw new Error(t('ui.no_speech_recognized'));
+    }
+    this.onTranscribed(transcript.text, transcript);
+    if (this.fileLabel) this.setInfo(this.fileLabel);
+    return transcript.text;
   }
 
   clear() {
@@ -2814,6 +2848,34 @@ function encodeWav(samples, sr) {
     v.setInt16(o, Math.max(-1, Math.min(1, s)) * 0x7fff, true); o += 2;
   }
   return buf;
+}
+
+// Read a Server-Sent Events response, calling `handlers[event]` for each
+// framed event with its parsed JSON payload.
+async function readSse(res, handlers) {
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = '';
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    let sep;
+    while ((sep = buf.indexOf('\n\n')) !== -1) {
+      const raw = buf.slice(0, sep);
+      buf = buf.slice(sep + 2);
+      let event = '';
+      const dataLines = [];
+      for (const line of raw.split('\n')) {
+        if (line.startsWith('event:')) event = line.slice(6).trim();
+        else if (line.startsWith('data:')) dataLines.push(line.slice(5).trim());
+      }
+      const handler = handlers[event];
+      if (!handler) continue;
+      const data = dataLines.join('\n');
+      handler(data ? JSON.parse(data) : null);
+    }
+  }
 }
 
 const synthCapture = new Capture($('synthCapture'));
@@ -5782,14 +5844,41 @@ const asrCapture = new Capture($('transcribeCapture'), {
 let transcribeSegments = [];
 let transcribeHistoryId = null;
 let transcribeHasCues = false;
+// True while a streaming request is still delivering cues.
+let transcribeStreaming = false;
+
+asrCapture.onProgress = (segment) => {
+  transcribeStreaming = true;
+  transcribeHistoryId = null;
+  transcribeHasCues = true;
+  transcribeSegments.push(segment);
+  showTranscribeResult(segmentsText(transcribeSegments), true);
+};
 
 asrCapture.onTranscribed = (text, transcript) => {
+  transcribeStreaming = false;
   transcribeSegments = (transcript && transcript.segments) || [];
   transcribeHistoryId = null;
   transcribeHasCues = transcribeSegments.length > 0;
   showTranscribeResult(text);
   loadRecentTranscriptions();
 };
+
+// Mirror the server's cue join: CJK needs no space, Latin words do.
+function segmentsText(segments) {
+  const cjk = (c) => /[　-〿぀-ヿ㐀-䶿一-鿿豈-﫿＀-￯]/.test(c);
+  let out = '';
+  for (const segment of segments) {
+    const piece = (segment.text || '').trim();
+    if (!piece) continue;
+    if (out) {
+      const previous = out[out.length - 1];
+      if (!cjk(previous) && !cjk(piece[0]) && !/\s/.test(previous)) out += ' ';
+    }
+    out += piece;
+  }
+  return out;
+}
 
 function syncTranscribePage() {
   const hint = $('transcribeHint');
@@ -5800,9 +5889,13 @@ function syncTranscribePage() {
   asrCapture.syncTranscribeButton();
 }
 
-function showTranscribeResult(text) {
-  $('transcribeText').value = text || '';
+function showTranscribeResult(text, streaming = false) {
   $('transcribeResultCard').hidden = false;
+  const area = $('transcribeText');
+  const atBottom = area.scrollTop + area.clientHeight >= area.scrollHeight - 4;
+  area.value = text || '';
+  // Follow the growing text unless the user scrolled up to read.
+  if (streaming && atBottom) area.scrollTop = area.scrollHeight;
   const meta = $('transcribeResultMeta');
   meta.innerHTML = '';
   const chip = document.createElement('span');
@@ -5811,7 +5904,7 @@ function showTranscribeResult(text) {
   meta.appendChild(chip);
   const hint = document.createElement('span');
   hint.className = 'hint';
-  hint.textContent = t('transcribe.saved');
+  hint.textContent = streaming ? t('transcribe.streaming') : t('transcribe.saved');
   meta.appendChild(hint);
   renderTranscribeActions();
 }
@@ -5843,6 +5936,8 @@ function cuesToVtt(segments) {
 function renderTranscribeActions() {
   const row = $('transcribeActions');
   row.innerHTML = '';
+  // Exports only make sense once the transcript is complete.
+  if (transcribeStreaming) return;
   const area = $('transcribeText');
 
   const copy = document.createElement('button');
@@ -5913,6 +6008,7 @@ async function openTranscribeEntry(h, button) {
   try {
     const res = await apiFetch(`/api/history/${encodeURIComponent(h.id)}/text`);
     if (!res.ok) throw new Error('HTTP ' + res.status);
+    transcribeStreaming = false;
     transcribeSegments = [];
     transcribeHistoryId = h.id;
     transcribeHasCues = !!h.has_segments;

@@ -72,6 +72,16 @@ const TOKEN_TAIL_SECS: f32 = 0.35;
 const COMMA_BREAK_SECS: f32 = 3.0;
 /// Pauses at least this long split speech chunks in the fallback path.
 const FALLBACK_GAP_SECS: f32 = 0.45;
+/// Streaming decode reports its cues in chunks of roughly this length.
+const STREAM_CHUNK_SECS: f32 = 12.0;
+/// Hard cap for one streaming decode when speech never pauses.
+const STREAM_MAX_CHUNK_SECS: f32 = 20.0;
+/// A pause at least this long ends a streaming chunk early.
+const STREAM_GAP_SECS: f32 = 0.35;
+/// Quiet window used to cut continuous speech without slicing a word.
+const STREAM_CUT_WINDOW_SECS: f32 = 0.03;
+/// How far back from the hard cap the quiet cut may search.
+const STREAM_CUT_SEARCH_SECS: f32 = 2.0;
 
 impl Transcriber {
     pub fn new(models_root: impl AsRef<Path>) -> Self {
@@ -127,6 +137,61 @@ impl Transcriber {
                 _ => recognizer.segments_by_speech(&samples, sample_rate, &text, duration),
             };
 
+            Ok(Transcript {
+                text,
+                segments,
+                language: recognizer.language.clone(),
+                duration,
+            })
+        })
+    }
+
+    /// Transcribe a clip in speech-sized chunks, reporting each finished
+    /// cue as soon as it is decoded. The first cues therefore appear after
+    /// a few seconds even for a long recording, instead of after one full
+    /// pass. The returned transcript has the same shape as
+    /// [`Self::transcribe_detailed`]; its text is assembled from the cues
+    /// because every chunk is decoded on its own.
+    pub fn transcribe_progressive<F>(&self, wav: &[u8], mut on_segment: F) -> Result<Transcript>
+    where
+        F: FnMut(&TranscriptSegment),
+    {
+        let (samples, sample_rate) = decode_clip(wav)?;
+        self.with_recognizer(|recognizer| {
+            let rate = sample_rate.max(1);
+            let duration = samples.len() as f32 / rate as f32;
+            let mut segments = Vec::new();
+            for (start, end) in stream_chunks(&samples, sample_rate.max(1) as u32) {
+                let offset = start as f32 / rate as f32;
+                let chunk_duration = (end - start) as f32 / rate as f32;
+                let chunk = &samples[start..end];
+                let (text, tokens, times) = match recognizer.run(chunk, rate) {
+                    Some(result) => (
+                        result.text.trim().to_string(),
+                        result.tokens,
+                        result.timestamps,
+                    ),
+                    None => (String::new(), Vec::new(), None),
+                };
+                let mut cues = match times {
+                    Some(times) if !tokens.is_empty() && times.len() == tokens.len() => {
+                        segments_from_tokens(&tokens, &times, chunk_duration)
+                    }
+                    _ => recognizer.segments_by_speech(chunk, rate, &text, chunk_duration),
+                };
+                for cue in &mut cues {
+                    cue.start = (cue.start + offset).min(duration);
+                    cue.end = (cue.end + offset).min(duration);
+                }
+                for cue in cues {
+                    if cue.text.trim().is_empty() {
+                        continue;
+                    }
+                    on_segment(&cue);
+                    segments.push(cue);
+                }
+            }
+            let text = join_text(segments.iter().map(|segment| segment.text.as_str()));
             Ok(Transcript {
                 text,
                 segments,
@@ -256,6 +321,118 @@ fn decode_clip(wav: &[u8]) -> Result<(Vec<f32>, i32)> {
         return Err(CoreError::UserError(i18n::Message::new(Key::EmptyClip)));
     }
     Ok((samples, sample_rate))
+}
+
+/// Split a clip into streaming decode chunks at pauses, merging short
+/// speech runs up to the target size. Continuous speech is cut near the
+/// hard cap at its quietest window so a word is not sliced.
+fn stream_chunks(samples: &[f32], sample_rate: u32) -> Vec<(usize, usize)> {
+    let rate = sample_rate.max(1) as f32;
+    let target = (STREAM_CHUNK_SECS * rate) as usize;
+    let hard = (STREAM_MAX_CHUNK_SECS * rate) as usize;
+    let ranges = crate::audio::speech_chunks(samples, sample_rate, STREAM_GAP_SECS);
+    if ranges.is_empty() {
+        return (!samples.is_empty())
+            .then_some((0, samples.len()))
+            .into_iter()
+            .collect();
+    }
+
+    let mut chunks = Vec::new();
+    let mut open: Option<(usize, usize)> = None;
+    for (start, end) in ranges {
+        match open {
+            Some((chunk_start, _)) if end - chunk_start <= target => {
+                open = Some((chunk_start, end));
+            }
+            Some((chunk_start, chunk_end)) => {
+                push_chunk(&mut chunks, samples, chunk_start, chunk_end, hard, rate);
+                open = Some((start, end));
+            }
+            None => open = Some((start, end)),
+        }
+    }
+    if let Some((start, end)) = open {
+        push_chunk(&mut chunks, samples, start, end, hard, rate);
+    }
+    chunks
+}
+
+/// Append one chunk, splitting it at quiet windows until it fits `hard`.
+fn push_chunk(
+    out: &mut Vec<(usize, usize)>,
+    samples: &[f32],
+    start: usize,
+    end: usize,
+    hard: usize,
+    rate: f32,
+) {
+    let mut pos = start;
+    while end.saturating_sub(pos) > hard {
+        let cut = quiet_cut(samples, pos, pos + hard, rate);
+        out.push((pos, cut));
+        pos = cut;
+    }
+    if end > pos {
+        out.push((pos, end));
+    }
+}
+
+/// The quietest 30 ms window in the last two seconds before `cap`, so a
+/// forced cut lands in a gap between words when one exists.
+fn quiet_cut(samples: &[f32], start: usize, cap: usize, rate: f32) -> usize {
+    let cap = cap.min(samples.len());
+    let window = ((STREAM_CUT_WINDOW_SECS * rate) as usize).max(1);
+    let search = (STREAM_CUT_SEARCH_SECS * rate) as usize;
+    let from = cap.saturating_sub(search).max(start + window);
+    let mut best = cap;
+    let mut best_energy = f32::INFINITY;
+    let mut pos = from;
+    while pos + window <= cap {
+        let energy: f32 = samples[pos..pos + window]
+            .iter()
+            .map(|s| s.abs())
+            .sum::<f32>()
+            / window as f32;
+        // `<=` keeps the latest window on a tie, maximizing retained length.
+        if energy <= best_energy {
+            best_energy = energy;
+            best = pos + window / 2;
+        }
+        pos += window;
+    }
+    best.clamp(start + 1, cap)
+}
+
+/// Join per-cue text. CJK cues need no separator; Latin ones do.
+fn join_text<'a>(parts: impl Iterator<Item = &'a str>) -> String {
+    let mut out = String::new();
+    for part in parts {
+        let part = part.trim();
+        if part.is_empty() {
+            continue;
+        }
+        if let (Some(previous), Some(next)) = (out.chars().last(), part.chars().next()) {
+            if !is_cjk(previous) && !is_cjk(next) && !previous.is_whitespace() {
+                out.push(' ');
+            }
+        }
+        out.push_str(part);
+    }
+    out
+}
+
+/// Whether a character belongs to a script written without word spaces.
+fn is_cjk(c: char) -> bool {
+    matches!(
+        c as u32,
+        0x3000..=0x303F // CJK punctuation
+            | 0x3040..=0x30FF // kana
+            | 0x3400..=0x4DBF // CJK extension A
+            | 0x4E00..=0x9FFF // CJK unified ideographs
+            | 0xF900..=0xFAFF // compatibility ideographs
+            | 0xFF00..=0xFFEF // full-width forms
+    )
 }
 
 /// Leading/trailing speech bounds in seconds, from energy alone.
@@ -508,5 +685,47 @@ mod tests {
     #[test]
     fn empty_token_stream_yields_no_segments() {
         assert!(segments_from_tokens(&[], &[], 1.0).is_empty());
+    }
+
+    fn tone(secs: f32, rate: u32) -> Vec<f32> {
+        (0..(secs * rate as f32) as usize)
+            .map(|i| (i as f32 * 0.05).sin() * 0.3)
+            .collect()
+    }
+
+    #[test]
+    fn streaming_chunks_split_on_pauses_and_cap_continuous_speech() {
+        let rate = 16_000u32;
+
+        // Three utterances separated by a second of silence.
+        let mut samples = Vec::new();
+        for _ in 0..3 {
+            samples.extend(tone(4.0, rate));
+            samples.extend(vec![0.0f32; rate as usize]);
+        }
+        let chunks = stream_chunks(&samples, rate);
+        assert!(chunks.len() >= 2, "pauses should end chunks: {chunks:?}");
+        for pair in chunks.windows(2) {
+            assert!(pair[0].1 <= pair[1].0, "chunks overlap: {chunks:?}");
+        }
+
+        // Continuous speech has no pause to cut at, so the hard cap applies
+        // and the quiet cut still keeps every chunk within it.
+        let long = stream_chunks(&tone(45.0, rate), rate);
+        let hard = (STREAM_MAX_CHUNK_SECS * rate as f32) as usize;
+        assert_eq!(long.len(), 3);
+        for (start, end) in &long {
+            assert!(end > start);
+            assert!(end - start <= hard);
+            assert!(*end <= (45.0 * rate as f32) as usize);
+        }
+        assert!(long.last().unwrap().1 > (44.0 * rate as f32) as usize);
+    }
+
+    #[test]
+    fn streaming_text_joins_cjk_without_spaces() {
+        assert_eq!(join_text(["你好。", "世界。"].into_iter()), "你好。世界。");
+        assert_eq!(join_text(["Hello.", "World."].into_iter()), "Hello. World.");
+        assert_eq!(join_text(["", "  "].into_iter()), "");
     }
 }

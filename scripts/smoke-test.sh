@@ -495,6 +495,21 @@ if curl -s "$BASE/api/health" | grep -q '"transcribe":true'; then
     *) bad "details duration missing" ;;
   esac
 
+  stream=$(curl -s -N -X POST "$BASE/api/transcribe/stream" \
+    -F "audio=@$DIR/test_wavs/leijun-1.wav")
+  case "$stream" in
+    *'event: segment'*) ok "streamed transcript cues" ;;
+    *) bad "stream cues: $(printf '%s' "$stream" | head -c 160)" ;;
+  esac
+  case "$stream" in
+    *'event: done'*'"segments":[{'*) ok "streamed transcript completes" ;;
+    *) bad "stream done missing: $(printf '%s' "$stream" | head -c 160)" ;;
+  esac
+  case "$stream" in
+    *武汉*) ok "streamed transcript text" ;;
+    *) bad "streamed transcript text" ;;
+  esac
+
   srt=$(curl -s -X POST "$BASE/api/transcribe/subtitles?format=srt" \
     -F "audio=@$DIR/test_wavs/leijun-1.wav")
   case "$srt" in

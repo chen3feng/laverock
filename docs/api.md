@@ -72,6 +72,7 @@ describes the loopback listener.
 | GET | `/api/projects/:id/subtitles?format=srt\|vtt` | the project's cues as a downloadable file |
 | POST | `/api/transcribe` | multipart `audio` (WAV) → transcript (needs the SenseVoice model); `record=1` also saves it to history |
 | POST | `/api/transcribe/details` | same input → `{text, segments: [{start, end, text}], language, duration}`; the result is saved to history |
+| POST | `/api/transcribe/stream` | same input → Server-Sent Events: `segment` per finished cue, then `done` with the full transcript; `record=1` saves it to history |
 | POST | `/api/transcribe/subtitles?format=srt\|vtt` | same input → downloadable SRT or WebVTT (`vtt`; `srt` is the default) |
 | GET | `/api/session` | loopback/paired state (public) |
 | POST | `/api/pair/start` | desktop only: create a five-minute pairing code + QR |

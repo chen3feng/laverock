@@ -240,6 +240,22 @@ async function main() {
     await page.fill('#historySearch', '');
     pass('history search');
 
+    // ------------------------------------------------------------ transcribe
+    say('transcribe');
+    await page.click('nav a[data-page="transcribe"]');
+    await page.waitForSelector('#page-transcribe.active');
+    await page.setInputFiles('#transcribeCapture .cap-file', ref);
+    await page.click('#transcribeCapture .cap-transcribe');
+    await page.waitForSelector('#transcribeResultCard:not([hidden])', { timeout: 60_000 });
+    await page.waitForFunction(
+      () => (document.getElementById('transcribeText')?.value || '').trim().length > 0,
+      null,
+      { timeout: 120_000 },
+    );
+    // Exports appear only after the stream's done event.
+    await page.waitForSelector('#transcribeActions button', { timeout: 120_000 });
+    pass('transcribe streams and finishes');
+
     // ---------------------------------------------------------------- models
     say('models');
     await page.click('nav a[data-page="models"]');

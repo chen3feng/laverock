@@ -20,7 +20,7 @@ pub(crate) mod synth;
 pub(crate) mod system;
 
 use axum::{
-    body::Body,
+    body::{Body, Bytes},
     extract::{ConnectInfo, State},
     http::{header, Request, StatusCode},
     middleware::{self, Next},
@@ -86,6 +86,18 @@ pub(crate) fn subtitle_response(
         format.render(segments),
     )
         .into_response()
+}
+
+/// One framed Server-Sent Event.
+pub(crate) fn sse_frame(event: &str, data: &str) -> Bytes {
+    Bytes::from(format!("event: {event}\ndata: {data}\n\n"))
+}
+
+pub(crate) fn error_frame(message: &str) -> Bytes {
+    sse_frame(
+        "error",
+        &serde_json::json!({ "message": message }).to_string(),
+    )
 }
 
 /// Make the request's language available to handlers and error mapping.

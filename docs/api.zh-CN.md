@@ -70,6 +70,7 @@ Cookie）；以下均指回环监听。
 | GET | `/api/projects/:id/subtitles?format=srt\|vtt` | 项目的分段 → 可下载的 SRT 或 WebVTT |
 | POST | `/api/transcribe` | multipart：`audio`（WAV）→ 转写文字（需安装 SenseVoice 模型）；`record=1` 同时写入历史 |
 | POST | `/api/transcribe/details` | 同样的输入 → `{text, segments: [{start, end, text}], language, duration}`；结果自动写入历史 |
+| POST | `/api/transcribe/stream` | 同样的输入 → Server-Sent Events：每段识别完成发一个 `segment`，最后发 `done`（完整转写）；`record=1` 同时写入历史 |
 | POST | `/api/transcribe/subtitles?format=srt\|vtt` | 同样的输入 → 可下载的 SRT 或 WebVTT（`format=vtt`；默认 `srt`） |
 | GET | `/api/session` | 回环/配对状态（公开） |
 | POST | `/api/pair/start` | 仅桌面：生成五分钟配对码 + 二维码 |
