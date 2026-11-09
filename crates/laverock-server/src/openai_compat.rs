@@ -396,6 +396,7 @@ pub async fn create_speech(
         &engine_display(&state.manager, &engine_id),
         TaskKind::from_output_kind(&engine_kind),
         &engine_kind,
+        None,
         &spoken_text,
         &wav_bytes,
         audio.sample_rate,

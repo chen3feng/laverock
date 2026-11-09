@@ -35,6 +35,11 @@ pub struct HistoryMeta {
     /// the task to pick a card renderer and a filter.
     #[serde(default)]
     pub task: TaskKind,
+    /// Music route that produced the entry (`"text2music"`, `"cover"`,
+    /// `"repaint"`, or Stable Audio's `"init_audio"`/`"inpaint_audio"`).
+    /// `None` for speech and for music engines without routes.
+    #[serde(default)]
+    pub route: Option<String>,
     pub text: String,
     pub duration_secs: f32,
     pub bytes: u64,
@@ -121,8 +126,8 @@ impl HistoryStore {
     /// Add one entry. `batch` marks the entry as the Nth take of a
     /// multi-sample generation; single standalone entries pass `None`.
     /// `task` is the operation, `kind` the output medium (`"music"`,
-    /// `"speech"`, later `"transcript"`), and `channels` the WAV's
-    /// spatial shape.
+    /// `"speech"`, later `"transcript"`), `route` the music route that was
+    /// used, and `channels` the WAV's spatial shape.
     #[allow(clippy::too_many_arguments)]
     pub fn add_typed(
         &self,
@@ -130,6 +135,7 @@ impl HistoryStore {
         engine_name: &str,
         task: TaskKind,
         kind: &str,
+        route: Option<&str>,
         text: &str,
         wav: &[u8],
         sample_rate: i32,
@@ -156,6 +162,7 @@ impl HistoryStore {
             engine_name: engine_name.to_string(),
             kind: kind.to_string(),
             task,
+            route: route.map(str::to_string),
             text: text.chars().take(2000).collect(),
             duration_secs,
             bytes: wav.len() as u64,
@@ -330,6 +337,7 @@ mod tests {
                 "ZipVoice",
                 TaskKind::Tts,
                 "speech",
+                None,
                 "你好",
                 &wav_bytes(),
                 24_000,
@@ -343,6 +351,7 @@ mod tests {
                 "ZipVoice",
                 TaskKind::Tts,
                 "speech",
+                None,
                 "你好",
                 &wav_bytes(),
                 24_000,
@@ -364,6 +373,7 @@ mod tests {
                 "ZipVoice",
                 TaskKind::Tts,
                 "speech",
+                None,
                 "再见",
                 &wav_bytes(),
                 24_000,
@@ -382,6 +392,7 @@ mod tests {
                 "ACE-Step",
                 TaskKind::Music,
                 "music",
+                Some("text2music"),
                 "calm piano",
                 &stereo,
                 48_000,
@@ -391,6 +402,7 @@ mod tests {
             .unwrap();
         assert_eq!(music.kind, "music");
         assert_eq!(music.task, TaskKind::Music);
+        assert_eq!(music.route.as_deref(), Some("text2music"));
         assert_eq!(music.channels, 2);
         assert_eq!(a.task, TaskKind::Tts);
         assert_eq!(store.list_by_task(Some(TaskKind::Music)).len(), 1);
@@ -403,6 +415,9 @@ mod tests {
         assert!(metas
             .iter()
             .any(|m| m.id == a.id && m.generation.as_deref() == Some(gen.as_str())));
+        assert!(metas
+            .iter()
+            .any(|m| m.id == music.id && m.route.as_deref() == Some("text2music")));
         assert!(metas
             .iter()
             .any(|m| m.id == single.id && m.generation.is_none()));
@@ -421,6 +436,7 @@ mod tests {
                 "ACE-Step",
                 TaskKind::Music,
                 "music",
+                Some("text2music"),
                 "calm piano",
                 &stereo,
                 48_000,

@@ -1416,6 +1416,12 @@ addI18n({
     'history.task.tts': '语音合成', 'history.task.music': '音乐',
     'history.task.asr': '语音识别', 'history.task.vc': '声音转换',
     'history.task.design': '声音设计', 'history.task.process': '音频处理',
+    'history.route.text2music': '文本生成音乐',
+    'history.route.cover': '翻唱', 'history.route.cover-nofsq': '翻唱（无 FSQ）',
+    'history.route.repaint': '局部重绘', 'history.route.complete': '补全',
+    'history.route.lego': '分轨生成', 'history.route.extract': '分轨提取',
+    'history.route.init_audio': '源音频初始化',
+    'history.route.inpaint_audio': '局部重绘',
     'history.clear': '清空全部',
     'history.empty': '还没有生成记录。去「合成」生成第一条吧。',
     'history.empty.task': '该任务下还没有记录。',
@@ -1429,6 +1435,12 @@ addI18n({
     'history.task.tts': 'Speech', 'history.task.music': 'Music',
     'history.task.asr': 'Transcription', 'history.task.vc': 'Voice conversion',
     'history.task.design': 'Voice design', 'history.task.process': 'Audio tools',
+    'history.route.text2music': 'Text to music',
+    'history.route.cover': 'Cover', 'history.route.cover-nofsq': 'Cover (no FSQ)',
+    'history.route.repaint': 'Repaint', 'history.route.complete': 'Complete',
+    'history.route.lego': 'Lego (track)', 'history.route.extract': 'Extract (track)',
+    'history.route.init_audio': 'Init audio',
+    'history.route.inpaint_audio': 'Inpaint',
     'history.clear': 'Clear all',
     'history.empty': 'No generations yet. Head to Synthesize to make the first one.',
     'history.empty.task': 'No entries for this task yet.',
@@ -4947,6 +4959,14 @@ function taskLabel(task) {
   return t('history.task.' + (task || 'tts'));
 }
 
+// Music routes are stored as stable ids; unknown ones (a manifest added
+// later) fall back to the raw value instead of an i18n key.
+function routeLabel(route) {
+  const key = 'history.route.' + route;
+  const label = t(key);
+  return label === key ? route : label;
+}
+
 async function loadHistory() {
   try {
     const d = await api('/api/history');
@@ -5079,6 +5099,14 @@ function buildHistoryTake(host, h, engineName, variantLabel) {
   task.className = 'chip';
   task.textContent = taskLabel(taskOf(h));
   meta.appendChild(task);
+  // Editing routes are the interesting part of a music entry; the default
+  // text-to-music route adds nothing beyond the "Music" chip.
+  if (h.route && h.route !== 'text2music') {
+    const route = document.createElement('span');
+    route.className = 'chip';
+    route.textContent = routeLabel(h.route);
+    meta.appendChild(route);
+  }
   if (variantLabel) {
     const take = document.createElement('span');
     take.className = 'chip';
