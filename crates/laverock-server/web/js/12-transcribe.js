@@ -78,8 +78,14 @@ async function loadSttModels() {
     // Private mode or blocked storage: fall back to the default.
   }
   if (stored && ids.includes(stored)) sttModelId = stored;
-  else if (ids.includes('stt-fireredasr2-ctc')) sttModelId = 'stt-fireredasr2-ctc';
-  else sttModelId = ids[0] || null;
+  else {
+    // Default to the newest install, matching the server's own default.
+    const newest = models.reduce(
+      (a, b) => ((b.installed_at || 0) > (a.installed_at || 0) ? b : a),
+      models[0],
+    );
+    sttModelId = newest ? newest.engine_id || newest.id : null;
+  }
   select.value = sttModelId || '';
   applySttModel();
 }

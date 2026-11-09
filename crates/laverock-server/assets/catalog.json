@@ -113,6 +113,94 @@
     }
   },
   {
+    "id": "stt-fireredasr2-aed",
+    "task": "asr",
+    "dir": "sherpa-onnx-fire-red-asr2-zh_en-int8-2026-02-26",
+    "name": "FireRedASR2 AED (INT8)",
+    "description": {
+      "en": "The most accurate Chinese/English option here, with 20+ Chinese dialects. Slower than the CTC build, and it returns neither word timestamps nor punctuation, so subtitle cues are split on pauses.",
+      "zh": "这里中文最准的选项，覆盖 20 多种中文方言。比 CTC 版本慢，而且不返回词级时间轴和标点，字幕只能按停顿切分。"
+    },
+    "size": "~799 MB",
+    "languages": [
+      "zh",
+      "en"
+    ],
+    "capabilities": [
+      "stt"
+    ],
+    "license": {
+      "name": "Apache-2.0",
+      "url": "https://github.com/FireRedTeam/FireRedASR2S",
+      "noncommercial": false
+    },
+    "min_memory_gb": 3,
+    "script": "download-stt-firered-aed.sh",
+    "env": {},
+    "note": {
+      "en": "Pick it on the Transcribe page for the final pass. Without token timestamps, long clips are split on pauses and each chunk is decoded separately, so it costs more than the CTC build. Pure ONNX, no Python needed.",
+      "zh": "在转写页选它做最终转写。没有词级时间轴时，长音频会按停顿切块逐段识别，开销比 CTC 版本更大。纯 ONNX，无需 Python。"
+    }
+  },
+  {
+    "id": "stt-qwen3-asr",
+    "task": "asr",
+    "dir": "sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25",
+    "name": "Qwen3-ASR 0.6B (INT8)",
+    "description": {
+      "en": "Multilingual speech recognition with punctuation: 30 languages plus 20+ Chinese dialects, including Cantonese, Sichuan and Wu. No word timestamps, so subtitle cues are split on pauses.",
+      "zh": "带标点的多语种语音识别：30 种语言 + 20 多种中文方言，包括粤语、四川话、吴语等。没有词级时间轴，字幕按停顿切分。"
+    },
+    "size": "~837 MB",
+    "languages": [
+      "zh",
+      "en",
+      "yue",
+      "ja",
+      "ko",
+      "fr",
+      "de",
+      "es",
+      "pt",
+      "it",
+      "ru",
+      "ar",
+      "hi",
+      "th",
+      "vi",
+      "id",
+      "tr",
+      "ms",
+      "nl",
+      "sv",
+      "da",
+      "fi",
+      "pl",
+      "cs",
+      "fil",
+      "fa",
+      "el",
+      "hu",
+      "mk",
+      "ro"
+    ],
+    "capabilities": [
+      "stt"
+    ],
+    "license": {
+      "name": "Apache-2.0",
+      "url": "https://github.com/QwenLM/Qwen3-ASR",
+      "noncommercial": false
+    },
+    "min_memory_gb": 3,
+    "script": "download-stt-qwen3.sh",
+    "env": {},
+    "note": {
+      "en": "Pick it on the Transcribe page. The LLM decoder is fast enough for CPU use (RTF around 0.1) but has no token timestamps, so long clips are split on pauses for subtitles. Pure ONNX, no Python needed.",
+      "zh": "在转写页选择。LLM 解码在 CPU 上约 RTF 0.1，但没有词级时间轴，长音频的字幕会按停顿切块识别。纯 ONNX，无需 Python。"
+    }
+  },
+  {
     "id": "voxcpm2",
     "task": "tts",
     "dir": "voxcpm2",

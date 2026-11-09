@@ -18,6 +18,8 @@ Laverock 的安装包不含模型权重：包里是应用本身，模型按需�
 ./scripts/download-kokoro.sh       # Kokoro-82M，约 135 MB（INT8；含 fp32 约 450 MB），8 种语言，预置音色
 ./scripts/download-stt.sh          # SenseVoice 语音识别，约 234 MB，自动转写
 ./scripts/download-stt-firered.sh  # FireRedASR2 CTC 语音识别，约 496 MB，更准确
+./scripts/download-stt-firered-aed.sh  # FireRedASR2 AED 语音识别，约 799 MB，最准确
+./scripts/download-stt-qwen3.sh    # Qwen3-ASR 0.6B 语音识别，约 837 MB，带标点、30 种语言
 ./scripts/download-voxcpm2.sh      # VoxCPM2，约 3.3 GB，30 种语言，GGUF
 ./scripts/download-qwen3tts.sh     # Qwen3-TTS 克隆，隔离 venv + 约 1.5 GB 模型
 ./scripts/download-longcat.sh      # LongCat-AudioDiT 1B，隔离 venv + 5.7 GB 权重
@@ -67,6 +69,8 @@ SEEDVC_QUANT=f16 ./scripts/download-seedvc.sh             # 约 3.6 GB 变声导
 | `kokoro-int8-multi-lang-v1_0` | Kokoro-82M | 54 个预置音色 | 中英日法西意葡印地 | 约 135 MB（INT8）/ 含 fp32 约 450 MB |
 | `sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17-int8` | SenseVoice Small INT8 | 语音识别 | 中英日韩粤 | 约 234 MB |
 | `sherpa-onnx-fire-red-asr2-ctc-zh_en-int8-2026-02-25` | FireRedASR2 CTC INT8 | 语音识别 | 中英 + 20 多种方言 | 约 496 MB |
+| `sherpa-onnx-fire-red-asr2-zh_en-int8-2026-02-26` | FireRedASR2 AED INT8 | 语音识别 | 中英 + 20 多种方言 | 约 799 MB |
+| `sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25` | Qwen3-ASR 0.6B INT8 | 语音识别 | 30 种语言 + 中文方言 | 约 837 MB |
 | `voxcpm2` | VoxCPM2 | 克隆、声音设计 | 30 种语言 | 约 3.3 GB |
 | `longcat` | LongCat-AudioDiT 1B | 克隆 | 中英 | 约 7 GB（含 venv） |
 | `dots` | dots.tts SOAR Q8_0 | 克隆 | 24 种语言 | 约 3.1 GB |
@@ -264,11 +268,22 @@ HeartMuLa 经评估后不提供：audio.cpp 没有对应 family，且约 25 GB �
 **SenseVoice** —— 轻快的本地语音识别，覆盖中英日韩粤，带标点和数字归一化。安装
 后，录音或上传的参考音频会自动转写并填入文字稿栏。
 
-**FireRedASR2 CTC** —— 更偏重准确率的替代模型：中英 + 20 多种中文方言，在嘈杂或
-口音重的音频上明显更准。它返回词级时间轴（SRT/WebVTT 仍可用），但不带标点，速度
-也比 SenseVoice 慢。两个模型都安装时，转写页可以按次选择，实时出字仍走
-SenseVoice；只装一个时，最后安装的模型是默认值。安装命令：
-`./scripts/download-stt-firered.sh`。
+**FireRedASR2 CTC** —— 轻快的准确率优先替代模型：中英 + 20 多种中文方言，在嘈杂
+或口音重的音频上明显更准。它返回词级时间轴（SRT/WebVTT 仍可用），但不带标点，
+速度也比 SenseVoice 慢。安装命令：`./scripts/download-stt-firered.sh`。
+
+**FireRedASR2 AED** —— CTC 版本的注意力结构兄弟模型：语言覆盖相同，普通话准确率
+是四者中最高的，但速度最慢、体积也最大（约 799 MB）。它不返回词级时间轴，字幕
+时间轴改为按停顿切分；同样不带标点。安装命令：
+`./scripts/download-stt-firered-aed.sh`。
+
+**Qwen3-ASR 0.6B** —— 覆盖最广，也是这里唯一保留标点的 FireRedASR2 时代模型：
+30 种语言 + 20 多种中文方言，解码器约 0.6B。相对体积而言速度很快，但占用约
+837 MB，同样没有词级时间轴，字幕按停顿切分。安装命令：
+`./scripts/download-stt-qwen3.sh`。
+
+安装多个模型时，转写页可以按次选择，实时出字仍走 SenseVoice；全新配置下，
+最后安装的模型是默认值。
 
 ## 速度
 
@@ -437,3 +452,8 @@ MOSS-TTS-Delay 由 [OpenMOSS](https://github.com/OpenMOSS) 以 Apache-2.0 发布
 原生运行时由 OpenMOSS 的 llama.cpp 分支构建。
 
 SenseVoice 由 FunAudioLLM 以 MIT 发布，并由 sherpa-onnx 打包。
+
+FireRedASR2（CTC 与 AED）由
+[FireRedTeam](https://github.com/FireRedTeam/FireRedASR2S) 以 Apache-2.0 发布。
+
+Qwen3-ASR 由 [QwenLM](https://github.com/QwenLM/Qwen3-ASR) 以 Apache-2.0 发布。

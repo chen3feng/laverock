@@ -156,6 +156,9 @@ pub struct ModelView {
     /// UI shows it and disables the download.
     pub unsupported: Option<String>,
     pub installed: bool,
+    /// When the install finished (engine.json mtime), in seconds since the
+    /// epoch. The Transcribe page defaults to the newest model.
+    pub installed_at: Option<u64>,
     /// Whether the engine is loaded right now.
     pub loaded: bool,
     /// Whether it keeps a resident child process (audio.cpp server).
@@ -307,6 +310,7 @@ impl ModelService {
                     .filter(|n| !n.is_empty()),
                 unsupported: unsupported_here(entry, lang),
                 installed,
+                installed_at: manifest.as_deref().and_then(installed_at),
                 loaded: info.is_some_and(|engine| engine.loaded),
                 resident: info.is_some_and(|engine| engine.resident),
                 memory_bytes: info.and_then(memory),
@@ -349,6 +353,7 @@ impl ModelService {
                 note: None,
                 unsupported: None,
                 installed: true,
+                installed_at: installed_at(&dir.join("engine.json")),
                 loaded: engine.loaded,
                 resident: engine.resident,
                 memory_bytes,
@@ -920,6 +925,16 @@ fn read_engine_id(manifest: &Path) -> Option<String> {
         .get("id")?
         .as_str()
         .map(std::string::ToString::to_string)
+}
+
+/// Install time from the manifest mtime, for "newest installed" defaults.
+fn installed_at(manifest: &Path) -> Option<u64> {
+    std::fs::metadata(manifest)
+        .and_then(|m| m.modified())
+        .ok()?
+        .duration_since(UNIX_EPOCH)
+        .ok()
+        .map(|d| d.as_secs())
 }
 
 /// Why the catalog excludes this model on the current OS, if it does.

@@ -85,6 +85,8 @@ configure.
 | Seed-VC | voice conversion | any | ~3.1 GB (Q8_0) |
 | SenseVoice Small (optional) | speech recognition | 5 | ~234 MB |
 | FireRedASR2 CTC (optional) | speech recognition | zh, en + 20+ dialects | ~496 MB |
+| FireRedASR2 AED (optional) | speech recognition | zh, en + 20+ dialects | ~799 MB |
+| Qwen3-ASR 0.6B (optional) | speech recognition | 30 languages + dialects | ~837 MB |
 
 Requirements, per-engine notes and manual install scripts are in
 **[Models](docs/models.md)**.
