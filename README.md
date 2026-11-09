@@ -84,6 +84,7 @@ configure.
 | MiniMax Music 3 | text-to-music, lyrics | zh, en | ~8.4 GB (Q4_0) |
 | Seed-VC | voice conversion | any | ~3.1 GB (Q8_0) |
 | SenseVoice Small (optional) | speech recognition | 5 | ~234 MB |
+| FireRedASR2 CTC (optional) | speech recognition | zh, en + 20+ dialects | ~496 MB |
 
 Requirements, per-engine notes and manual install scripts are in
 **[Models](docs/models.md)**.

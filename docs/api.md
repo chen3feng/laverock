@@ -71,7 +71,7 @@ describes the loopback listener.
 | GET | `/api/projects/:id/export?format=srt\|vtt` | the project's cues as a downloadable subtitle file |
 | GET | `/api/projects/:id/files/:name` | a recorded export (`mix.wav`, `export.mp4`) |
 | GET | `/api/projects/:id/subtitles?format=srt\|vtt` | the project's cues as a downloadable file |
-| POST | `/api/transcribe` | multipart `audio` (WAV) → transcript (needs the SenseVoice model); `record=1` also saves it to history |
+| POST | `/api/transcribe` | multipart `audio` (WAV) → transcript (needs an installed STT model); `record=1` also saves it to history |
 | POST | `/api/transcribe/details` | same input → `{text, segments: [{start, end, text}], language, duration}`; the result is saved to history |
 | POST | `/api/transcribe/stream` | same input → Server-Sent Events: `segment` per finished cue, then `done` with the full transcript; `record=1` saves it to history |
 | POST | `/api/transcribe/subtitles?format=srt\|vtt` | same input → downloadable SRT or WebVTT (`vtt`; `srt` is the default) |
@@ -90,9 +90,13 @@ A voice can be built from one or more **takes** in the recording library.
 `GET /api/engines` reports `reference_limit_secs`, the length at which the
 joined reference is cut, because each engine only conditions on that much.
 
-Timed transcripts come from the SenseVoice model, whose CTC decoder reports a
-timestamp per token; the server aggregates them into sentence-sized cues.
-Models without token timestamps fall back to splitting the clip on pauses.
+Timed transcripts come from the installed speech-to-text model, whose CTC
+decoder reports a timestamp per token; the server aggregates them into
+sentence-sized cues. Models without token timestamps fall back to splitting
+the clip on pauses. All four `/api/transcribe*` endpoints accept
+`?model=<id>` to pick an installed model (SenseVoice, FireRedASR2 CTC); when
+omitted, the most recently installed one is used. `GET /api/models` lists
+them with their `engine_id`.
 `POST /api/captures/:id/transcribe` stores both the text and the cues in the
 take, and a manual transcript edit clears the cues because they would no
 longer match. Cue times are seconds from the start of the clip.

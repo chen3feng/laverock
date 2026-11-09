@@ -495,6 +495,23 @@ if curl -s "$BASE/api/health" | grep -q '"transcribe":true'; then
     *) bad "details duration missing" ;;
   esac
 
+  # The model query selects an installed recognizer explicitly; an id that
+  # is not installed falls back to the default instead of failing.
+  picked=$(curl -s -X POST \
+    "$BASE/api/transcribe/details?model=sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17-int8" \
+    -F "audio=@$DIR/test_wavs/leijun-1.wav")
+  case "$picked" in
+    *武汉*) ok "explicit STT model selection" ;;
+    *) bad "explicit STT model: $(printf '%s' "$picked" | head -c 160)" ;;
+  esac
+  fallback=$(curl -s -X POST \
+    "$BASE/api/transcribe/details?model=stt-not-installed" \
+    -F "audio=@$DIR/test_wavs/leijun-1.wav")
+  case "$fallback" in
+    *武汉*) ok "unknown STT model falls back" ;;
+    *) bad "unknown STT model: $(printf '%s' "$fallback" | head -c 160)" ;;
+  esac
+
   stream=$(curl -s -N -X POST "$BASE/api/transcribe/stream" \
     -F "audio=@$DIR/test_wavs/leijun-1.wav")
   case "$stream" in

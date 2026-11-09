@@ -44,6 +44,13 @@ struct TranscribeResponse {
     text: String,
 }
 
+/// Which installed STT model to use; the most recently installed one when
+/// omitted. The UI names one so the fast and accurate models can coexist.
+#[derive(Debug, Default, serde::Deserialize)]
+struct ModelQuery {
+    model: Option<String>,
+}
+
 /// One multipart audio upload.
 struct AudioUpload {
     audio: Vec<u8>,
@@ -94,13 +101,14 @@ pub(crate) fn record_transcript(
     state: &AppState,
     transcript: &laverock_core::Transcript,
     input_name: Option<&str>,
+    model: Option<&str>,
 ) {
     if transcript.text.trim().is_empty() {
         return;
     }
     let (engine_id, engine_name) = state
         .transcriber
-        .model_info()
+        .model_info(model)
         .unwrap_or_else(|| ("stt".to_string(), "SenseVoice".to_string()));
     if let Err(e) = state.history.add_text(
         &engine_id,
@@ -124,17 +132,22 @@ fn panic_error(what: &str) -> impl FnOnce(tokio::task::JoinError) -> ApiError + 
 /// Transcribe a reference WAV clip with the on-device STT model.
 async fn transcribe(
     State(state): State<AppState>,
+    Query(query): Query<ModelQuery>,
     multipart: Multipart,
 ) -> Result<Json<TranscribeResponse>, ApiError> {
     let AudioUpload { audio, record } = read_audio(multipart).await?;
+    let model = query.model;
 
     // Loading and running the model is blocking; keep it off the runtime.
     let transcriber = state.transcriber.clone();
-    let transcript = tokio::task::spawn_blocking(move || transcriber.transcribe_detailed(&audio))
-        .await
-        .map_err(panic_error("transcribe"))??;
+    let used = model.clone();
+    let transcript = tokio::task::spawn_blocking(move || {
+        transcriber.transcribe_detailed(&audio, used.as_deref())
+    })
+    .await
+    .map_err(panic_error("transcribe"))??;
     if record {
-        record_transcript(&state, &transcript, None);
+        record_transcript(&state, &transcript, None, model.as_deref());
     }
     Ok(Json(TranscribeResponse {
         text: transcript.text,
@@ -144,14 +157,19 @@ async fn transcribe(
 /// Same input as `/api/transcribe`, but with timed segments.
 async fn transcribe_details(
     State(state): State<AppState>,
+    Query(query): Query<ModelQuery>,
     multipart: Multipart,
 ) -> Result<Json<laverock_core::Transcript>, ApiError> {
     let AudioUpload { audio, .. } = read_audio(multipart).await?;
     let transcriber = state.transcriber.clone();
-    let transcript = tokio::task::spawn_blocking(move || transcriber.transcribe_detailed(&audio))
-        .await
-        .map_err(panic_error("transcribe"))??;
-    record_transcript(&state, &transcript, None);
+    let model = query.model;
+    let used = model.clone();
+    let transcript = tokio::task::spawn_blocking(move || {
+        transcriber.transcribe_detailed(&audio, used.as_deref())
+    })
+    .await
+    .map_err(panic_error("transcribe"))??;
+    record_transcript(&state, &transcript, None, model.as_deref());
     Ok(Json(transcript))
 }
 
@@ -160,15 +178,17 @@ async fn transcribe_details(
 /// decoded instead of after one full pass.
 async fn transcribe_stream(
     State(state): State<AppState>,
+    Query(query): Query<ModelQuery>,
     multipart: Multipart,
 ) -> Result<Response, ApiError> {
     let AudioUpload { audio, record } = read_audio(multipart).await?;
     let transcriber = state.transcriber.clone();
     let history_state = state.clone();
+    let model = query.model;
     let (tx, rx) = mpsc::channel::<std::result::Result<Bytes, std::io::Error>>(16);
 
     tokio::task::spawn_blocking(move || {
-        let result = transcriber.transcribe_progressive(&audio, |segment| {
+        let result = transcriber.transcribe_progressive(&audio, model.as_deref(), |segment| {
             let payload = serde_json::json!({
                 "text": segment.text,
                 "start": segment.start,
@@ -179,7 +199,7 @@ async fn transcribe_stream(
         match result {
             Ok(transcript) => {
                 if record {
-                    record_transcript(&history_state, &transcript, None);
+                    record_transcript(&history_state, &transcript, None, model.as_deref());
                 }
                 let recorded = record && !transcript.text.trim().is_empty();
                 let payload = serde_json::json!({
@@ -209,6 +229,8 @@ async fn transcribe_stream(
 struct SubtitleQuery {
     /// `srt` (default) or `vtt`.
     format: Option<String>,
+    /// Installed STT model id; the default when omitted.
+    model: Option<String>,
 }
 
 /// Transcribe an upload and return it as an SRT/WebVTT file.
@@ -222,9 +244,12 @@ async fn transcribe_subtitles(
         .ok_or_else(|| ApiError::bad_request(format!("unknown subtitle format: {raw}")))?;
     let AudioUpload { audio, .. } = read_audio(multipart).await?;
     let transcriber = state.transcriber.clone();
-    let transcript = tokio::task::spawn_blocking(move || transcriber.transcribe_detailed(&audio))
-        .await
-        .map_err(panic_error("transcribe"))??;
+    let model = query.model;
+    let transcript = tokio::task::spawn_blocking(move || {
+        transcriber.transcribe_detailed(&audio, model.as_deref())
+    })
+    .await
+    .map_err(panic_error("transcribe"))??;
     Ok(subtitle_response(&transcript.segments, format, "laverock"))
 }
 

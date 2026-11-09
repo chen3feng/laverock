@@ -20,6 +20,7 @@ installs and CI use them directly:
 ./scripts/download-zipvoice.sh     # ZipVoice, ~160 MB, zh/en, ONNX
 ./scripts/download-kokoro.sh       # Kokoro-82M, ~135 MB INT8 (~450 MB with fp32), 8 languages, preset voices
 ./scripts/download-stt.sh          # SenseVoice STT, ~234 MB, auto-transcribes clips
+./scripts/download-stt-firered.sh  # FireRedASR2 CTC STT, ~496 MB, more accurate
 ./scripts/download-voxcpm2.sh      # VoxCPM2, ~3.3 GB, 30 languages, GGUF
 ./scripts/download-qwen3tts.sh     # Qwen3-TTS cloning, isolated venv + ~1.5 GB model
 ./scripts/download-longcat.sh      # LongCat-AudioDiT 1B, isolated venv + 5.7 GB weights
@@ -73,6 +74,7 @@ endpoint call the model.
 | `sherpa-onnx-zipvoice-distill-int8-zh-en-emilia` | ZipVoice Distill INT8 | clone | zh, en | ~160 MB |
 | `kokoro-int8-multi-lang-v1_0` | Kokoro-82M | 54 preset voices | zh, en, ja, fr, es, it, pt, hi | ~135 MB (INT8) / ~450 MB with fp32 |
 | `sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17-int8` | SenseVoice Small INT8 | speech recognition | zh, en, ja, ko, yue | ~234 MB |
+| `sherpa-onnx-fire-red-asr2-ctc-zh_en-int8-2026-02-25` | FireRedASR2 CTC INT8 | speech recognition | zh, en + 20+ dialects | ~496 MB |
 | `voxcpm2` | VoxCPM2 | clone, voice design | 30 languages | ~3.3 GB |
 | `longcat` | LongCat-AudioDiT 1B | clone | zh, en | ~7 GB incl. venv |
 | `dots` | dots.tts SOAR Q8_0 | clone | 24 languages | ~3.1 GB |
@@ -325,9 +327,17 @@ trade quality for different vocoders, and `v1_svc` is for singing. Q8_0 is
 the default download; `SEEDVC_QUANT=f16` keeps a little more detail at
 ~3.6 GB.
 
-**SenseVoice** — optional on-device speech recognition covering zh/en/ja/
-ko/yue. Once installed, a recorded or uploaded reference clip is transcribed
-automatically into the transcript field; the Transcribe button re-runs it.
+**SenseVoice** — fast on-device speech recognition covering zh/en/ja/ko/
+yue, with punctuation and inverse text normalization. Once installed, a
+recorded or uploaded reference clip is transcribed automatically into the
+transcript field.
+
+**FireRedASR2 CTC** — the accuracy-first alternative: zh/en plus 20+ Chinese
+dialects, noticeably better on noisy or accented audio. It reports token
+timestamps (so SRT/WebVTT cues still work) but no punctuation, and is slower
+than SenseVoice. When both are installed, the Transcribe page picks the model
+per run and live dictation keeps using SenseVoice; otherwise the most recently
+installed model is the default. Install it with `./scripts/download-stt-firered.sh`.
 
 ## Speed
 

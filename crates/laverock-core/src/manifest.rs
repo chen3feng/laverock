@@ -53,12 +53,14 @@ pub enum EngineKind {
 /// Backend configuration for a speech-to-text model.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SttManifest {
-    /// Recognizer family, currently only `sense_voice`.
+    /// Recognizer family: `sense_voice` (default) or
+    /// `fire_red_asr_ctc`.
     #[serde(default = "default_stt_engine")]
     pub engine: String,
     pub model: String,
     pub tokens: String,
     /// SenseVoice language hint: `auto`, `zh`, `en`, `ja`, `ko`, `yue`.
+    /// Ignored by FireRedASR2, which detects the language itself.
     #[serde(default = "default_stt_language")]
     pub language: String,
     /// Inverse text normalization (digits, dates, punctuation).

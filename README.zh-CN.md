@@ -69,6 +69,7 @@
 | MiniMax Music 3 | 文字生成音乐、歌词 | 中、英 | 约 8.4 GB（Q4_0） |
 | Seed-VC | 变声 | 不限 | 约 3.1 GB（Q8_0） |
 | SenseVoice Small（可选） | 语音识别 | 5 种 | 约 234 MB |
+| FireRedASR2 CTC（可选） | 语音识别 | 中英 + 20 多种方言 | 约 496 MB |
 
 各模型的环境要求、注意事项与手工安装脚本见 **[模型](docs/models.zh-CN.md)**。
 

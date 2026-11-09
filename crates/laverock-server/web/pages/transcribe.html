@@ -6,6 +6,11 @@
       <div class="card">
         <label data-i18n="transcribe.audio">音频</label>
         <div id="transcribeCapture"></div>
+        <div class="hist-row" id="transcribeModelRow" hidden>
+          <label for="transcribeModel" data-i18n="transcribe.model">识别模型</label>
+          <select id="transcribeModel"></select>
+          <span class="hint" data-i18n="transcribe.model_hint">更大的模型更准；实时出字仍优先使用 SenseVoice。</span>
+        </div>
         <p class="hint" id="transcribeHint" data-i18n="transcribe.hint">转写在本机完成；首次使用需要先到「模型」页安装 SenseVoice。</p>
       </div>
       <div class="card" id="transcribeResultCard" hidden>
