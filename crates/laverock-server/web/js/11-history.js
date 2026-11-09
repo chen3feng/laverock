@@ -1,6 +1,7 @@
 // ---------------------------------------------------------------- history
 
 let historyItems = [];
+let historySearch = '';
 
 // Task chips on the history page. Entries written before `task` existed
 // fall back to the output kind.
@@ -27,8 +28,9 @@ function routeLabel(route) {
 }
 
 async function loadHistory() {
+  const q = historySearch.trim();
   try {
-    const d = await api('/api/history');
+    const d = await api('/api/history' + (q ? '?q=' + encodeURIComponent(q) : ''));
     historyItems = d.history || [];
   } catch (e) {
     toast((t("ui.failed_to_load_history")) + e.message, true);
@@ -89,9 +91,11 @@ function renderHistory() {
     ? historyItems.filter((h) => taskOf(h) === historyTaskFilter)
     : historyItems;
   const empty = $('historyEmpty');
-  empty.textContent = historyTaskFilter && historyItems.length
-    ? t('history.empty.task')
-    : t('history.empty');
+  empty.textContent = historySearch.trim()
+    ? t('history.empty.search')
+    : historyTaskFilter && historyItems.length
+      ? t('history.empty.task')
+      : t('history.empty');
   empty.hidden = items.length > 0;
   $('clearHistory').hidden = historyItems.length === 0;
   const engineName = Object.fromEntries(engines.map((e) => [e.id, e.name]));
@@ -388,6 +392,17 @@ function buildHistoryTranscript(h) {
   box.appendChild(row);
   return box;
 }
+
+// Search runs on the server so it can reach full transcripts, not just the
+// 2,000-character preview carried in the list.
+let historySearchTimer = null;
+$('historySearch').addEventListener('input', (e) => {
+  clearTimeout(historySearchTimer);
+  historySearchTimer = setTimeout(() => {
+    historySearch = e.target.value;
+    loadHistory();
+  }, 200);
+});
 
 $('clearHistory').onclick = async () => {
   const yes = await confirmAction(

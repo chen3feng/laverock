@@ -44,7 +44,7 @@ Cookie）；以下均指回环监听。
 | GET | `/api/captures/:id/subtitles?format=srt\|vtt` | 将该素材已存的分段导出为字幕文件 |
 | DELETE | `/api/captures/:id` | 删除素材（引用它的声音同步去掉这一段） |
 | POST | `/api/captures/dedupe` | 删除内容完全相同的素材并重指向声音 → `{removed}` |
-| GET | `/api/history` | 已生成的音频与转写文本，最新在前（`?task=asr` 按任务筛选） |
+| GET | `/api/history` | 已生成的音频与转写文本，最新在前（`?task=asr` 按任务筛选，`?q=` 搜索文本、来源名与引擎） |
 | GET | `/api/history/:id/audio` | 生成的音频（`?format=mp3` 导出 MP3） |
 | GET | `/api/history/:id/input` | 声音转换记录保留的源音频 |
 | GET | `/api/history/:id/text` | 完整结果文本：转写内容或提示词 |

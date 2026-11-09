@@ -81,13 +81,13 @@
     padding: 20px; margin-bottom: 16px;
   }
   label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 8px; }
-  select, textarea, input[type="text"] {
+  select, textarea, input[type="text"], input[type="search"] {
     width: 100%; background: var(--panel2); color: var(--text);
     border: 1px solid var(--line); border-radius: 9px; padding: 10px 12px;
     font: inherit; outline: none;
   }
   textarea { min-height: 110px; resize: vertical; }
-  select:focus, textarea:focus, input[type="text"]:focus { border-color: var(--accent2); }
+  select:focus, textarea:focus, input[type="text"]:focus, input[type="search"]:focus { border-color: var(--accent2); }
   .row { display: flex; gap: 14px; flex-wrap: wrap; }
   .row > div { flex: 1; min-width: 160px; }
   .row > .param-wide { flex: 1 0 100%; }
@@ -340,6 +340,7 @@
   .pbar-label b { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
 
   /* ---------- history ---------- */
+  .history-search { max-width: 420px; margin-bottom: 12px; }
   .history-filters { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 16px; }
   .filter-chip {
     display: inline-flex; align-items: center; gap: 6px;
@@ -908,6 +909,7 @@
         <div><h1 data-i18n="history.title">历史</h1><p class="sub" data-i18n="history.sub">本机生成的音频与文本记录，最多保留 100 条或 1 GB。</p></div>
         <button class="ghost danger" id="clearHistory" type="button" data-i18n="history.clear" hidden>清空全部</button>
       </div>
+      <input type="search" id="historySearch" class="history-search" data-i18n-ph="history.search" placeholder="搜索文本、来源或引擎" />
       <div class="history-filters" id="historyFilters" role="group"></div>
       <div id="historyList"></div>
       <div class="empty" id="historyEmpty" data-i18n="history.empty" hidden>还没有生成记录。去「合成」生成第一条吧。</div>
@@ -1464,8 +1466,10 @@ addI18n({
     'history.route.init_audio': '源音频初始化',
     'history.route.inpaint_audio': '局部重绘',
     'history.clear': '清空全部',
+    'history.search': '搜索文本、来源或引擎',
     'history.empty': '还没有生成记录。去「合成」生成第一条吧。',
     'history.empty.task': '该任务下还没有记录。',
+    'history.empty.search': '没有匹配的记录。',
     'history.variant': '候选项 {n}',
     'history.variant_group': '共 {n} 个候选项',
     'history.source': '源音频',
@@ -1493,8 +1497,10 @@ addI18n({
     'history.route.init_audio': 'Init audio',
     'history.route.inpaint_audio': 'Inpaint',
     'history.clear': 'Clear all',
+    'history.search': 'Search text, source or engine',
     'history.empty': 'No generations yet. Head to Synthesize to make the first one.',
     'history.empty.task': 'No entries for this task yet.',
+    'history.empty.search': 'No matching entries.',
     'history.variant': 'take #{n}',
     'history.variant_group': '{n} takes',
     'history.source': 'Source',
@@ -5043,6 +5049,7 @@ $('musicGo').onclick = async () => {
 // ---------------------------------------------------------------- history
 
 let historyItems = [];
+let historySearch = '';
 
 // Task chips on the history page. Entries written before `task` existed
 // fall back to the output kind.
@@ -5069,8 +5076,9 @@ function routeLabel(route) {
 }
 
 async function loadHistory() {
+  const q = historySearch.trim();
   try {
-    const d = await api('/api/history');
+    const d = await api('/api/history' + (q ? '?q=' + encodeURIComponent(q) : ''));
     historyItems = d.history || [];
   } catch (e) {
     toast((t("ui.failed_to_load_history")) + e.message, true);
@@ -5131,9 +5139,11 @@ function renderHistory() {
     ? historyItems.filter((h) => taskOf(h) === historyTaskFilter)
     : historyItems;
   const empty = $('historyEmpty');
-  empty.textContent = historyTaskFilter && historyItems.length
-    ? t('history.empty.task')
-    : t('history.empty');
+  empty.textContent = historySearch.trim()
+    ? t('history.empty.search')
+    : historyTaskFilter && historyItems.length
+      ? t('history.empty.task')
+      : t('history.empty');
   empty.hidden = items.length > 0;
   $('clearHistory').hidden = historyItems.length === 0;
   const engineName = Object.fromEntries(engines.map((e) => [e.id, e.name]));
@@ -5430,6 +5440,17 @@ function buildHistoryTranscript(h) {
   box.appendChild(row);
   return box;
 }
+
+// Search runs on the server so it can reach full transcripts, not just the
+// 2,000-character preview carried in the list.
+let historySearchTimer = null;
+$('historySearch').addEventListener('input', (e) => {
+  clearTimeout(historySearchTimer);
+  historySearchTimer = setTimeout(() => {
+    historySearch = e.target.value;
+    loadHistory();
+  }, 200);
+});
 
 $('clearHistory').onclick = async () => {
   const yes = await confirmAction(

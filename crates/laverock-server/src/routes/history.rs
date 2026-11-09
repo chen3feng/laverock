@@ -26,6 +26,7 @@ pub(crate) fn router() -> Router<AppState> {
 #[derive(Debug, serde::Deserialize)]
 struct HistoryQuery {
     task: Option<String>,
+    q: Option<String>,
 }
 
 async fn list_history(
@@ -39,9 +40,9 @@ async fn list_history(
                 .ok_or_else(|| ApiError::bad_request(format!("unknown task: {raw}")))?,
         ),
     };
-    Ok(Json(
-        serde_json::json!({ "history": state.history.list_by_task(task) }),
-    ))
+    Ok(Json(serde_json::json!({
+        "history": state.history.list(task, query.q.as_deref()),
+    })))
 }
 
 async fn delete_history(
