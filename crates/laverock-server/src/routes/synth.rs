@@ -612,7 +612,10 @@ async fn convert(
         .as_ref()
         .map(|e| e.kind.clone())
         .unwrap_or_else(|| "audio_cpp".to_string());
-    let history_text = source_name.unwrap_or_default();
+    let history_text = source_name.clone().unwrap_or_default();
+    // Keep the source as mono WAV so the history card can play it next to
+    // the converted take. `decode_wav` already downmixed it.
+    let source_wav = encode_wav_channels(&input_samples, input_sr, 1).ok();
 
     let wants_job = headers.get("x-laverock-job").and_then(|v| v.to_str().ok()) == Some("1");
     if wants_job {
@@ -654,7 +657,7 @@ async fn convert(
             message: format!("engine task panicked: {e}"),
         })??;
     let wav = encode_wav_channels(&samples, sample_rate, channels)?;
-    if let Err(e) = state.history.add_typed(
+    match state.history.add_typed(
         &engine_id,
         &engine_name,
         TaskKind::Vc,
@@ -666,7 +669,17 @@ async fn convert(
         channels,
         None,
     ) {
-        tracing::warn!("history add failed: {e}");
+        Ok(meta) => {
+            if let Some(source) = &source_wav {
+                if let Err(e) = state
+                    .history
+                    .attach_input(&meta.id, source, source_name.as_deref())
+                {
+                    tracing::warn!("history source attach failed: {e}");
+                }
+            }
+        }
+        Err(e) => tracing::warn!("history add failed: {e}"),
     }
     Ok((
         StatusCode::OK,
@@ -712,6 +725,7 @@ fn start_convert_job(
                 sink_job.emit("stage", serde_json::json!({ "message": label }));
             }
         });
+        let source_wav = encode_wav_channels(&request.input_samples, request.input_sr, 1).ok();
         let request = ConvertRequest {
             progress: Some(sink),
             ..request
@@ -735,7 +749,7 @@ fn start_convert_job(
                 return;
             }
         };
-        if let Err(e) = history.add_typed(
+        match history.add_typed(
             &engine_id,
             &engine_name,
             TaskKind::Vc,
@@ -747,7 +761,14 @@ fn start_convert_job(
             channels,
             None,
         ) {
-            tracing::warn!("history add failed: {e}");
+            Ok(meta) => {
+                if let Some(source) = &source_wav {
+                    if let Err(e) = history.attach_input(&meta.id, source, Some(&history_text)) {
+                        tracing::warn!("history source attach failed: {e}");
+                    }
+                }
+            }
+            Err(e) => tracing::warn!("history add failed: {e}"),
         }
 
         let name = "converted.wav";

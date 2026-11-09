@@ -339,8 +339,12 @@
   .hist-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
   .hist-row audio { height: 34px; flex: 1; min-width: 220px; }
   .hist-meta { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .hist-transcript { margin: 8px 0 10px; min-height: 120px; }
+  .hist-compare { display: grid; gap: 4px; flex: 1; min-width: 220px; }
+  .hist-compare audio { width: 100%; }
   @media (max-width: 760px) {
     .hist-row audio { min-width: 0; width: 100%; order: 3; }
+    .hist-compare { min-width: 0; width: 100%; }
   }
 
   /* ---------- overlay / toast ---------- */

@@ -46,9 +46,12 @@ describes the loopback listener.
 | GET | `/api/captures/:id/subtitles?format=srt\|vtt` | the take's stored timed cues as a downloadable file |
 | DELETE | `/api/captures/:id` | delete a take (it is removed from the voices using it) |
 | POST | `/api/captures/dedupe` | delete byte-identical takes, repointing voices → `{removed}` |
-| GET | `/api/history` | generated audio, newest first |
+| GET | `/api/history` | generated audio and transcripts, newest first (`?task=asr` filters) |
 | GET | `/api/history/:id/audio` | generated audio (`?format=mp3` to export) |
-| DELETE | `/api/history/:id` · `/api/history` | delete one or all generations |
+| GET | `/api/history/:id/input` | the source clip kept for a voice-conversion entry |
+| GET | `/api/history/:id/text` | the full result text: transcript or prompt |
+| GET | `/api/history/:id/subtitles?format=srt\|vtt` | timed transcript cues as a downloadable file |
+| DELETE | `/api/history/:id` · `/api/history` | delete one or all entries |
 | POST | `/api/audio/mp3` | body: WAV → MP3 (built-in pure-Rust encoder, no ffmpeg needed) |
 | GET | `/api/tools` | audio tools available on this machine → `{denoise, separation, mp3}` |
 | POST | `/api/tools/enhance` | multipart `audio` (WAV) + `mode` (`denoise`, `vocals`, `instrumental`, `both`) → `202` background job; a single stem is a WAV, `both` also bundles `stems.zip` |
@@ -59,7 +62,7 @@ describes the loopback listener.
 | DELETE | `/api/projects/:id` | delete a project and its source clip |
 | GET | `/api/projects/:id/source` | the project's audio track (WAV) |
 | GET | `/api/projects/:id/media` | the uploaded media file itself (video or compressed audio) |
-| POST | `/api/projects/:id/transcribe` | run speech recognition over the source and replace the cues → project |
+| POST | `/api/projects/:id/transcribe` | run speech recognition over the source and replace the cues → project; the transcript is also saved to history |
 | POST | `/api/projects/:id/synthesize` | dubbing job: multipart, optional repeated `segment` ids to re-run only those cues → `202`; writes `segments/<id>.wav` per cue |
 | GET | `/api/projects/:id/segments/:segment/audio` | the generated audio for one cue |
 | POST | `/api/projects/:id/mix` | multipart optional `background_volume`, `voice_volume` (0–4) and `ducking` → `202`; writes and records `mix.wav` |
@@ -67,8 +70,8 @@ describes the loopback listener.
 | GET | `/api/projects/:id/export?format=srt\|vtt` | the project's cues as a downloadable subtitle file |
 | GET | `/api/projects/:id/files/:name` | a recorded export (`mix.wav`, `export.mp4`) |
 | GET | `/api/projects/:id/subtitles?format=srt\|vtt` | the project's cues as a downloadable file |
-| POST | `/api/transcribe` | multipart `audio` (WAV) → transcript (needs the SenseVoice model) |
-| POST | `/api/transcribe/details` | same input → `{text, segments: [{start, end, text}], language, duration}` |
+| POST | `/api/transcribe` | multipart `audio` (WAV) → transcript (needs the SenseVoice model); `record=1` also saves it to history |
+| POST | `/api/transcribe/details` | same input → `{text, segments: [{start, end, text}], language, duration}`; the result is saved to history |
 | POST | `/api/transcribe/subtitles?format=srt\|vtt` | same input → downloadable SRT or WebVTT (`vtt`; `srt` is the default) |
 | GET | `/api/session` | loopback/paired state (public) |
 | POST | `/api/pair/start` | desktop only: create a five-minute pairing code + QR |

@@ -166,6 +166,14 @@ function buildHistoryTake(host, h, engineName, variantLabel) {
     route.textContent = routeLabel(h.route);
     meta.appendChild(route);
   }
+  // Transcripts name their source clip; audio entries already show it in
+  // the text line.
+  if (h.output === 'text' && h.input && h.input.name) {
+    const source = document.createElement('span');
+    source.className = 'chip';
+    source.textContent = h.input.name;
+    meta.appendChild(source);
+  }
   if (variantLabel) {
     const take = document.createElement('span');
     take.className = 'chip';
@@ -179,67 +187,46 @@ function buildHistoryTake(host, h, engineName, variantLabel) {
     ` · ${fmtDur(h.duration_secs)} · ${fmtBytes(h.bytes)}`;
   meta.appendChild(when);
 
+  // Text results (transcripts) get an editable card instead of a player.
+  if (h.output === 'text') {
+    host.append(meta, buildHistoryTranscript(h));
+    return;
+  }
+
   const text = document.createElement('div');
   text.className = 'hist-text';
   text.textContent = h.text;
 
-  const row = document.createElement('div');
-  row.className = 'hist-row';
-  const audio = document.createElement('audio');
-  audio.controls = true;
-  audio.preload = 'none';
-  audio.addEventListener('play', () => pauseOtherAudio(audio));
-  audio.src = `/api/history/${encodeURIComponent(h.id)}/audio`;
+  host.append(meta, text, buildHistoryAudioRow(h));
+}
 
-  const saveFromUrl = async (el, url, name, busyLabel) => {
-    const label = el.textContent;
-    el.style.pointerEvents = 'none';
-    el.textContent = busyLabel;
-    try {
-      const res = await apiFetch(url);
-      if (!res.ok) throw new Error('HTTP ' + res.status);
-      await saveBlob(await res.blob(), name);
-    } catch (e) {
-      toast((t("ui.download_failed")) + e.message, true);
-    } finally {
-      el.style.pointerEvents = '';
-      el.textContent = label;
-    }
-  };
-
-  const dl = document.createElement('a');
-  dl.className = 'hint';
-  dl.href = audio.src;
-  dl.textContent = t('download.wav');
-  dl.onclick = (e) => {
-    e.preventDefault();
-    saveFromUrl(dl, audio.src, `laverock-${h.id}.wav`,
-      t("ui.preparing"));
-  };
-
-  if (mp3Supported) {
-    const mp3 = document.createElement('a');
-    mp3.className = 'hint';
-    mp3.href = `/api/history/${encodeURIComponent(h.id)}/audio?format=mp3`;
-    mp3.textContent = t('download.mp3');
-    const mp3Url = mp3.href;
-    mp3.onclick = (e) => {
-      e.preventDefault();
-      saveFromUrl(mp3, mp3Url, `laverock-${h.id}.mp3`,
-        t("ui.converting"));
-    };
-    row.append(audio, dl, mp3);
-  } else {
-    row.append(audio, dl);
+// Save a server-side artifact through the same file picker as downloads.
+async function historySaveFromUrl(el, url, name, busyLabel) {
+  const label = el.textContent;
+  el.style.pointerEvents = 'none';
+  el.textContent = busyLabel;
+  try {
+    const res = await apiFetch(url);
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    await saveBlob(await res.blob(), name);
+  } catch (e) {
+    toast((t("ui.download_failed")) + e.message, true);
+  } finally {
+    el.style.pointerEvents = '';
+    el.textContent = label;
   }
+}
 
+function historyDeleteButton(h) {
   const del = document.createElement('button');
   del.className = 'ghost danger';
   del.type = 'button';
   del.textContent = t("ui.delete");
   del.onclick = async () => {
     const yes = await confirmAction(
-      t("ui.delete_this_generation_the_audio"),
+      h.output === 'text'
+        ? t('history.delete_text_confirm')
+        : t("ui.delete_this_generation_the_audio"),
       { title: t("ui.delete_entry"), okText: t("ui.delete") },
     );
     if (!yes) return;
@@ -253,9 +240,153 @@ function buildHistoryTake(host, h, engineName, variantLabel) {
       toast((t("ui.delete_failed")) + e.message, true);
     }
   };
-  row.append(del);
+  return del;
+}
 
-  host.append(meta, text, row);
+function historyPlayer(label, url) {
+  const box = document.createElement('div');
+  box.className = 'hist-compare';
+  if (label) {
+    const cap = document.createElement('span');
+    cap.className = 'hint';
+    cap.textContent = label;
+    box.appendChild(cap);
+  }
+  const audio = document.createElement('audio');
+  audio.controls = true;
+  audio.preload = 'none';
+  audio.addEventListener('play', () => pauseOtherAudio(audio));
+  audio.src = url;
+  box.appendChild(audio);
+  return box;
+}
+
+function buildHistoryAudioRow(h) {
+  const id = encodeURIComponent(h.id);
+  const row = document.createElement('div');
+  row.className = 'hist-row';
+
+  // Voice conversion keeps its source clip, so show both sides.
+  const hasSource = !!(h.input && h.input.audio);
+  if (hasSource) {
+    row.append(
+      historyPlayer(t('history.source'), `/api/history/${id}/input`),
+      historyPlayer(t('history.converted'), `/api/history/${id}/audio`),
+    );
+  } else {
+    const player = historyPlayer('', `/api/history/${id}/audio`);
+    player.style.flex = '1';
+    row.appendChild(player);
+  }
+
+  const dl = document.createElement('a');
+  dl.className = 'hint';
+  dl.href = `/api/history/${id}/audio`;
+  dl.textContent = t('download.wav');
+  const wavUrl = dl.href;
+  dl.onclick = (e) => {
+    e.preventDefault();
+    historySaveFromUrl(dl, wavUrl, `laverock-${h.id}.wav`, t("ui.preparing"));
+  };
+  row.appendChild(dl);
+
+  if (hasSource) {
+    const src = document.createElement('a');
+    src.className = 'hint';
+    src.href = `/api/history/${id}/input`;
+    src.textContent = t('history.download_source');
+    const srcUrl = src.href;
+    src.onclick = (e) => {
+      e.preventDefault();
+      historySaveFromUrl(src, srcUrl, `laverock-${h.id}-source.wav`, t("ui.preparing"));
+    };
+    row.appendChild(src);
+  }
+
+  if (mp3Supported) {
+    const mp3 = document.createElement('a');
+    mp3.className = 'hint';
+    mp3.href = `/api/history/${id}/audio?format=mp3`;
+    mp3.textContent = t('download.mp3');
+    const mp3Url = mp3.href;
+    mp3.onclick = (e) => {
+      e.preventDefault();
+      historySaveFromUrl(mp3, mp3Url, `laverock-${h.id}.mp3`, t("ui.converting"));
+    };
+    row.appendChild(mp3);
+  }
+
+  row.append(historyDeleteButton(h));
+  return row;
+}
+
+function buildHistoryTranscript(h) {
+  const box = document.createElement('div');
+  const area = document.createElement('textarea');
+  area.className = 'hist-transcript';
+  area.rows = 5;
+  area.spellcheck = false;
+  // The list only carries a preview; load the full transcript in place.
+  area.value = h.text || '';
+  apiFetch(`/api/history/${encodeURIComponent(h.id)}/text`)
+    .then((res) => (res.ok ? res.text() : null))
+    .then((full) => {
+      if (full !== null && !area.dataset.edited) area.value = full;
+    })
+    .catch(() => {});
+  area.addEventListener('input', () => { area.dataset.edited = '1'; });
+  box.appendChild(area);
+
+  const row = document.createElement('div');
+  row.className = 'hist-row';
+
+  const copy = document.createElement('button');
+  copy.type = 'button';
+  copy.className = 'ghost small';
+  copy.textContent = t('history.copy');
+  copy.onclick = async () => {
+    let copied = false;
+    try {
+      await navigator.clipboard.writeText(area.value);
+      copied = true;
+    } catch (_) {
+      area.select();
+      copied = document.execCommand('copy');
+    }
+    toast(copied ? t('history.copied') : t('history.copy_failed'), !copied);
+  };
+
+  const txt = document.createElement('a');
+  txt.className = 'hint';
+  txt.href = '#';
+  txt.textContent = t('history.download_txt');
+  txt.onclick = async (e) => {
+    e.preventDefault();
+    await saveBlob(
+      new Blob([area.value], { type: 'text/plain;charset=utf-8' }),
+      `laverock-${h.id}.txt`,
+    );
+  };
+  row.append(copy, txt);
+
+  if (h.has_segments) {
+    for (const format of ['srt', 'vtt']) {
+      const link = document.createElement('a');
+      link.className = 'hint';
+      link.href = `/api/history/${encodeURIComponent(h.id)}/subtitles?format=${format}`;
+      link.textContent = t('history.download_' + format);
+      const url = link.href;
+      link.onclick = (e) => {
+        e.preventDefault();
+        historySaveFromUrl(link, url, `laverock-${h.id}.${format}`, t("ui.preparing"));
+      };
+      row.appendChild(link);
+    }
+  }
+
+  row.append(historyDeleteButton(h));
+  box.appendChild(row);
+  return box;
 }
 
 $('clearHistory').onclick = async () => {

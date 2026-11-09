@@ -38,27 +38,74 @@ struct TranscribeResponse {
     text: String,
 }
 
+/// One multipart audio upload.
+struct AudioUpload {
+    audio: Vec<u8>,
+    /// `record=1` asks the server to keep the transcript in history. The
+    /// capture widget sends it only for an explicit transcribe click, not
+    /// for the automatic pass that fills a reference's text.
+    record: bool,
+}
+
 /// Read the `audio` field of a multipart upload.
-async fn read_audio(mut multipart: Multipart) -> Result<Vec<u8>, ApiError> {
+async fn read_audio(mut multipart: Multipart) -> Result<AudioUpload, ApiError> {
     let mut audio: Option<Vec<u8>> = None;
+    let mut record = false;
     while let Some(mut field) = multipart
         .next_field()
         .await
         .map_err(|e| ApiError::bad_request(format!("malformed multipart: {e}")))?
     {
-        if field.name() == Some("audio") {
-            let mut bytes = Vec::new();
-            while let Some(chunk) = field
-                .chunk()
-                .await
-                .map_err(|e| ApiError::bad_request(format!("bad upload: {e}")))?
-            {
-                bytes.extend_from_slice(&chunk);
+        match field.name() {
+            Some("audio") => {
+                let mut bytes = Vec::new();
+                while let Some(chunk) = field
+                    .chunk()
+                    .await
+                    .map_err(|e| ApiError::bad_request(format!("bad upload: {e}")))?
+                {
+                    bytes.extend_from_slice(&chunk);
+                }
+                audio = Some(bytes);
             }
-            audio = Some(bytes);
+            Some("record") => {
+                let raw = field
+                    .text()
+                    .await
+                    .map_err(|e| ApiError::bad_request(format!("bad record field: {e}")))?;
+                record = matches!(raw.trim(), "1" | "true" | "yes");
+            }
+            _ => {}
         }
     }
-    audio.ok_or_else(|| ApiError::bad_request("missing required field: audio"))
+    let audio = audio.ok_or_else(|| ApiError::bad_request("missing required field: audio"))?;
+    Ok(AudioUpload { audio, record })
+}
+
+/// Keep a finished transcript in history. Best-effort: recognition has
+/// already succeeded, so a storage failure must not fail the request.
+pub(crate) fn record_transcript(
+    state: &AppState,
+    transcript: &laverock_core::Transcript,
+    input_name: Option<&str>,
+) {
+    if transcript.text.trim().is_empty() {
+        return;
+    }
+    let (engine_id, engine_name) = state
+        .transcriber
+        .model_info()
+        .unwrap_or_else(|| ("stt".to_string(), "SenseVoice".to_string()));
+    if let Err(e) = state.history.add_text(
+        &engine_id,
+        &engine_name,
+        &transcript.text,
+        &transcript.segments,
+        transcript.duration,
+        input_name,
+    ) {
+        tracing::warn!("history add failed: {e}");
+    }
 }
 
 fn panic_error(what: &str) -> impl FnOnce(tokio::task::JoinError) -> ApiError + '_ {
@@ -73,14 +120,19 @@ async fn transcribe(
     State(state): State<AppState>,
     multipart: Multipart,
 ) -> Result<Json<TranscribeResponse>, ApiError> {
-    let audio = read_audio(multipart).await?;
+    let AudioUpload { audio, record } = read_audio(multipart).await?;
 
     // Loading and running the model is blocking; keep it off the runtime.
     let transcriber = state.transcriber.clone();
-    let text = tokio::task::spawn_blocking(move || transcriber.transcribe(&audio))
+    let transcript = tokio::task::spawn_blocking(move || transcriber.transcribe_detailed(&audio))
         .await
         .map_err(panic_error("transcribe"))??;
-    Ok(Json(TranscribeResponse { text }))
+    if record {
+        record_transcript(&state, &transcript, None);
+    }
+    Ok(Json(TranscribeResponse {
+        text: transcript.text,
+    }))
 }
 
 /// Same input as `/api/transcribe`, but with timed segments.
@@ -88,11 +140,12 @@ async fn transcribe_details(
     State(state): State<AppState>,
     multipart: Multipart,
 ) -> Result<Json<laverock_core::Transcript>, ApiError> {
-    let audio = read_audio(multipart).await?;
+    let AudioUpload { audio, .. } = read_audio(multipart).await?;
     let transcriber = state.transcriber.clone();
     let transcript = tokio::task::spawn_blocking(move || transcriber.transcribe_detailed(&audio))
         .await
         .map_err(panic_error("transcribe"))??;
+    record_transcript(&state, &transcript, None);
     Ok(Json(transcript))
 }
 
@@ -111,7 +164,7 @@ async fn transcribe_subtitles(
     let raw = query.format.as_deref().unwrap_or("");
     let format = subtitles::Format::parse(raw)
         .ok_or_else(|| ApiError::bad_request(format!("unknown subtitle format: {raw}")))?;
-    let audio = read_audio(multipart).await?;
+    let AudioUpload { audio, .. } = read_audio(multipart).await?;
     let transcriber = state.transcriber.clone();
     let transcript = tokio::task::spawn_blocking(move || transcriber.transcribe_detailed(&audio))
         .await

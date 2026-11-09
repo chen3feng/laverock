@@ -1,4 +1,5 @@
-//! Synthesis history: list, delete, and serve the generated audio.
+//! Synthesis history: list, delete, and serve generated audio, text and
+//! transcript cues.
 
 use axum::{
     extract::{Path, Query, State},
@@ -9,14 +10,17 @@ use axum::{
 };
 use laverock_core::TaskKind;
 
-use super::{ApiError, AppState};
-use crate::export;
+use super::{subtitle_response, ApiError, AppState};
+use crate::{export, subtitles};
 
 pub(crate) fn router() -> Router<AppState> {
     Router::new()
         .route("/api/history", get(list_history).delete(clear_history))
         .route("/api/history/{id}", delete(delete_history))
         .route("/api/history/{id}/audio", get(history_audio))
+        .route("/api/history/{id}/text", get(history_text))
+        .route("/api/history/{id}/subtitles", get(history_subtitles))
+        .route("/api/history/{id}/input", get(history_input))
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -105,6 +109,70 @@ async fn history_audio(
             (
                 header::CONTENT_DISPOSITION,
                 format!("attachment; filename=\"laverock-{id}.mp3\""),
+            ),
+        ],
+        bytes,
+    )
+        .into_response())
+}
+
+/// The full result text: a transcript for ASR entries, the prompt otherwise.
+async fn history_text(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Response, ApiError> {
+    let text = state.history.text(&id)?;
+    Ok((
+        StatusCode::OK,
+        [
+            (
+                header::CONTENT_TYPE,
+                "text/plain; charset=utf-8".to_string(),
+            ),
+            (
+                header::CONTENT_DISPOSITION,
+                format!("attachment; filename=\"laverock-{id}.txt\""),
+            ),
+        ],
+        text,
+    )
+        .into_response())
+}
+
+/// Timed cues as an SRT/WebVTT download.
+async fn history_subtitles(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Query(query): Query<AudioQuery>,
+) -> Result<Response, ApiError> {
+    let raw = query.format.as_deref().unwrap_or("");
+    let format = subtitles::Format::parse(raw)
+        .ok_or_else(|| ApiError::bad_request(format!("unknown subtitle format: {raw}")))?;
+    let segments = state.history.segments(&id)?;
+    if segments.is_empty() {
+        return Err(ApiError::bad_request("this entry has no timed cues"));
+    }
+    Ok(subtitle_response(
+        &segments,
+        format,
+        &format!("laverock-{id}"),
+    ))
+}
+
+/// The uploaded source clip of a voice conversion.
+async fn history_input(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Response, ApiError> {
+    let path = state.history.input_path(&id)?;
+    let bytes = tokio::fs::read(path).await?;
+    Ok((
+        StatusCode::OK,
+        [
+            (header::CONTENT_TYPE, "audio/wav".to_string()),
+            (
+                header::CONTENT_DISPOSITION,
+                format!("attachment; filename=\"laverock-{id}-source.wav\""),
             ),
         ],
         bytes,
