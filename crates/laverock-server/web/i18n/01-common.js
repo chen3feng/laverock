@@ -6,6 +6,7 @@ addI18n({
     'nav.history': '历史', 'nav.settings': '设置', 'state.title': '服务状态',
     'nav.group.create': '创作', 'nav.group.assets': '资源',
     'nav.group.apps': '应用', 'nav.group.system': '系统',
+    'recent.title': '最近生成', 'recent.view_all': '查看全部',
   },
   en: {
     'brand.sub': 'Local voice studio',
@@ -14,5 +15,6 @@ addI18n({
     'nav.history': 'History', 'nav.settings': 'Settings', 'state.title': 'Service status',
     'nav.group.create': 'Create', 'nav.group.assets': 'Library',
     'nav.group.apps': 'Apps', 'nav.group.system': 'System',
+    'recent.title': 'Recent results', 'recent.view_all': 'View all',
   },
 });

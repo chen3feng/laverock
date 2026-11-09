@@ -175,6 +175,15 @@ async function main() {
     assert.ok(results >= 1, 'a take was rendered');
     pass(`synthesis finished (${results} take)`);
 
+    // The task page lists the newest history entries under the form.
+    await page.waitForSelector('#synthRecent .card', { timeout: 30_000 });
+    assert.equal(
+      await page.locator('#synthRecent .hist-text').first().textContent(),
+      synthText,
+      'the newest result is listed under the form',
+    );
+    pass('recent results listed');
+
     const synthWav = await saveDownload(page, page.locator('#synthResults a.hint').first(), artifacts);
     assert.ok(fs.statSync(synthWav).size > 44, 'downloaded WAV has a header');
     fs.accessSync(synthWav);
@@ -216,6 +225,20 @@ async function main() {
     assert.ok(fs.statSync(histWav).size > 44, 'history WAV has a header');
     assert.ok(histWav.endsWith('.wav'), 'history download is a WAV');
     pass(`history download (${path.basename(histWav)})`);
+
+    // Search filters server-side; a miss shows the empty state and a hit
+    // brings the entry back.
+    await page.fill('#historySearch', 'no-such-entry-xyz');
+    await page.waitForSelector('#historyEmpty:not([hidden])', { timeout: 30_000 });
+    await page.fill('#historySearch', '自动化测试');
+    await page.waitForFunction(
+      (text) => Array.from(document.querySelectorAll('#historyList .hist-text'))
+        .some((el) => el.textContent === text),
+      synthText,
+      { timeout: 30_000 },
+    );
+    await page.fill('#historySearch', '');
+    pass('history search');
 
     // ---------------------------------------------------------------- models
     say('models');
