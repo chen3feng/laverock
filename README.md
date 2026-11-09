@@ -20,6 +20,9 @@ generation history and a phone remote that joins over your local network.
 - **Voice conversion** — turn an existing recording into a saved voice while
   keeping its words and timing. Seed-VC runs on the same local runtime, and
   long conversions continue as background jobs.
+- **Speech transcription** — transcribe a recording or audio file on-device,
+  edit the text, and export TXT, SRT or VTT; every transcript stays in
+  history.
 - **18 models behind one interface** — from a 135 MB ONNX model that runs in
   real time on CPU to 2B diffusion and LLM systems, plus text-to-music and
   voice conversion. Install, update and remove them from the app, with live
@@ -29,8 +32,8 @@ generation history and a phone remote that joins over your local network.
   have room noise or background music removed before it conditions a voice;
   the original is kept, so cleanup is reversible. A voice is one take or
   several joined together, and voices export or import as `.lvvoice.zip`.
-- **History** — every generation is kept, playable and downloadable as WAV
-  or MP3, newest first.
+- **History** — every generation and transcript is kept, playable or
+  editable and downloadable as WAV, MP3, TXT or subtitles, newest first.
 - **Phone remote** — turn on LAN access, scan a QR code, and use the same UI
   from a phone on the same Wi-Fi, over HTTPS.
 - **OpenAI-compatible API** — clients written for OpenAI's TTS API work by

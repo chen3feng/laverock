@@ -9,7 +9,7 @@ file is miserable, so the sources live in `crates/laverock-server/web/`:
   styles.css    the stylesheet
   body.html     the markup outside the pages (sidebar, overlays, templates);
                 `{{nav}}` and `{{pages}}` are filled from pages.json
-  pages.json    page index: id, i18n key, fallback label and nav icon
+  pages.json    page index: id, nav group, i18n key, fallback label and icon
   pages/*.html  one `<section class="page">` per page, in pages.json order
   i18n/*.js     translation fragments, concatenated before the runtime
   js/NN-*.js    one file per section, concatenated in filename order
@@ -55,13 +55,22 @@ def build() -> str:
     shell = (WEB / "index.html").read_text(encoding="utf-8")
     styles = (WEB / "styles.css").read_text(encoding="utf-8").strip("\n")
     pages = pages_index()
-    nav = "\n".join(
-        "    <a href=\"#/{id}\" data-page=\"{id}\">\n"
-        "      <svg viewBox=\"0 0 24 24\">{icon}</svg>\n"
-        "      <span data-i18n=\"{i18n}\">{label}</span>\n"
-        "    </a>".format(**entry)
-        for entry in pages
-    )
+    nav_parts = []
+    group = None
+    for entry in pages:
+        # A new group gets a small heading; the label comes from i18n so
+        # the sidebar stays bilingual like the page names.
+        if entry.get("group") and entry["group"] != group:
+            group = entry["group"]
+            nav_parts.append(
+                f'    <div class="nav-group" data-i18n="nav.group.{group}"></div>')
+        nav_parts.append(
+            "    <a href=\"#/{id}\" data-page=\"{id}\">\n"
+            "      <svg viewBox=\"0 0 24 24\">{icon}</svg>\n"
+            "      <span data-i18n=\"{i18n}\">{label}</span>\n"
+            "    </a>".format(**entry)
+        )
+    nav = "\n".join(nav_parts)
     page_html = "\n\n".join(
         (WEB / "pages" / f"{entry['id']}.html")
         .read_text(encoding="utf-8")

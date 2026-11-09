@@ -1,7 +1,7 @@
 // ---------------------------------------------------------------- capture
 
 class Capture {
-  constructor(host, { autoTranscribe = true, transcribe = true } = {}) {
+  constructor(host, { autoTranscribe = true, transcribe = true, detailed = false } = {}) {
     host.innerHTML = '';
     host.appendChild($('captureTpl').content.cloneNode(true));
     applyI18n(host);
@@ -19,6 +19,9 @@ class Capture {
     // is nothing to transcribe.
     this.autoTranscribe = autoTranscribe;
     this.showTranscribe = transcribe;
+    // Detailed mode returns timed cues (and always records in history);
+    // the plain endpoint is enough for filling a reference's text.
+    this.detailed = detailed;
     this.onChange = () => {};
     this.onTranscribed = () => {};
 
@@ -68,14 +71,16 @@ class Capture {
       const fd = new FormData();
       fd.append('audio', this.blob, this.filename || 'reference.wav');
       if (record) fd.append('record', '1');
-      const res = await apiFetch('/api/transcribe', { method: 'POST', body: fd });
+      const url = this.detailed ? '/api/transcribe/details' : '/api/transcribe';
+      const res = await apiFetch(url, { method: 'POST', body: fd });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         throw new Error(body.error || res.statusText);
       }
-      const { text } = await res.json();
+      const body = await res.json();
+      const text = body.text;
       if (!text) throw new Error(t("ui.no_speech_recognized"));
-      this.onTranscribed(text);
+      this.onTranscribed(text, this.detailed ? body : null);
       if (this.fileLabel) this.setInfo(this.fileLabel);
       return text;
     } catch (e) {

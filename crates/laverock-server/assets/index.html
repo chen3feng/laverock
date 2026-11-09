@@ -48,6 +48,11 @@
     stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round;
   }
   nav a:hover { background: var(--panel); color: var(--text); }
+  .nav-group {
+    margin: 12px 12px 2px; font-size: 10.5px; letter-spacing: .12em;
+    text-transform: uppercase; color: var(--muted); opacity: .75;
+  }
+  nav .nav-group:first-child { margin-top: 2px; }
   nav a.active {
     background: var(--panel2); color: var(--text);
     box-shadow: inset 2px 0 0 var(--accent);
@@ -377,7 +382,8 @@
       background: rgba(16, 18, 25, .98); backdrop-filter: blur(12px);
     }
     .brand, .sidebar-foot { display: none; }
-    nav { flex-direction: row; flex: 1; gap: 2px; }
+    nav { flex-direction: row; flex: 1; gap: 2px; overflow-x: auto; }
+    .nav-group { display: none; }
     nav a {
       flex: 1; flex-direction: column; gap: 3px; justify-content: center;
       padding: 7px 2px; font-size: 10.5px; border-radius: 9px;
@@ -403,6 +409,7 @@
     <div><b>Laverock</b><span data-i18n="brand.sub">本地语音工作室</span></div>
   </div>
   <nav>
+    <div class="nav-group" data-i18n="nav.group.create"></div>
     <a href="#/synthesize" data-page="synthesize">
       <svg viewBox="0 0 24 24"><path d="M11 5 6 9H2v6h4l5 4V5Z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M18.5 5.5a9 9 0 0 1 0 13"/></svg>
       <span data-i18n="nav.synthesize">合成</span>
@@ -411,21 +418,18 @@
       <svg viewBox="0 0 24 24"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
       <span data-i18n="nav.music">音乐</span>
     </a>
+    <a href="#/transcribe" data-page="transcribe">
+      <svg viewBox="0 0 24 24"><path d="M4 6h16"/><path d="M4 12h10"/><path d="M4 18h7"/><circle cx="18" cy="16" r="3"/><path d="m20.5 18.5 2 2"/></svg>
+      <span data-i18n="nav.transcribe">转写</span>
+    </a>
     <a href="#/convert" data-page="convert">
       <svg viewBox="0 0 24 24"><path d="M4 12v-2a8 8 0 0 1 16 0v2"/><path d="M4 14v4"/><path d="M20 14v4"/><path d="M8 16v4"/><path d="M16 16v4"/><path d="M8 12h.01"/><path d="M16 12h.01"/></svg>
       <span data-i18n="nav.convert">变声</span>
     </a>
+    <div class="nav-group" data-i18n="nav.group.assets"></div>
     <a href="#/captures" data-page="captures">
       <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="4" rx="1"/><rect x="3" y="10" width="18" height="4" rx="1"/><rect x="3" y="16" width="18" height="4" rx="1"/></svg>
       <span data-i18n="nav.captures">素材库</span>
-    </a>
-    <a href="#/tools" data-page="tools">
-      <svg viewBox="0 0 24 24"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
-      <span data-i18n="nav.tools">工具</span>
-    </a>
-    <a href="#/projects" data-page="projects">
-      <svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M7 15h4"/><path d="M13 15h4"/><path d="M7 11h10"/></svg>
-      <span data-i18n="nav.projects">字幕</span>
     </a>
     <a href="#/voices" data-page="voices">
       <svg viewBox="0 0 24 24"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><path d="M12 19v3"/></svg>
@@ -435,6 +439,16 @@
       <svg viewBox="0 0 24 24"><path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/></svg>
       <span data-i18n="nav.models">模型</span>
     </a>
+    <div class="nav-group" data-i18n="nav.group.apps"></div>
+    <a href="#/tools" data-page="tools">
+      <svg viewBox="0 0 24 24"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
+      <span data-i18n="nav.tools">工具</span>
+    </a>
+    <a href="#/projects" data-page="projects">
+      <svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M7 15h4"/><path d="M13 15h4"/><path d="M7 11h10"/></svg>
+      <span data-i18n="nav.projects">字幕</span>
+    </a>
+    <div class="nav-group" data-i18n="nav.group.system"></div>
     <a href="#/history" data-page="history">
       <svg viewBox="0 0 24 24"><path d="M3 3v5h5"/><path d="M3.05 13A9 9 0 1 0 6 5.3L3 8"/><path d="M12 7v5l4 2"/></svg>
       <span data-i18n="nav.history">历史</span>
@@ -581,6 +595,25 @@
       <div id="musicResults" hidden></div>
     </section>
 
+    <!-- ================= 转写 ================= -->
+    <section id="page-transcribe" class="page">
+      <div class="page-head">
+        <div><h1 data-i18n="transcribe.title">转写</h1><p class="sub" data-i18n="transcribe.sub">把一段录音或音频转成文字，带时间轴，可复制或导出 TXT / SRT / VTT。</p></div>
+      </div>
+      <div class="card">
+        <label data-i18n="transcribe.audio">音频</label>
+        <div id="transcribeCapture"></div>
+        <p class="hint" id="transcribeHint" data-i18n="transcribe.hint">转写在本机完成；首次使用需要先到「模型」页安装 SenseVoice。</p>
+      </div>
+      <div class="card" id="transcribeResultCard" hidden>
+        <div class="hist-meta" id="transcribeResultMeta"></div>
+        <textarea id="transcribeText" class="hist-transcript" rows="8" spellcheck="false"></textarea>
+        <div class="hist-row" id="transcribeActions"></div>
+      </div>
+      <div class="section-title" id="transcribeRecentTitle" data-i18n="transcribe.recent" hidden>最近转写</div>
+      <div id="transcribeRecent"></div>
+    </section>
+
     <!-- ================= 变声 ================= -->
     <section id="page-convert" class="page">
       <div class="page-head"><h1 data-i18n="convert.title">变声</h1><p class="sub" data-i18n="convert.sub">把一段现成语音换成声音库里的目标音色，保留内容与韵律。</p></div>
@@ -657,6 +690,63 @@
       <div class="empty" id="capturesEmpty" data-i18n="captures.empty" hidden>
         还没有素材。点击「添加素材」录音或上传一段参考音频。
       </div>
+    </section>
+
+    <!-- ================= 语音素材 ================= -->
+    <section id="page-voices" class="page">
+      <div class="page-head" style="display:flex;align-items:flex-end;justify-content:space-between;gap:12px;flex-wrap:wrap">
+        <div><h1 data-i18n="voices.title">声音库</h1><p class="sub" data-i18n="voices.sub">保存的声音可以复用到任何克隆引擎，也可以由素材库里的多段录音组成。</p></div>
+        <div style="display:flex;gap:8px">
+          <button id="exportVoicesBtn" class="ghost" type="button" data-i18n="voice.exportBatch">⬇ 批量导出</button>
+          <button id="importVoiceBtn" class="ghost" type="button" data-i18n="voice.import">⬆ 导入声音</button>
+          <button id="newVoiceBtn" type="button" data-i18n="voice.new">＋ 新建声音</button>
+          <input id="importVoiceFile" type="file" accept=".zip" hidden />
+        </div>
+      </div>
+
+      <div class="card" id="newVoiceCard" hidden>
+        <label for="newName" data-i18n="voice.name">声音名称</label>
+        <input type="text" id="newName" data-i18n-ph="voice.name.ph" placeholder="例如：新闻女声" />
+        <label style="margin-top:14px" data-i18n="voice.ref">参考声音（3–10 秒干净人声）</label>
+        <div id="voiceCapture"></div>
+        <div class="hint" data-i18n="voice.rec.hint">录音会在浏览器内转成 24kHz 单声道 WAV。</div>
+        <div class="hint"><a href="#/captures" data-i18n="voice.from_library">要用多段录音拼成一个声音？去素材库勾选后新建。</a></div>
+        <div style="margin-top:14px">
+          <label for="newPromptText" data-i18n="voice.prompt">参考音频对应文字（ZipVoice 必填）</label>
+          <input type="text" id="newPromptText" data-i18n-ph="voice.prompt.ph" placeholder="录音里说了什么就填什么" />
+        </div>
+        <div class="actions" style="margin-top:16px">
+          <button id="newSave" type="button" data-i18n="voice.save">保存到声音库</button>
+          <button class="ghost" id="newCancel" type="button" data-i18n="cancel">取消</button>
+          <span class="hint" id="newSaveHint"></span>
+        </div>
+      </div>
+
+      <div class="grid" id="voicesGrid"></div>
+      <div class="empty" id="voicesEmpty" data-i18n="voices.empty" hidden>
+        还没有保存的声音。点击「新建声音」录音或上传一段 3–10 秒的参考音频。
+      </div>
+    </section>
+
+    <!-- ================= 模型 ================= -->
+    <section id="page-models" class="page">
+      <div class="page-head"><h1 data-i18n="models.title">模型</h1><p class="sub" data-i18n="models.sub">每个模型都是 <code>models/&lt;id&gt;/engine.json</code> 描述的一个插件。</p></div>
+
+      <div class="card" id="modelPaths" hidden>
+        <label data-i18n="models.dir">模型目录</label>
+        <div class="pathline"><code id="modelsDirPath">…</code></div>
+        <label style="margin-top:12px" data-i18n="models.scripts">下载脚本</label>
+        <div class="pathline"><code id="scriptsDirPath">…</code></div>
+        <div class="hint" data-i18n="models.paths.hint">下载使用「设置 → 下载网络」中的代理与镜像；安装完成后引擎会自动刷新。</div>
+      </div>
+
+      <div class="card" id="modelsNotice" hidden>
+        <label data-i18n="models.desktop.only">模型管理仅在电脑端可用</label>
+        <div class="hint" data-i18n="models.desktop.hint">手机上可以查看已安装的引擎并直接合成。安装新模型请在电脑上打开同一界面。</div>
+      </div>
+
+      <div id="modelGroups"></div>
+      <div class="empty" id="installedEmpty" data-i18n="models.empty" hidden>没有可显示的模型。</div>
     </section>
 
     <!-- ================= 音频工具 ================= -->
@@ -810,63 +900,6 @@
         </div>
         <audio id="projectSegAudio" hidden></audio>
       </div>
-    </section>
-
-    <!-- ================= 语音素材 ================= -->
-    <section id="page-voices" class="page">
-      <div class="page-head" style="display:flex;align-items:flex-end;justify-content:space-between;gap:12px;flex-wrap:wrap">
-        <div><h1 data-i18n="voices.title">声音库</h1><p class="sub" data-i18n="voices.sub">保存的声音可以复用到任何克隆引擎，也可以由素材库里的多段录音组成。</p></div>
-        <div style="display:flex;gap:8px">
-          <button id="exportVoicesBtn" class="ghost" type="button" data-i18n="voice.exportBatch">⬇ 批量导出</button>
-          <button id="importVoiceBtn" class="ghost" type="button" data-i18n="voice.import">⬆ 导入声音</button>
-          <button id="newVoiceBtn" type="button" data-i18n="voice.new">＋ 新建声音</button>
-          <input id="importVoiceFile" type="file" accept=".zip" hidden />
-        </div>
-      </div>
-
-      <div class="card" id="newVoiceCard" hidden>
-        <label for="newName" data-i18n="voice.name">声音名称</label>
-        <input type="text" id="newName" data-i18n-ph="voice.name.ph" placeholder="例如：新闻女声" />
-        <label style="margin-top:14px" data-i18n="voice.ref">参考声音（3–10 秒干净人声）</label>
-        <div id="voiceCapture"></div>
-        <div class="hint" data-i18n="voice.rec.hint">录音会在浏览器内转成 24kHz 单声道 WAV。</div>
-        <div class="hint"><a href="#/captures" data-i18n="voice.from_library">要用多段录音拼成一个声音？去素材库勾选后新建。</a></div>
-        <div style="margin-top:14px">
-          <label for="newPromptText" data-i18n="voice.prompt">参考音频对应文字（ZipVoice 必填）</label>
-          <input type="text" id="newPromptText" data-i18n-ph="voice.prompt.ph" placeholder="录音里说了什么就填什么" />
-        </div>
-        <div class="actions" style="margin-top:16px">
-          <button id="newSave" type="button" data-i18n="voice.save">保存到声音库</button>
-          <button class="ghost" id="newCancel" type="button" data-i18n="cancel">取消</button>
-          <span class="hint" id="newSaveHint"></span>
-        </div>
-      </div>
-
-      <div class="grid" id="voicesGrid"></div>
-      <div class="empty" id="voicesEmpty" data-i18n="voices.empty" hidden>
-        还没有保存的声音。点击「新建声音」录音或上传一段 3–10 秒的参考音频。
-      </div>
-    </section>
-
-    <!-- ================= 模型 ================= -->
-    <section id="page-models" class="page">
-      <div class="page-head"><h1 data-i18n="models.title">模型</h1><p class="sub" data-i18n="models.sub">每个模型都是 <code>models/&lt;id&gt;/engine.json</code> 描述的一个插件。</p></div>
-
-      <div class="card" id="modelPaths" hidden>
-        <label data-i18n="models.dir">模型目录</label>
-        <div class="pathline"><code id="modelsDirPath">…</code></div>
-        <label style="margin-top:12px" data-i18n="models.scripts">下载脚本</label>
-        <div class="pathline"><code id="scriptsDirPath">…</code></div>
-        <div class="hint" data-i18n="models.paths.hint">下载使用「设置 → 下载网络」中的代理与镜像；安装完成后引擎会自动刷新。</div>
-      </div>
-
-      <div class="card" id="modelsNotice" hidden>
-        <label data-i18n="models.desktop.only">模型管理仅在电脑端可用</label>
-        <div class="hint" data-i18n="models.desktop.hint">手机上可以查看已安装的引擎并直接合成。安装新模型请在电脑上打开同一界面。</div>
-      </div>
-
-      <div id="modelGroups"></div>
-      <div class="empty" id="installedEmpty" data-i18n="models.empty" hidden>没有可显示的模型。</div>
     </section>
 
     <!-- ================= 历史 ================= -->
@@ -1072,14 +1105,18 @@ addI18n({
   zh: {
     'brand.sub': '本地语音工作室',
     'nav.synthesize': '合成', 'nav.music': '音乐', 'nav.captures': '素材库', 'nav.voices': '声音',
-    'nav.models': '模型',
+    'nav.models': '模型', 'nav.transcribe': '转写',
     'nav.history': '历史', 'nav.settings': '设置', 'state.title': '服务状态',
+    'nav.group.create': '创作', 'nav.group.assets': '资源',
+    'nav.group.apps': '应用', 'nav.group.system': '系统',
   },
   en: {
     'brand.sub': 'Local voice studio',
     'nav.synthesize': 'Synthesize', 'nav.music': 'Music', 'nav.captures': 'Library', 'nav.voices': 'Voices',
-    'nav.models': 'Models',
+    'nav.models': 'Models', 'nav.transcribe': 'Transcribe',
     'nav.history': 'History', 'nav.settings': 'Settings', 'state.title': 'Service status',
+    'nav.group.create': 'Create', 'nav.group.assets': 'Library',
+    'nav.group.apps': 'Apps', 'nav.group.system': 'System',
   },
 });
 
@@ -1793,6 +1830,35 @@ addI18n({
 
 addI18n({
   zh: {
+    'transcribe.title': '转写',
+    'transcribe.sub': '把一段录音或音频转成文字，带时间轴，可复制或导出 TXT / SRT / VTT。',
+    'transcribe.audio': '音频',
+    'transcribe.hint': '转写在本机完成；首次使用需要先到「模型」页安装 SenseVoice。',
+    'transcribe.no_model': '还没有安装语音识别模型，请先到「模型」页安装 SenseVoice。',
+    'transcribe.result': '转写结果',
+    'transcribe.saved': '结果已保存到历史，可随时回来复制或导出。',
+    'transcribe.recent': '最近转写',
+    'transcribe.open': '打开',
+    'transcribe.open_history': '查看全部',
+    'transcribe.empty': '还没有转写记录。',
+  },
+  en: {
+    'transcribe.title': 'Transcribe',
+    'transcribe.sub': 'Turn a recording or audio file into text with timings, ready to copy or export as TXT / SRT / VTT.',
+    'transcribe.audio': 'Audio',
+    'transcribe.hint': 'Transcription runs on this computer; install SenseVoice from the Models page first.',
+    'transcribe.no_model': 'No speech recognition model installed yet. Install SenseVoice from the Models page first.',
+    'transcribe.result': 'Transcript',
+    'transcribe.saved': 'Saved to history, so you can come back to copy or export it.',
+    'transcribe.recent': 'Recent transcripts',
+    'transcribe.open': 'Open',
+    'transcribe.open_history': 'View all',
+    'transcribe.empty': 'No transcripts yet.',
+  },
+});
+
+addI18n({
+  zh: {
     'cap.file': '选择文件', 'cap.record': '● 录音', 'cap.stop': '■ 停止', 'cap.none': '未选择',
     'cap.transcribe': '✎ 转写', 'transcribe.busy': '转写中…',
     'preset.official.hf': '官方（huggingface.co）', 'preset.cn': 'hf-mirror.com（国内加速）',
@@ -2162,7 +2228,7 @@ async function jobSnapshot(id) {
 }
 
 const $ = (id) => document.getElementById(id);
-const PAGES = ["synthesize", "music", "convert", "captures", "tools", "projects", "voices", "models", "history", "settings"];
+const PAGES = ["synthesize", "music", "transcribe", "convert", "captures", "voices", "models", "tools", "projects", "history", "settings"];
 const HF_PRESETS = [
   { value: '', labelKey: 'preset.official.hf' },
   { value: 'https://hf-mirror.com', labelKey: 'preset.cn' },
@@ -2214,6 +2280,10 @@ async function setLanguage(next, { persist = true } = {}) {
   syncProxyMode();
   await Promise.all([loadEngines(), loadProfiles(), loadCaptures(), loadSettingsPage(), loadToolsPage(), loadProjects()]);
   renderHistory();
+  if (currentPage() === 'transcribe') {
+    syncTranscribePage();
+    loadRecentTranscriptions();
+  }
   await loadModels();
   if (session && session.lan_enabled) loadDevices();
 }
@@ -2524,7 +2594,7 @@ async function api(path, opts) {
 // ---------------------------------------------------------------- capture
 
 class Capture {
-  constructor(host, { autoTranscribe = true, transcribe = true } = {}) {
+  constructor(host, { autoTranscribe = true, transcribe = true, detailed = false } = {}) {
     host.innerHTML = '';
     host.appendChild($('captureTpl').content.cloneNode(true));
     applyI18n(host);
@@ -2542,6 +2612,9 @@ class Capture {
     // is nothing to transcribe.
     this.autoTranscribe = autoTranscribe;
     this.showTranscribe = transcribe;
+    // Detailed mode returns timed cues (and always records in history);
+    // the plain endpoint is enough for filling a reference's text.
+    this.detailed = detailed;
     this.onChange = () => {};
     this.onTranscribed = () => {};
 
@@ -2591,14 +2664,16 @@ class Capture {
       const fd = new FormData();
       fd.append('audio', this.blob, this.filename || 'reference.wav');
       if (record) fd.append('record', '1');
-      const res = await apiFetch('/api/transcribe', { method: 'POST', body: fd });
+      const url = this.detailed ? '/api/transcribe/details' : '/api/transcribe';
+      const res = await apiFetch(url, { method: 'POST', body: fd });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         throw new Error(body.error || res.statusText);
       }
-      const { text } = await res.json();
+      const body = await res.json();
+      const text = body.text;
       if (!text) throw new Error(t("ui.no_speech_recognized"));
-      this.onTranscribed(text);
+      this.onTranscribed(text, this.detailed ? body : null);
       if (this.fileLabel) this.setInfo(this.fileLabel);
       return text;
     } catch (e) {
@@ -5558,6 +5633,230 @@ $('saveSettings').onclick = async () => {
   }
 };
 
+// ---------------------------------------------------------------- transcribe
+
+const transcribeCapture = new Capture($('transcribeCapture'), {
+  autoTranscribe: false,
+  detailed: true,
+});
+
+// The result card shows cues from a fresh run, or a history id when the
+// user opens an older transcript (its cues stay on the server).
+let transcribeSegments = [];
+let transcribeHistoryId = null;
+let transcribeHasCues = false;
+
+transcribeCapture.onTranscribed = (text, transcript) => {
+  transcribeSegments = (transcript && transcript.segments) || [];
+  transcribeHistoryId = null;
+  transcribeHasCues = transcribeSegments.length > 0;
+  showTranscribeResult(text);
+  loadRecentTranscriptions();
+};
+
+function syncTranscribePage() {
+  const hint = $('transcribeHint');
+  hint.className = transcribeAvailable ? 'hint' : 'err';
+  hint.textContent = transcribeAvailable
+    ? t('transcribe.hint')
+    : t('transcribe.no_model');
+  transcribeCapture.syncTranscribeButton();
+}
+
+function showTranscribeResult(text) {
+  $('transcribeText').value = text || '';
+  $('transcribeResultCard').hidden = false;
+  const meta = $('transcribeResultMeta');
+  meta.innerHTML = '';
+  const chip = document.createElement('span');
+  chip.className = 'chip';
+  chip.textContent = t('transcribe.result');
+  meta.appendChild(chip);
+  const hint = document.createElement('span');
+  hint.className = 'hint';
+  hint.textContent = t('transcribe.saved');
+  meta.appendChild(hint);
+  renderTranscribeActions();
+}
+
+// Timed cues are rendered here rather than fetched back, so a fresh
+// transcript can be exported without another round trip.
+function cueStamp(seconds, separator) {
+  const ms = Math.max(0, Math.round((Number(seconds) || 0) * 1000));
+  const parts = [
+    Math.floor(ms / 3_600_000),
+    Math.floor((ms % 3_600_000) / 60_000),
+    Math.floor((ms % 60_000) / 1000),
+  ].map((n) => String(n).padStart(2, '0'));
+  return parts.join(':') + separator + String(ms % 1000).padStart(3, '0');
+}
+
+function cuesToSrt(segments) {
+  return segments
+    .map((seg, i) => `${i + 1}\n${cueStamp(seg.start, ',')} --> ${cueStamp(seg.end, ',')}\n${seg.text}\n`)
+    .join('\n');
+}
+
+function cuesToVtt(segments) {
+  return 'WEBVTT\n\n' + segments
+    .map((seg) => `${cueStamp(seg.start, '.')} --> ${cueStamp(seg.end, '.')}\n${seg.text}\n`)
+    .join('\n');
+}
+
+function renderTranscribeActions() {
+  const row = $('transcribeActions');
+  row.innerHTML = '';
+  const area = $('transcribeText');
+
+  const copy = document.createElement('button');
+  copy.type = 'button';
+  copy.className = 'ghost small';
+  copy.textContent = t('history.copy');
+  copy.onclick = async () => {
+    let copied = false;
+    try {
+      await navigator.clipboard.writeText(area.value);
+      copied = true;
+    } catch (_) {
+      area.select();
+      copied = document.execCommand('copy');
+    }
+    toast(copied ? t('history.copied') : t('history.copy_failed'), !copied);
+  };
+
+  const txt = document.createElement('a');
+  txt.className = 'hint';
+  txt.href = '#';
+  txt.textContent = t('history.download_txt');
+  txt.onclick = async (e) => {
+    e.preventDefault();
+    await saveBlob(
+      new Blob([area.value], { type: 'text/plain;charset=utf-8' }),
+      'laverock-transcript.txt',
+    );
+  };
+  row.append(copy, txt);
+
+  const downloadCues = async (format) => {
+    const body = format === 'srt' ? cuesToSrt(transcribeSegments) : cuesToVtt(transcribeSegments);
+    const mime = format === 'srt'
+      ? 'application/x-subrip;charset=utf-8'
+      : 'text/vtt;charset=utf-8';
+    await saveBlob(new Blob([body], { type: mime }), `laverock-transcript.${format}`);
+  };
+
+  for (const format of ['srt', 'vtt']) {
+    if (transcribeSegments.length) {
+      const link = document.createElement('a');
+      link.className = 'hint';
+      link.href = '#';
+      link.textContent = t('history.download_' + format);
+      link.onclick = (e) => {
+        e.preventDefault();
+        downloadCues(format);
+      };
+      row.appendChild(link);
+    } else if (transcribeHistoryId && transcribeHasCues) {
+      const link = document.createElement('a');
+      link.className = 'hint';
+      link.href = `/api/history/${encodeURIComponent(transcribeHistoryId)}/subtitles?format=${format}`;
+      link.textContent = t('history.download_' + format);
+      link.onclick = (e) => {
+        e.preventDefault();
+        historySaveFromUrl(
+          link, link.href, `laverock-${transcribeHistoryId}.${format}`, t('ui.preparing'));
+      };
+      row.appendChild(link);
+    }
+  }
+}
+
+async function openTranscribeEntry(h, button) {
+  button.disabled = true;
+  try {
+    const res = await apiFetch(`/api/history/${encodeURIComponent(h.id)}/text`);
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    transcribeSegments = [];
+    transcribeHistoryId = h.id;
+    transcribeHasCues = !!h.has_segments;
+    showTranscribeResult(await res.text());
+    $('transcribeResultCard').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  } catch (e) {
+    toast(t('ui.failed_to_load_history') + e.message, true);
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function loadRecentTranscriptions() {
+  let items = [];
+  try {
+    const d = await api('/api/history?task=asr');
+    items = (d.history || []).slice(0, 5);
+  } catch (_) {
+    return;
+  }
+  const host = $('transcribeRecent');
+  host.innerHTML = '';
+  $('transcribeRecentTitle').hidden = items.length === 0;
+  if (!items.length) return;
+
+  for (const h of items) {
+    const card = document.createElement('div');
+    card.className = 'card';
+
+    const meta = document.createElement('div');
+    meta.className = 'hist-meta';
+    const when = document.createElement('span');
+    when.className = 'hint';
+    when.textContent = new Date(h.created_at * 1000)
+      .toLocaleString(dateLocale(), { hour12: false });
+    meta.appendChild(when);
+    if (h.input && h.input.name) {
+      const source = document.createElement('span');
+      source.className = 'chip';
+      source.textContent = h.input.name;
+      meta.appendChild(source);
+    }
+    const dur = document.createElement('span');
+    dur.className = 'hint';
+    dur.textContent = fmtDur(h.duration_secs);
+    meta.appendChild(dur);
+    card.appendChild(meta);
+
+    const preview = document.createElement('div');
+    preview.className = 'hist-text';
+    preview.textContent = h.text;
+    card.appendChild(preview);
+
+    const row = document.createElement('div');
+    row.className = 'hist-row';
+    const open = document.createElement('button');
+    open.type = 'button';
+    open.className = 'ghost small';
+    open.textContent = t('transcribe.open');
+    open.onclick = () => openTranscribeEntry(h, open);
+    row.appendChild(open);
+    card.appendChild(row);
+    host.appendChild(card);
+  }
+
+  const more = document.createElement('div');
+  more.className = 'actions';
+  const link = document.createElement('a');
+  link.className = 'hint';
+  link.href = '#/history';
+  link.textContent = t('transcribe.open_history');
+  link.onclick = (e) => {
+    e.preventDefault();
+    historyTaskFilter = 'asr';
+    try { localStorage.setItem('laverock-history-task', 'asr'); } catch (_) {}
+    location.hash = '#/history';
+  };
+  more.appendChild(link);
+  host.appendChild(more);
+}
+
 // ---------------------------------------------------------------- convert
 //
 // Voice conversion: a source clip plus a target voice from the library.
@@ -6757,6 +7056,7 @@ function showPage(page) {
   if (page === 'convert') { loadProfiles(); syncConvertEngine(); }
   if (page === 'voices') loadProfiles();
   if (page === 'history') loadHistory();
+  if (page === 'transcribe') { syncTranscribePage(); loadRecentTranscriptions(); }
   // Installs run on the server and can finish while another page is open,
   // so pick up the registry before drawing the catalog. Engines load first
   // because the cards read the per-engine kind and load state.
@@ -6777,7 +7077,10 @@ async function loadHealth() {
     transcribeAvailable = !!h.transcribe;
     ffmpegAvailable = !!h.ffmpeg;
     syncProjectMediaInput();
-    for (const cap of [synthCapture, voiceCapture, libraryCapture]) cap.syncTranscribeButton();
+    for (const cap of [synthCapture, voiceCapture, libraryCapture, transcribeCapture]) {
+      cap.syncTranscribeButton();
+    }
+    syncTranscribePage();
   } catch (_) {
     $('connState').classList.add('off');
   }

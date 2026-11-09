@@ -39,6 +39,10 @@ async function setLanguage(next, { persist = true } = {}) {
   syncProxyMode();
   await Promise.all([loadEngines(), loadProfiles(), loadCaptures(), loadSettingsPage(), loadToolsPage(), loadProjects()]);
   renderHistory();
+  if (currentPage() === 'transcribe') {
+    syncTranscribePage();
+    loadRecentTranscriptions();
+  }
   await loadModels();
   if (session && session.lan_enabled) loadDevices();
 }

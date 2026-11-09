@@ -39,6 +39,11 @@
     stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round;
   }
   nav a:hover { background: var(--panel); color: var(--text); }
+  .nav-group {
+    margin: 12px 12px 2px; font-size: 10.5px; letter-spacing: .12em;
+    text-transform: uppercase; color: var(--muted); opacity: .75;
+  }
+  nav .nav-group:first-child { margin-top: 2px; }
   nav a.active {
     background: var(--panel2); color: var(--text);
     box-shadow: inset 2px 0 0 var(--accent);
@@ -368,7 +373,8 @@
       background: rgba(16, 18, 25, .98); backdrop-filter: blur(12px);
     }
     .brand, .sidebar-foot { display: none; }
-    nav { flex-direction: row; flex: 1; gap: 2px; }
+    nav { flex-direction: row; flex: 1; gap: 2px; overflow-x: auto; }
+    .nav-group { display: none; }
     nav a {
       flex: 1; flex-direction: column; gap: 3px; justify-content: center;
       padding: 7px 2px; font-size: 10.5px; border-radius: 9px;

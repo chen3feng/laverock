@@ -1,0 +1,28 @@
+addI18n({
+  zh: {
+    'transcribe.title': '转写',
+    'transcribe.sub': '把一段录音或音频转成文字，带时间轴，可复制或导出 TXT / SRT / VTT。',
+    'transcribe.audio': '音频',
+    'transcribe.hint': '转写在本机完成；首次使用需要先到「模型」页安装 SenseVoice。',
+    'transcribe.no_model': '还没有安装语音识别模型，请先到「模型」页安装 SenseVoice。',
+    'transcribe.result': '转写结果',
+    'transcribe.saved': '结果已保存到历史，可随时回来复制或导出。',
+    'transcribe.recent': '最近转写',
+    'transcribe.open': '打开',
+    'transcribe.open_history': '查看全部',
+    'transcribe.empty': '还没有转写记录。',
+  },
+  en: {
+    'transcribe.title': 'Transcribe',
+    'transcribe.sub': 'Turn a recording or audio file into text with timings, ready to copy or export as TXT / SRT / VTT.',
+    'transcribe.audio': 'Audio',
+    'transcribe.hint': 'Transcription runs on this computer; install SenseVoice from the Models page first.',
+    'transcribe.no_model': 'No speech recognition model installed yet. Install SenseVoice from the Models page first.',
+    'transcribe.result': 'Transcript',
+    'transcribe.saved': 'Saved to history, so you can come back to copy or export it.',
+    'transcribe.recent': 'Recent transcripts',
+    'transcribe.open': 'Open',
+    'transcribe.open_history': 'View all',
+    'transcribe.empty': 'No transcripts yet.',
+  },
+});

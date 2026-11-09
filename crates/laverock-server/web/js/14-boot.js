@@ -15,6 +15,7 @@ function showPage(page) {
   if (page === 'convert') { loadProfiles(); syncConvertEngine(); }
   if (page === 'voices') loadProfiles();
   if (page === 'history') loadHistory();
+  if (page === 'transcribe') { syncTranscribePage(); loadRecentTranscriptions(); }
   // Installs run on the server and can finish while another page is open,
   // so pick up the registry before drawing the catalog. Engines load first
   // because the cards read the per-engine kind and load state.
@@ -35,7 +36,10 @@ async function loadHealth() {
     transcribeAvailable = !!h.transcribe;
     ffmpegAvailable = !!h.ffmpeg;
     syncProjectMediaInput();
-    for (const cap of [synthCapture, voiceCapture, libraryCapture]) cap.syncTranscribeButton();
+    for (const cap of [synthCapture, voiceCapture, libraryCapture, transcribeCapture]) {
+      cap.syncTranscribeButton();
+    }
+    syncTranscribePage();
   } catch (_) {
     $('connState').classList.add('off');
   }
