@@ -242,7 +242,10 @@ upload the source. `cover` (and `cover-nofsq`) re-sings it in a new style,
 `repaint_mode`, `repaint_strength`), `complete` fills in missing sections,
 and `lego`/`extract` generate or pull a single track named by `track_name`.
 Every route except `text2music` needs the source upload; the page hides the
-controls a route does not use.
+controls a route does not use. A checkpoint that implements only some
+routes can say so in its manifest: give `parameters` an entry for
+`task_route` whose `options` list only the supported values, and the Music
+page offers exactly those.
 
 12 GB+ of VRAM is comfortable. On an 8 GB card the model runs with CPU or
 offload; installing with `ACE_STEP_QUANT=q8_0` halves the download, though
