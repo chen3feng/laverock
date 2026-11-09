@@ -1,15 +1,17 @@
 //! Ad-hoc audio helpers: transcription and WAV-to-MP3 encoding.
 
 use axum::{
-    body::Bytes,
+    body::{Body, Bytes},
     extract::{DefaultBodyLimit, Multipart, Query, State},
     http::{header, StatusCode},
     response::{IntoResponse, Response},
     routing::post,
     Json, Router,
 };
+use tokio::sync::mpsc;
+use tokio_stream::wrappers::ReceiverStream;
 
-use super::{subtitle_response, ApiError, AppState};
+use super::{error_frame, sse_frame, subtitle_response, ApiError, AppState};
 use crate::{export, subtitles};
 
 pub(crate) fn router() -> Router<AppState> {
@@ -26,6 +28,10 @@ pub(crate) fn router() -> Router<AppState> {
         .route(
             "/api/transcribe/details",
             post(transcribe_details).layer(DefaultBodyLimit::max(64 * 1024 * 1024)),
+        )
+        .route(
+            "/api/transcribe/stream",
+            post(transcribe_stream).layer(DefaultBodyLimit::max(64 * 1024 * 1024)),
         )
         .route(
             "/api/transcribe/subtitles",
@@ -147,6 +153,56 @@ async fn transcribe_details(
         .map_err(panic_error("transcribe"))??;
     record_transcript(&state, &transcript, None);
     Ok(Json(transcript))
+}
+
+/// Stream a transcript: one `segment` event per finished cue, then a
+/// `done` event with the whole transcript. Long clips fill in as they are
+/// decoded instead of after one full pass.
+async fn transcribe_stream(
+    State(state): State<AppState>,
+    multipart: Multipart,
+) -> Result<Response, ApiError> {
+    let AudioUpload { audio, record } = read_audio(multipart).await?;
+    let transcriber = state.transcriber.clone();
+    let history_state = state.clone();
+    let (tx, rx) = mpsc::channel::<std::result::Result<Bytes, std::io::Error>>(16);
+
+    tokio::task::spawn_blocking(move || {
+        let result = transcriber.transcribe_progressive(&audio, |segment| {
+            let payload = serde_json::json!({
+                "text": segment.text,
+                "start": segment.start,
+                "end": segment.end,
+            });
+            let _ = tx.blocking_send(Ok(sse_frame("segment", &payload.to_string())));
+        });
+        match result {
+            Ok(transcript) => {
+                if record {
+                    record_transcript(&history_state, &transcript, None);
+                }
+                let recorded = record && !transcript.text.trim().is_empty();
+                let payload = serde_json::json!({
+                    "text": transcript.text,
+                    "segments": transcript.segments,
+                    "language": transcript.language,
+                    "duration": transcript.duration,
+                    "recorded": recorded,
+                });
+                let _ = tx.blocking_send(Ok(sse_frame("done", &payload.to_string())));
+            }
+            Err(e) => {
+                let _ = tx.blocking_send(Ok(error_frame(&e.to_string())));
+            }
+        }
+    });
+
+    Response::builder()
+        .status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, "text/event-stream")
+        .header(header::CACHE_CONTROL, "no-cache")
+        .body(Body::from_stream(ReceiverStream::new(rx)))
+        .map_err(|e| ApiError::internal(e.to_string()))
 }
 
 #[derive(Debug, serde::Deserialize)]

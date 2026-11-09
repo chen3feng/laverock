@@ -24,6 +24,9 @@ class Capture {
     this.detailed = detailed;
     this.onChange = () => {};
     this.onTranscribed = () => {};
+    // Detailed transcription streams; each finished cue is reported here
+    // while the request is still running.
+    this.onProgress = () => {};
 
     this.pick.onclick = () => this.file.click();
     this.transBtn.onclick = () => this.transcribe({ record: true });
@@ -68,11 +71,11 @@ class Capture {
     }
     this.setTranscribing(true);
     try {
+      if (this.detailed) return await this.transcribeStream(record);
       const fd = new FormData();
       fd.append('audio', this.blob, this.filename || 'reference.wav');
       if (record) fd.append('record', '1');
-      const url = this.detailed ? '/api/transcribe/details' : '/api/transcribe';
-      const res = await apiFetch(url, { method: 'POST', body: fd });
+      const res = await apiFetch('/api/transcribe', { method: 'POST', body: fd });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         throw new Error(body.error || res.statusText);
@@ -80,7 +83,7 @@ class Capture {
       const body = await res.json();
       const text = body.text;
       if (!text) throw new Error(t("ui.no_speech_recognized"));
-      this.onTranscribed(text, this.detailed ? body : null);
+      this.onTranscribed(text, null);
       if (this.fileLabel) this.setInfo(this.fileLabel);
       return text;
     } catch (e) {
@@ -90,6 +93,35 @@ class Capture {
     } finally {
       this.setTranscribing(false);
     }
+  }
+
+  // Detailed mode streams: cues arrive while the model works through the
+  // clip, and the `done` event carries the finished transcript.
+  async transcribeStream(record) {
+    const fd = new FormData();
+    fd.append('audio', this.blob, this.filename || 'reference.wav');
+    if (record) fd.append('record', '1');
+    const res = await apiFetch('/api/transcribe/stream', { method: 'POST', body: fd });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.error || res.statusText);
+    }
+    let transcript = null;
+    let failure = null;
+    await readSse(res, {
+      segment: (segment) => this.onProgress(segment),
+      done: (body) => { transcript = body; },
+      error: (body) => {
+        failure = new Error((body && body.message) || t('ui.transcription_failed'));
+      },
+    });
+    if (failure) throw failure;
+    if (!transcript || !transcript.text) {
+      throw new Error(t('ui.no_speech_recognized'));
+    }
+    this.onTranscribed(transcript.text, transcript);
+    if (this.fileLabel) this.setInfo(this.fileLabel);
+    return transcript.text;
   }
 
   clear() {
@@ -204,6 +236,34 @@ function encodeWav(samples, sr) {
     v.setInt16(o, Math.max(-1, Math.min(1, s)) * 0x7fff, true); o += 2;
   }
   return buf;
+}
+
+// Read a Server-Sent Events response, calling `handlers[event]` for each
+// framed event with its parsed JSON payload.
+async function readSse(res, handlers) {
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = '';
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    let sep;
+    while ((sep = buf.indexOf('\n\n')) !== -1) {
+      const raw = buf.slice(0, sep);
+      buf = buf.slice(sep + 2);
+      let event = '';
+      const dataLines = [];
+      for (const line of raw.split('\n')) {
+        if (line.startsWith('event:')) event = line.slice(6).trim();
+        else if (line.startsWith('data:')) dataLines.push(line.slice(5).trim());
+      }
+      const handler = handlers[event];
+      if (!handler) continue;
+      const data = dataLines.join('\n');
+      handler(data ? JSON.parse(data) : null);
+    }
+  }
 }
 
 const synthCapture = new Capture($('synthCapture'));
