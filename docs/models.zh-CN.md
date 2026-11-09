@@ -195,7 +195,9 @@ M4 Pro 上 Q8_0 检查点实测 RTF 1.47，加载后内存约 4.1 GB（见「速
 `cover-nofsq`）用新风格重新演唱，`repaint` 重绘指定时间段（`repainting_start` /
 `repainting_end`、`repaint_mode`、`repaint_strength`），`complete` 补全缺失段落，
 `lego` / `extract` 按 `track_name` 生成或提取单条音轨。除 `text2music` 外，所有
-路由都需要上传源音乐；页面会隐藏当前路由用不到的控件。
+路由都需要上传源音乐；页面会隐藏当前路由用不到的控件。如果某个检查点只
+支持部分路由，可在清单的 `parameters` 中为 `task_route` 声明一个只包含受支持
+取值的条目，音乐页就只显示这些路由。
 
 建议 12 GB 以上显存。8 GB 显卡可走 CPU/offload；安装时设置
 `ACE_STEP_QUANT=q8_0` 可把下载减半，但量化后的 planner 偶尔会采样失败，
