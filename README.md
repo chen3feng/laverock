@@ -21,8 +21,8 @@ generation history and a phone remote that joins over your local network.
   keeping its words and timing. Seed-VC runs on the same local runtime, and
   long conversions continue as background jobs.
 - **Speech transcription** — transcribe a recording or audio file on-device,
-  edit the text, and export TXT, SRT or VTT; every transcript stays in
-  history.
+  with text appearing live as you speak; edit it and export TXT, SRT or VTT;
+  every transcript stays in history.
 - **18 models behind one interface** — from a 135 MB ONNX model that runs in
   real time on CPU to 2B diffusion and LLM systems, plus text-to-music and
   voice conversion. Install, update and remove them from the app, with live

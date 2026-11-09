@@ -3,6 +3,7 @@
 const asrCapture = new Capture($('transcribeCapture'), {
   autoTranscribe: false,
   detailed: true,
+  live: true,
 });
 
 // The result card shows cues from a fresh run, or a history id when the
@@ -12,37 +13,46 @@ let transcribeHistoryId = null;
 let transcribeHasCues = false;
 // True while a streaming request is still delivering cues.
 let transcribeStreaming = false;
+// Live dictation text shown while recording, and until the pass after
+// stop replaces it with the final transcript.
+let transcribeLiveText = '';
+let transcribeLive = false;
+
+asrCapture.onLiveText = (text) => {
+  transcribeLive = true;
+  transcribeLiveText = text;
+  transcribeStreaming = false;
+  transcribeSegments = [];
+  transcribeHistoryId = null;
+  transcribeHasCues = false;
+  showTranscribeResult(text, 'live');
+};
 
 asrCapture.onProgress = (segment) => {
+  // The live text stays on screen until the final pass finishes.
+  if (transcribeLiveText) return;
   transcribeStreaming = true;
   transcribeHistoryId = null;
   transcribeHasCues = true;
   transcribeSegments.push(segment);
-  showTranscribeResult(segmentsText(transcribeSegments), true);
+  showTranscribeResult(segmentsText(transcribeSegments), 'streaming');
 };
 
 asrCapture.onTranscribed = (text, transcript) => {
+  transcribeLive = false;
+  transcribeLiveText = '';
   transcribeStreaming = false;
   transcribeSegments = (transcript && transcript.segments) || [];
   transcribeHistoryId = null;
   transcribeHasCues = transcribeSegments.length > 0;
-  showTranscribeResult(text);
+  showTranscribeResult(text, 'done');
   loadRecentTranscriptions();
 };
 
 // Mirror the server's cue join: CJK needs no space, Latin words do.
 function segmentsText(segments) {
-  const cjk = (c) => /[　-〿぀-ヿ㐀-䶿一-鿿豈-﫿＀-￯]/.test(c);
   let out = '';
-  for (const segment of segments) {
-    const piece = (segment.text || '').trim();
-    if (!piece) continue;
-    if (out) {
-      const previous = out[out.length - 1];
-      if (!cjk(previous) && !cjk(piece[0]) && !/\s/.test(previous)) out += ' ';
-    }
-    out += piece;
-  }
+  for (const segment of segments) out = joinCjk(out, segment.text);
   return out;
 }
 
@@ -55,13 +65,13 @@ function syncTranscribePage() {
   asrCapture.syncTranscribeButton();
 }
 
-function showTranscribeResult(text, streaming = false) {
+function showTranscribeResult(text, state = 'done') {
   $('transcribeResultCard').hidden = false;
   const area = $('transcribeText');
   const atBottom = area.scrollTop + area.clientHeight >= area.scrollHeight - 4;
   area.value = text || '';
   // Follow the growing text unless the user scrolled up to read.
-  if (streaming && atBottom) area.scrollTop = area.scrollHeight;
+  if (state !== 'done' && atBottom) area.scrollTop = area.scrollHeight;
   const meta = $('transcribeResultMeta');
   meta.innerHTML = '';
   const chip = document.createElement('span');
@@ -70,7 +80,9 @@ function showTranscribeResult(text, streaming = false) {
   meta.appendChild(chip);
   const hint = document.createElement('span');
   hint.className = 'hint';
-  hint.textContent = streaming ? t('transcribe.streaming') : t('transcribe.saved');
+  hint.textContent = state === 'live'
+    ? t('transcribe.live')
+    : state === 'streaming' ? t('transcribe.streaming') : t('transcribe.saved');
   meta.appendChild(hint);
   renderTranscribeActions();
 }
@@ -103,7 +115,7 @@ function renderTranscribeActions() {
   const row = $('transcribeActions');
   row.innerHTML = '';
   // Exports only make sense once the transcript is complete.
-  if (transcribeStreaming) return;
+  if (transcribeLive || transcribeStreaming) return;
   const area = $('transcribeText');
 
   const copy = document.createElement('button');
@@ -174,6 +186,8 @@ async function openTranscribeEntry(h, button) {
   try {
     const res = await apiFetch(`/api/history/${encodeURIComponent(h.id)}/text`);
     if (!res.ok) throw new Error('HTTP ' + res.status);
+    transcribeLive = false;
+    transcribeLiveText = '';
     transcribeStreaming = false;
     transcribeSegments = [];
     transcribeHistoryId = h.id;
