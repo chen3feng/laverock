@@ -59,6 +59,10 @@ pub enum Family {
     AceStep,
     /// Music and sound effects (`--task gen`), Stable Audio 3.
     StableAudio,
+    /// Music with lyrics (`--task gen`), MiniMax Music 3.
+    MiniMaxMusic3,
+    /// Music with lyrics and style prompts (`--task gen`), YuE2.
+    Yue2,
     /// Any family driven by a `model_spec.json`; the manifest supplies
     /// the family and task names.
     Generic,
@@ -74,13 +78,18 @@ impl Family {
             Family::IndexTts2 => "index_tts2",
             Family::AceStep => "ace_step",
             Family::StableAudio => "stable_audio",
+            Family::MiniMaxMusic3 => "minimax_music3",
+            Family::Yue2 => "yue2",
             Family::Generic => "audio_cpp",
         }
     }
 
     /// Families that generate music rather than speech.
     fn is_music(self) -> bool {
-        matches!(self, Family::AceStep | Family::StableAudio)
+        matches!(
+            self,
+            Family::AceStep | Family::StableAudio | Family::MiniMaxMusic3 | Family::Yue2
+        )
     }
 
     fn label(self) -> &'static str {
@@ -91,6 +100,8 @@ impl Family {
             Family::IndexTts2 => "IndexTTS-2",
             Family::AceStep => "ACE-Step",
             Family::StableAudio => "Stable Audio 3",
+            Family::MiniMaxMusic3 => "MiniMax Music 3",
+            Family::Yue2 => "YuE2",
             Family::Generic => "audio.cpp",
         }
     }
@@ -265,7 +276,9 @@ impl AudioCppEngine {
                 .indextts2
                 .as_ref()
                 .map(|c| Section::speech(c, family)),
-            Family::AceStep | Family::StableAudio => manifest.music.as_ref().map(Section::music),
+            Family::AceStep | Family::StableAudio | Family::MiniMaxMusic3 | Family::Yue2 => {
+                manifest.music.as_ref().map(Section::music)
+            }
             Family::Generic => manifest.audio_cpp.as_ref().map(|cfg| {
                 let spec = manifest
                     .resolved_spec
@@ -364,6 +377,25 @@ impl AudioCppEngine {
             server_bin,
             resident: Mutex::new(None),
         })
+    }
+
+    /// The `--text` value for families that read their prompt there.
+    /// YuE2 takes the style caption as a request option and treats
+    /// `--text` as the lyrics fallback, so it gets no `--text` at all.
+    fn prompt_text_argument<'a>(&self, req: &'a SynthRequest) -> Option<&'a str> {
+        match self.family {
+            Family::Yue2 => None,
+            _ => Some(req.text.as_str()),
+        }
+    }
+
+    /// The resident server's `input` field. It maps to `--text`, so YuE2
+    /// puts the lyrics there and the style in `options.style`.
+    fn resident_input(&self, req: &SynthRequest) -> String {
+        match self.family {
+            Family::Yue2 => self.param_str(req, "lyrics", ""),
+            _ => req.text.clone(),
+        }
     }
 
     fn param_str(&self, req: &SynthRequest, name: &str, fallback: &str) -> String {
@@ -471,6 +503,18 @@ impl SpeechEngine for AudioCppEngine {
                             .into(),
                     ));
                 }
+            }
+        } else if self.family == Family::MiniMaxMusic3 {
+            if self.param_str(req, "lyrics", "").is_empty() {
+                return Err(CoreError::UserError(i18n::Message::new(
+                    Key::MusicLyricsRequired,
+                )));
+            }
+        } else if self.family == Family::Yue2 {
+            if req.text.trim().is_empty() {
+                return Err(CoreError::BadRequest(
+                    "YuE2 needs a style prompt (the caption)".into(),
+                ));
             }
         } else if is_music {
             let route = self.param_str(req, "task_route", "text2music");
@@ -592,9 +636,10 @@ impl SpeechEngine for AudioCppEngine {
             .arg("--model")
             .arg(&self.model)
             .arg("--backend")
-            .arg(&self.backend)
-            .arg("--text")
-            .arg(&req.text);
+            .arg(&self.backend);
+        if let Some(text) = self.prompt_text_argument(req) {
+            cmd.arg("--text").arg(text);
+        }
         if let Some(ref_wav) = &ref_wav {
             cmd.arg("--voice-ref").arg(ref_wav);
         }
@@ -785,7 +830,9 @@ impl AudioCppEngine {
             Family::VoxCpm2 => self.voxcpm2_task(req),
             Family::CosyVoice => self.cosyvoice_task(req),
             Family::IndexTts2 => self.indextts2_task(req),
-            Family::AceStep | Family::StableAudio => self.ace_step_task(req),
+            Family::AceStep | Family::StableAudio | Family::MiniMaxMusic3 | Family::Yue2 => {
+                self.ace_step_task(req)
+            }
             Family::Generic => self.task.as_str(),
         }
     }
@@ -798,6 +845,8 @@ impl AudioCppEngine {
             Family::IndexTts2 => self.indextts2_options(req, cmd),
             Family::AceStep => self.ace_step_options(req, cmd),
             Family::StableAudio => self.stable_audio_options(req, cmd),
+            Family::MiniMaxMusic3 => self.minimax_music3_options(req, cmd),
+            Family::Yue2 => self.yue2_options(req, cmd),
             Family::Generic => Ok(()),
         }
     }
@@ -1145,7 +1194,9 @@ impl AudioCppEngine {
             Family::VoxCpm2 => self.voxcpm2_server_tasks(),
             Family::CosyVoice => self.cosyvoice_server_tasks(),
             Family::IndexTts2 => self.indextts2_server_tasks(),
-            Family::AceStep | Family::StableAudio => self.ace_step_server_tasks(),
+            Family::AceStep | Family::StableAudio | Family::MiniMaxMusic3 | Family::Yue2 => {
+                self.ace_step_server_tasks()
+            }
             Family::Generic => vec![self.task.as_str()],
         }
     }
@@ -1223,6 +1274,8 @@ impl AudioCppEngine {
             Family::IndexTts2 => self.indextts2_resident(req)?,
             Family::AceStep => self.ace_step_resident(req)?,
             Family::StableAudio => self.stable_audio_resident(req)?,
+            Family::MiniMaxMusic3 => self.minimax_music3_resident(req)?,
+            Family::Yue2 => self.yue2_resident(req)?,
             Family::Generic => {
                 return Err(CoreError::Load(
                     "generic audio.cpp tasks use /v1/tasks/run".into(),
@@ -1232,7 +1285,7 @@ impl AudioCppEngine {
 
         let mut body = json!({
             "model": self.resident_id(self.task(req)),
-            "input": req.text,
+            "input": self.resident_input(req),
             "seed": seed,
             "options": Value::Object(family.options),
         });
@@ -1466,11 +1519,14 @@ struct ResidentFailure {
 /// Join relative paths onto the model directory; absolute paths pass through.
 fn resolve_path(dir: &Path, value: &str) -> PathBuf {
     let path = Path::new(value);
-    if path.is_absolute() {
+    let joined = if path.is_absolute() {
         path.to_path_buf()
     } else {
         dir.join(path)
-    }
+    };
+    // A package directory is often spelled ".", which joins to "dir/.";
+    // audio.cpp only needs the directory itself.
+    joined.components().collect()
 }
 
 /// Read the spec a generic install names, or its conventional
@@ -1508,6 +1564,8 @@ mod tests {
             "indextts2" => ("indextts2", "indextts2"),
             "music" => ("music", "ace-step"),
             "stable_audio" => ("music", "stable-audio"),
+            "minimax_music3" => ("music", "minimax-music3"),
+            "yue2" => ("music", "yue2"),
             "audio_cpp" => ("audio_cpp", "seed-vc"),
             _ => ("cosyvoice", "cosyvoice"),
         };
@@ -1540,12 +1598,16 @@ mod tests {
                 "model": "fake.gguf",
                 "backend": "cpu"
             });
-            if kind == "stable_audio" {
-                section_cfg["family"] = serde_json::json!("stable_audio");
+            if matches!(kind, "stable_audio" | "minimax_music3" | "yue2") {
+                section_cfg["family"] = serde_json::json!(kind);
             }
             serde_json::json!({
                 "id": id,
-                "kind": if kind == "stable_audio" { "music" } else { kind },
+                "kind": if matches!(kind, "stable_audio" | "minimax_music3" | "yue2") {
+                    "music"
+                } else {
+                    kind
+                },
                 "name": "test",
                 "defaults": { "speed": 1.0, "num_steps": 10 },
                 section: section_cfg
@@ -1583,6 +1645,8 @@ mod tests {
             "indextts2" => super::Family::IndexTts2,
             "music" => super::Family::AceStep,
             "stable_audio" => super::Family::StableAudio,
+            "minimax_music3" => super::Family::MiniMaxMusic3,
+            "yue2" => super::Family::Yue2,
             "audio_cpp" => super::Family::Generic,
             _ => super::Family::CosyVoice,
         };
@@ -2011,6 +2075,91 @@ mod tests {
         req.input_sr = 48_000;
         let err = engine.synthesize(&req).unwrap_err();
         assert!(err.to_string().contains("inpaint_mask"), "{err}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn minimax_music3_passes_lyrics_and_duration() {
+        let dir = args_dir("minimax-music3");
+        let engine = fixture(&dir, "minimax_music3");
+        let req = request(&[
+            ("lyrics", serde_json::json!("[verse] city lights")),
+            ("duration_sec", serde_json::json!(20)),
+            ("guidance_scale", serde_json::json!(1.5)),
+        ]);
+        engine.synthesize(&req).expect("music");
+
+        let args: Vec<String> = std::fs::read_to_string(dir.join("args.txt"))
+            .unwrap()
+            .lines()
+            .map(str::to_string)
+            .collect();
+        assert!(args.windows(2).any(|w| w == ["--family", "minimax_music3"]));
+        assert!(
+            args.windows(2).any(|w| w == ["--text", "hello"]),
+            "caption stays in --text"
+        );
+        assert!(args
+            .windows(2)
+            .any(|w| w == ["--request-option", "lyrics=[verse] city lights"]));
+        assert!(args
+            .windows(2)
+            .any(|w| w == ["--request-option", "duration_sec=20"]));
+        assert!(args
+            .windows(2)
+            .any(|w| w == ["--request-option", "guidance_scale=1.5"]));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn minimax_music3_needs_lyrics() {
+        let dir = args_dir("minimax-music3-no-lyrics");
+        let engine = fixture(&dir, "minimax_music3");
+        let err = engine.synthesize(&request(&[])).unwrap_err();
+        assert!(err.to_string().contains("lyrics"), "{err}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn yue2_uses_the_caption_as_style_and_omits_text() {
+        let dir = args_dir("yue2");
+        let engine = fixture(&dir, "yue2");
+        let req = request(&[
+            ("lyrics", serde_json::json!("[verse] morning light")),
+            ("cot", serde_json::json!("full")),
+        ]);
+        engine.synthesize(&req).expect("music");
+
+        let args: Vec<String> = std::fs::read_to_string(dir.join("args.txt"))
+            .unwrap()
+            .lines()
+            .map(str::to_string)
+            .collect();
+        assert!(args.windows(2).any(|w| w == ["--family", "yue2"]));
+        assert!(
+            !args.iter().any(|a| a == "--text"),
+            "YuE2 reads --text as lyrics"
+        );
+        assert!(args
+            .windows(2)
+            .any(|w| w == ["--request-option", "style=hello"]));
+        assert!(args
+            .windows(2)
+            .any(|w| w == ["--lyrics", "[verse] morning light"]));
+        assert!(args
+            .windows(2)
+            .any(|w| w == ["--request-option", "cot=full"]));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn yue2_requires_a_style_caption() {
+        let dir = args_dir("yue2-no-style");
+        let engine = fixture(&dir, "yue2");
+        let mut req = request(&[]);
+        req.text = "   ".into();
+        let err = engine.synthesize(&req).unwrap_err();
+        assert!(err.to_string().contains("style"), "{err}");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

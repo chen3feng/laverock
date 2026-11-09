@@ -62,6 +62,8 @@
 | MOSS-TTS-Delay | 克隆 | 20 种 | 约 10 GB |
 | ACE-Step 1.5 Turbo | 文字生成音乐、歌词 | 50+ 种 | 约 10 GB（BF16） |
 | Stable Audio 3 Small / Medium | 音乐、音效、局部重绘 | 英 | 1.7–3.6 GB（Q8_0） |
+| YuE2 3B | 文字生成音乐、歌词（CC BY-NC 4.0） | 英 | 约 4.5 GB（Q8_0） |
+| MiniMax Music 3 | 文字生成音乐、歌词 | 中、英 | 约 8.4 GB（Q4_0） |
 | Seed-VC | 变声 | 不限 | 约 3.1 GB（Q8_0） |
 | SenseVoice Small（可选） | 语音识别 | 5 种 | 约 234 MB |
 

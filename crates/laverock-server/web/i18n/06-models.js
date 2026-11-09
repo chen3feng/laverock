@@ -17,6 +17,7 @@ addI18n({
     'models.unload_done': '模型已卸载',
     'models.show_details': '展开详情', 'models.hide_details': '收起详情',
     'models.license': '许可证', 'models.noncommercial': '非商用',
+    'models.memory_required': '需要约 {gb} GB 内存',
   },
   en: {
     'models.title': 'Models',
@@ -36,5 +37,6 @@ addI18n({
     'models.unload_done': 'Model unloaded',
     'models.show_details': 'Show details', 'models.hide_details': 'Hide details',
     'models.license': 'License', 'models.noncommercial': 'Non-commercial',
+    'models.memory_required': 'Needs about {gb} GB of memory',
   },
 });

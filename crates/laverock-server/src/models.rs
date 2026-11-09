@@ -51,6 +51,10 @@ struct CatalogEntry {
     /// them so the picker can avoid defaulting to a non-commercial one.
     #[serde(default)]
     license: Option<License>,
+    /// Physical memory the model needs, in GB. Entries above the machine's
+    /// total memory are listed but cannot be installed.
+    #[serde(default)]
+    min_memory_gb: Option<f64>,
     /// Operating systems where this model cannot be used, spelled as
     /// `std::env::consts::OS` (`windows`, `macos`, `linux`). The UI then
     /// hides the download and the API refuses to start it.
@@ -139,6 +143,11 @@ pub struct ModelView {
     /// Terms the weights are distributed under, when the catalog declares
     /// them.
     pub license: Option<License>,
+    /// Physical memory the model needs, in GB.
+    pub min_memory_gb: Option<f64>,
+    /// Why the install button is disabled on this machine, when the
+    /// catalog asks for more memory than it has.
+    pub memory_short: Option<String>,
     /// What the model does; the Models page groups cards by it and offers
     /// a shortcut to the matching workspace.
     pub task: TaskKind,
@@ -251,6 +260,7 @@ impl ModelService {
             }
         };
         let jobs = self.jobs.lock().expect("jobs lock poisoned");
+        let total_memory = crate::system::total_memory_bytes();
         let mut models: Vec<ModelView> = Vec::new();
         let mut known = Vec::new();
 
@@ -287,6 +297,8 @@ impl ModelService {
                 languages: entry.languages.clone(),
                 capabilities: entry.capabilities.clone(),
                 license: entry.license.clone(),
+                min_memory_gb: entry.min_memory_gb,
+                memory_short: memory_short(entry.min_memory_gb, total_memory, lang),
                 task: entry.task(),
                 note: entry
                     .note
@@ -331,6 +343,8 @@ impl ModelService {
                 languages: engine.languages,
                 capabilities: engine.capabilities,
                 license: engine.license,
+                min_memory_gb: None,
+                memory_short: None,
                 task: engine.task,
                 note: None,
                 unsupported: None,
@@ -372,6 +386,20 @@ impl ModelService {
         {
             return Err(CoreError::UserError(
                 i18n::Message::new(Key::UnsupportedPlatform).arg("model", &entry.name),
+            ));
+        }
+
+        // The UI disables the button; the API refuses too, so a direct
+        // call cannot start a download that cannot fit in memory.
+        if memory_short(
+            entry.min_memory_gb,
+            crate::system::total_memory_bytes(),
+            "en",
+        )
+        .is_some()
+        {
+            return Err(CoreError::UserError(
+                i18n::Message::new(Key::InsufficientMemory).arg("model", &entry.name),
             ));
         }
 
@@ -910,6 +938,23 @@ fn unsupported_here(entry: &CatalogEntry, lang: &str) -> Option<String> {
     )
 }
 
+/// Why this machine cannot install the model, when the catalog asks for
+/// more memory than it reports. An unreadable total never blocks an
+/// install.
+fn memory_short(min_gb: Option<f64>, total: Option<u64>, lang: &str) -> Option<String> {
+    let (min_gb, total) = (min_gb?, total?);
+    let have = total as f64 / (1024.0 * 1024.0 * 1024.0);
+    if have >= min_gb {
+        return None;
+    }
+    Some(match lang {
+        "en" => {
+            format!("Needs about {min_gb:.0} GB of memory; this computer reports {have:.0} GB.")
+        }
+        _ => format!("需要约 {min_gb:.0} GB 内存；本机约 {have:.0} GB。"),
+    })
+}
+
 /// Why an installed directory is unusable, if it is. An unparsable
 /// manifest counts: the engine never registers in that case, so the
 /// model page must offer a reinstall rather than claiming it is fine.
@@ -1139,6 +1184,18 @@ mod tests {
     use super::*;
 
     #[test]
+    fn memory_gate_explains_a_short_machine() {
+        assert_eq!(memory_short(None, Some(64 << 30), "en"), None);
+        assert_eq!(memory_short(Some(16.0), None, "en"), None);
+        assert_eq!(memory_short(Some(16.0), Some(64 << 30), "en"), None);
+        let msg = memory_short(Some(16.0), Some(8 << 30), "en").expect("short");
+        assert!(msg.contains("16") && msg.contains("8"), "{msg}");
+        assert!(memory_short(Some(16.0), Some(8 << 30), "zh")
+            .unwrap()
+            .contains("内存"));
+    }
+
+    #[test]
     fn catalog_is_valid() {
         let entries = catalog();
         assert!(entries.len() >= 3);
@@ -1312,6 +1369,7 @@ mod tests {
             languages: Vec::new(),
             capabilities: Vec::new(),
             license: None,
+            min_memory_gb: None,
             task: None,
             script: "fake.sh".to_string(),
             env: BTreeMap::new(),
@@ -1419,6 +1477,7 @@ mod tests {
             languages: Vec::new(),
             capabilities: Vec::new(),
             license: None,
+            min_memory_gb: None,
             task: None,
             script: "x.sh".into(),
             env: BTreeMap::new(),
@@ -1558,6 +1617,7 @@ mod tests {
             languages: Vec::new(),
             capabilities: Vec::new(),
             license: None,
+            min_memory_gb: None,
             task: None,
             script: "m.sh".into(),
             env: BTreeMap::new(),

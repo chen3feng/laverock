@@ -95,6 +95,12 @@ messages! {
     MusicSourceRequired = "music_source_required"
         { en: "{route} needs a source song to edit; upload one first.",
           zh: "{route} 需要一段要编辑的源音乐，请先上传。" },
+    MusicLyricsRequired = "music_lyrics_required"
+        { en: "This music model needs lyrics; fill in the lyrics field first.",
+          zh: "该音乐模型需要歌词，请先填写歌词。" },
+    InsufficientMemory = "insufficient_memory"
+        { en: "This computer does not have enough memory to install {model}.",
+          zh: "本机内存不足，无法安装 {model}。" },
     TranscriptRequired = "transcript_required"
         { en: "{engine} needs the transcript of the reference clip.",
           zh: "{engine} 需要参考音频对应的文字。" },

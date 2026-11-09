@@ -108,3 +108,52 @@ pub fn rss_bytes(pid: u32) -> Option<u64> {
 pub fn rss_bytes(_pid: u32) -> Option<u64> {
     None
 }
+
+/// Total physical memory, in bytes.
+///
+/// The catalog gates the largest music models on this: on Apple Silicon it
+/// is the unified memory the GPU shares, and on a CUDA machine system RAM
+/// is normally at least the VRAM budget. `None` (an unreadable value)
+/// means no gate rather than blocking the install.
+#[cfg(target_os = "macos")]
+pub fn total_memory_bytes() -> Option<u64> {
+    let output = std::process::Command::new("sysctl")
+        .args(["-n", "hw.memsize"])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    String::from_utf8_lossy(&output.stdout).trim().parse().ok()
+}
+
+#[cfg(target_os = "linux")]
+pub fn total_memory_bytes() -> Option<u64> {
+    let meminfo = std::fs::read_to_string("/proc/meminfo").ok()?;
+    let line = meminfo.lines().find(|line| line.starts_with("MemTotal:"))?;
+    let kb: u64 = line.split_whitespace().nth(1)?.parse().ok()?;
+    Some(kb * 1024)
+}
+
+/// `wmic` is absent from some recent Windows builds; an unreadable total
+/// simply disables the memory gate.
+#[cfg(windows)]
+pub fn total_memory_bytes() -> Option<u64> {
+    let output = std::process::Command::new("wmic")
+        .args(["ComputerSystem", "get", "TotalPhysicalMemory", "/value"])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let text = String::from_utf8_lossy(&output.stdout);
+    let line = text
+        .lines()
+        .find(|line| line.starts_with("TotalPhysicalMemory="))?;
+    line.split('=').nth(1)?.trim().parse().ok()
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
+pub fn total_memory_bytes() -> Option<u64> {
+    None
+}

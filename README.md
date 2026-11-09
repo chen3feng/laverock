@@ -77,6 +77,8 @@ configure.
 | MOSS-TTS-Delay | clone | 20 | ~10 GB |
 | ACE-Step 1.5 Turbo | text-to-music, lyrics | 50+ | ~10 GB (BF16) |
 | Stable Audio 3 Small / Medium | music, sound effects, inpainting | en | 1.7–3.6 GB (Q8_0) |
+| YuE2 3B | text-to-music, lyrics (CC BY-NC 4.0) | en | ~4.5 GB (Q8_0) |
+| MiniMax Music 3 | text-to-music, lyrics | zh, en | ~8.4 GB (Q4_0) |
 | Seed-VC | voice conversion | any | ~3.1 GB (Q8_0) |
 | SenseVoice Small (optional) | speech recognition | 5 | ~234 MB |
 

@@ -387,6 +387,10 @@ impl Manifest {
             Some("stable_audio") if self.kind == EngineKind::Music => {
                 Self::stable_audio_parameters()
             }
+            Some("minimax_music3") if self.kind == EngineKind::Music => {
+                Self::minimax_music3_parameters()
+            }
+            Some("yue2") if self.kind == EngineKind::Music => Self::yue2_parameters(),
             _ => Self::default_parameters(self.kind),
         }
     }
@@ -533,6 +537,151 @@ impl Manifest {
                     .into(),
             },
         ]
+    }
+
+    /// MiniMax Music 3 controls: lyrics are required, plus the usual
+    /// diffusion knobs.
+    fn minimax_music3_parameters() -> Vec<ParamSpec> {
+        vec![
+            Self::lyrics_parameter(),
+            ParamSpec::slider(
+                "duration_sec",
+                ("Duration (seconds)", "时长（秒）"),
+                30.0,
+                10.0,
+                300.0,
+                1.0,
+                (
+                    "Budget for the generated song; the result may be shorter.",
+                    "生成歌曲的时长预算；实际结果可能更短。",
+                ),
+            ),
+            ParamSpec::int_slider(
+                "num_steps",
+                ("Diffusion steps", "扩散步数"),
+                30,
+                1,
+                100,
+                1,
+                (
+                    "30 is the model default; more steps are slower.",
+                    "30 是模型默认值；越多越慢。",
+                ),
+            ),
+            ParamSpec::slider(
+                "guidance_scale",
+                ("Guidance strength", "引导强度"),
+                1.0,
+                0.0,
+                10.0,
+                0.1,
+                (
+                    "Classifier-free guidance; 1 keeps the model default.",
+                    "无分类器引导；1 表示使用模型默认值。",
+                ),
+            ),
+            Self::seed_parameter(),
+        ]
+    }
+
+    /// YuE2 controls: style is the caption, lyrics and the optional
+    /// chain-of-thought planning are separate.
+    fn yue2_parameters() -> Vec<ParamSpec> {
+        use serde_json::json;
+        vec![
+            Self::lyrics_parameter(),
+            ParamSpec::int_slider(
+                "num_steps",
+                ("Diffusion steps", "扩散步数"),
+                8,
+                1,
+                64,
+                1,
+                (
+                    "8 is the model default; more steps are slower.",
+                    "8 是模型默认值；越多越慢。",
+                ),
+            ),
+            ParamSpec::slider(
+                "guidance_scale",
+                ("Guidance strength", "引导强度"),
+                1.0,
+                0.0,
+                10.0,
+                0.1,
+                (
+                    "Classifier-free guidance; 1 keeps the model default.",
+                    "无分类器引导；1 表示使用模型默认值。",
+                ),
+            ),
+            ParamSpec {
+                name: "cot".into(),
+                label: ("Planning", "规划模式").into(),
+                kind: ParamKind::Choice,
+                min: None,
+                max: None,
+                step: None,
+                options: vec![
+                    ParamOption {
+                        label: ("Off (fastest)", "关闭（最快）").into(),
+                        value: "off".into(),
+                    },
+                    ParamOption {
+                        label: ("Melody", "旋律").into(),
+                        value: "melody".into(),
+                    },
+                    ParamOption {
+                        label: ("Full", "完整").into(),
+                        value: "full".into(),
+                    },
+                ],
+                default: json!("off"),
+                hint: (
+                    "Chain-of-thought planning improves structure but takes longer.",
+                    "思维链规划能改善结构，但耗时更长。",
+                )
+                    .into(),
+            },
+            Self::seed_parameter(),
+        ]
+    }
+
+    fn lyrics_parameter() -> ParamSpec {
+        use serde_json::json;
+        ParamSpec {
+            name: "lyrics".into(),
+            label: ("Lyrics", "歌词").into(),
+            kind: ParamKind::TextArea,
+            min: None,
+            max: None,
+            step: None,
+            options: Vec::new(),
+            default: json!(""),
+            hint: (
+                "Section tags like [verse] and [chorus] are understood.",
+                "支持 [verse]、[chorus] 等段落标记。",
+            )
+                .into(),
+        }
+    }
+
+    fn seed_parameter() -> ParamSpec {
+        use serde_json::json;
+        ParamSpec {
+            name: "seed".into(),
+            label: ("Random seed", "随机种子").into(),
+            kind: ParamKind::Int,
+            min: Some(json!(0)),
+            max: Some(json!(4_294_967_295i64)),
+            step: None,
+            options: Vec::new(),
+            default: json!(42),
+            hint: (
+                "Same seed + prompt gives a reproducible song.",
+                "相同种子 + 提示词得到可复现的歌曲。",
+            )
+                .into(),
+        }
     }
 
     /// Longest reference clip this engine will use, in seconds.
@@ -2019,6 +2168,27 @@ mod tests {
         assert_eq!(params[0].default, serde_json::json!(30.0));
         assert!(!names.contains(&"task_route"), "no ACE-Step routes");
         assert!(!names.contains(&"lyrics"), "Stable Audio takes no lyrics");
+
+        let minimax: Manifest = serde_json::from_str(
+            r#"{"id":"mm","kind":"music","name":"m",
+                "music":{"binary":"/b","model":"/m","family":"minimax_music3"}}"#,
+        )
+        .expect("MiniMax manifest");
+        let minimax_params = minimax.parameters_or_defaults();
+        let names: Vec<&str> = minimax_params.iter().map(|p| p.name.as_str()).collect();
+        assert!(names.contains(&"lyrics"));
+        assert!(names.contains(&"duration_sec"));
+        assert!(!names.contains(&"task_route"));
+
+        let yue: Manifest = serde_json::from_str(
+            r#"{"id":"y","kind":"music","name":"y",
+                "music":{"binary":"/b","model":"/m","family":"yue2"}}"#,
+        )
+        .expect("YuE2 manifest");
+        let yue_params = yue.parameters_or_defaults();
+        let names: Vec<&str> = yue_params.iter().map(|p| p.name.as_str()).collect();
+        assert!(names.contains(&"lyrics"));
+        assert!(names.contains(&"cot"));
     }
 
     #[test]

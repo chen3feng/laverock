@@ -345,6 +345,8 @@ impl EngineManager {
                 // historical default for installs written before the field.
                 let family = match manifest.music.as_ref().map(|m| m.family.as_str()) {
                     Some("stable_audio") => Family::StableAudio,
+                    Some("minimax_music3") => Family::MiniMaxMusic3,
+                    Some("yue2") => Family::Yue2,
                     _ => Family::AceStep,
                 };
                 Arc::new(AudioCppEngine::build(&dir, &manifest, family)?)
