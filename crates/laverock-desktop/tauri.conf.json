@@ -38,7 +38,9 @@
       "../../scripts/download-indextts2.sh": "scripts/download-indextts2.sh",
       "../../scripts/download-mosstts.sh": "scripts/download-mosstts.sh",
       "../../scripts/download-seedvc.sh": "scripts/download-seedvc.sh",
-      "../../scripts/download-stable-audio.sh": "scripts/download-stable-audio.sh"
+      "../../scripts/download-stable-audio.sh": "scripts/download-stable-audio.sh",
+      "../../scripts/download-yue2.sh": "scripts/download-yue2.sh",
+      "../../scripts/download-minimax-music.sh": "scripts/download-minimax-music.sh"
     },
     "macOS": {
       "signingIdentity": "-",

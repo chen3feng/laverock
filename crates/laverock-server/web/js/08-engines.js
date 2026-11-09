@@ -263,7 +263,14 @@ function syncMusicEngine() {
     : '';
   $('musicEngineHint').textContent =
     `${e.kind} · ${(e.languages || []).join(' / ')} · ${caps}${license}`;
-  renderParamGrid($('musicParams'), e.parameters || [], 'music-param-', musicParamActions());
+  // Duration estimation only applies to engines with a duration control.
+  const hasDuration = (e.parameters || []).some((p) => p.name === 'duration_sec');
+  renderParamGrid(
+    $('musicParams'),
+    e.parameters || [],
+    'music-param-',
+    hasDuration ? musicParamActions() : {},
+  );
   syncMusicRoute();
 }
 $('musicEngine').onchange = syncMusicEngine;

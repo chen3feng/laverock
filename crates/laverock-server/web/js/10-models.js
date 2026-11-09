@@ -34,6 +34,8 @@ function engineAsModel(engine) {
     languages: engine.languages || [],
     capabilities: engine.capabilities || [],
     license: engine.license || null,
+    min_memory_gb: null,
+    memory_short: null,
     task: engine.task,
     note: null,
     unsupported: null,
@@ -198,6 +200,8 @@ function modelCard(model, installed, readonly) {
         : ''}
       ${model.license ? `<div class="chips">${licenseChip(model.license)}</div>` : ''}
       ${model.note ? `<div class="hint">${esc(model.note)}</div>` : ''}
+      ${model.min_memory_gb ? `<div class="hint">${esc(t('models.memory_required', { gb: Math.round(model.min_memory_gb) }))}</div>` : ''}
+      ${model.memory_short ? `<div class="hint err">${esc(model.memory_short)}</div>` : ''}
       ${model.unsupported ? `<div class="hint err">${esc(model.unsupported)}</div>` : ''}
       ${stale ? `<div class="hint err">${esc(model.problem)}</div>` : ''}
       ${model.manual ? `<div class="hint">${t("ui.manually_installed_manifest")}</div>` : ''}
@@ -243,7 +247,7 @@ function modelCard(model, installed, readonly) {
       : failed
         ? (t("ui.retry_install"))
         : (t("ui.download_install"));
-  btn.disabled = running || !scriptsReady || !!model.unsupported;
+  btn.disabled = running || !scriptsReady || !!model.unsupported || !!model.memory_short;
   btn.onclick = () => installModel(model.id);
   actions.appendChild(btn);
   if (installed) actions.appendChild(deleteButton(model));

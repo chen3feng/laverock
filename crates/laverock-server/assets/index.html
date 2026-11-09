@@ -1384,6 +1384,7 @@ addI18n({
     'models.unload_done': '模型已卸载',
     'models.show_details': '展开详情', 'models.hide_details': '收起详情',
     'models.license': '许可证', 'models.noncommercial': '非商用',
+    'models.memory_required': '需要约 {gb} GB 内存',
   },
   en: {
     'models.title': 'Models',
@@ -1403,6 +1404,7 @@ addI18n({
     'models.unload_done': 'Model unloaded',
     'models.show_details': 'Show details', 'models.hide_details': 'Hide details',
     'models.license': 'License', 'models.noncommercial': 'Non-commercial',
+    'models.memory_required': 'Needs about {gb} GB of memory',
   },
 });
 
@@ -3886,7 +3888,14 @@ function syncMusicEngine() {
     : '';
   $('musicEngineHint').textContent =
     `${e.kind} · ${(e.languages || []).join(' / ')} · ${caps}${license}`;
-  renderParamGrid($('musicParams'), e.parameters || [], 'music-param-', musicParamActions());
+  // Duration estimation only applies to engines with a duration control.
+  const hasDuration = (e.parameters || []).some((p) => p.name === 'duration_sec');
+  renderParamGrid(
+    $('musicParams'),
+    e.parameters || [],
+    'music-param-',
+    hasDuration ? musicParamActions() : {},
+  );
   syncMusicRoute();
 }
 $('musicEngine').onchange = syncMusicEngine;
@@ -4297,6 +4306,8 @@ function engineAsModel(engine) {
     languages: engine.languages || [],
     capabilities: engine.capabilities || [],
     license: engine.license || null,
+    min_memory_gb: null,
+    memory_short: null,
     task: engine.task,
     note: null,
     unsupported: null,
@@ -4461,6 +4472,8 @@ function modelCard(model, installed, readonly) {
         : ''}
       ${model.license ? `<div class="chips">${licenseChip(model.license)}</div>` : ''}
       ${model.note ? `<div class="hint">${esc(model.note)}</div>` : ''}
+      ${model.min_memory_gb ? `<div class="hint">${esc(t('models.memory_required', { gb: Math.round(model.min_memory_gb) }))}</div>` : ''}
+      ${model.memory_short ? `<div class="hint err">${esc(model.memory_short)}</div>` : ''}
       ${model.unsupported ? `<div class="hint err">${esc(model.unsupported)}</div>` : ''}
       ${stale ? `<div class="hint err">${esc(model.problem)}</div>` : ''}
       ${model.manual ? `<div class="hint">${t("ui.manually_installed_manifest")}</div>` : ''}
@@ -4506,7 +4519,7 @@ function modelCard(model, installed, readonly) {
       : failed
         ? (t("ui.retry_install"))
         : (t("ui.download_install"));
-  btn.disabled = running || !scriptsReady || !!model.unsupported;
+  btn.disabled = running || !scriptsReady || !!model.unsupported || !!model.memory_short;
   btn.onclick = () => installModel(model.id);
   actions.appendChild(btn);
   if (installed) actions.appendChild(deleteButton(model));

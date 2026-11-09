@@ -7,5 +7,7 @@ pub(super) mod ace_step;
 pub(super) mod cosyvoice;
 pub(super) mod dots;
 pub(super) mod indextts2;
+pub(super) mod minimax_music3;
 pub(super) mod stable_audio;
 pub(super) mod voxcpm2;
+pub(super) mod yue2;

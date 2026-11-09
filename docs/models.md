@@ -31,11 +31,15 @@ installs and CI use them directly:
 ./scripts/download-mosstts.sh      # MOSS-TTS-Delay, macOS/Linux only, ~10 GB weights
 ./scripts/download-ace-step.sh     # ACE-Step 1.5 Turbo music, ~10 GB BF16 (shares the runtime)
 ./scripts/download-stable-audio.sh # Stable Audio 3 Small Music, ~1.7 GB Q8_0 (shares the runtime)
+./scripts/download-yue2.sh         # YuE2 3B music, ~4.5 GB Q8_0 (CC BY-NC 4.0, shares the runtime)
+./scripts/download-minimax-music.sh # MiniMax Music 3, ~8.4 GB Q4_0 (shares the runtime)
 ./scripts/download-seedvc.sh       # Seed-VC voice conversion, ~3.1 GB Q8_0 (shares the runtime)
 
 # Variants
 STABLE_AUDIO_VARIANT=sfx ./scripts/download-stable-audio.sh    # sound effects, 8 s default
 STABLE_AUDIO_VARIANT=medium ./scripts/download-stable-audio.sh # larger music model, ~3.6 GB
+YUE2_QUANT=q4_0 ./scripts/download-yue2.sh                     # ~2.9 GB music export
+MINIMAX_MUSIC_QUANT=q8_0 ./scripts/download-minimax-music.sh   # ~13.4 GB music export
 
 # Variants
 QWEN3TTS_VARIANT=custom ./scripts/download-qwen3tts.sh    # 9 preset speakers
@@ -87,6 +91,8 @@ endpoint call the model.
 | `stable-audio-music` | Stable Audio 3 Small Music | text-to-music, init audio, inpainting | en | ~1.7 GB (Q8_0) / ~2.4 GB (F16) |
 | `stable-audio-sfx` | Stable Audio 3 Small SFX | sound effects | en | ~1.7 GB (Q8_0) / ~2.4 GB (F16) |
 | `stable-audio-medium` | Stable Audio 3 Medium | text-to-music, init audio, inpainting | en | ~3.6 GB (Q8_0) / ~5.8 GB (F16) |
+| `yue2` | YuE2 3B | text-to-music, lyrics | en | ~4.5 GB (Q8_0) / ~2.9 GB (Q4_0) |
+| `minimax-music3` | MiniMax Music 3 | text-to-music, lyrics | zh, en | ~8.4 GB (Q4_0) / ~13.4 GB (Q8_0) |
 | `seed-vc` | Seed-VC | voice conversion (`vc`) | language-agnostic | ~3.1 GB (Q8_0) / ~3.6 GB (F16) |
 | `enhance` | Voice cleanup (GTCRN + BS-RoFormer) | recording cleanup | — | ~165 MB |
 
@@ -281,6 +287,26 @@ otherwise. Stable Audio 3 is English-only and outputs 44.1 kHz stereo.
 Check the model card's licence before commercial use; the installer's note
 also says so.
 
+**Large music models** — two more engines need more memory than the
+small music builds. `yue2` (YuE2 3B) takes the caption as a style prompt
+and the lyrics separately, with optional chain-of-thought planning
+(`cot`); its weights are CC BY-NC 4.0, so the Music page never defaults to
+it while a commercial engine is installed. `minimax-music3` requires
+lyrics and sings in Chinese and English under the MiniMax-Music3 Community
+License.
+
+Catalog entries declare `min_memory_gb` (12 GB for YuE2 Q8_0, 16 GB for
+MiniMax Q4_0). The Models page shows the requirement and disables the
+install when the machine reports less memory; the check uses total
+physical memory, which is unified memory on Apple Silicon and normally at
+least the VRAM budget on a CUDA machine. When the total cannot be read,
+the gate is skipped rather than blocking the install.
+
+HeartMuLa was evaluated and is not offered: audio.cpp has no family for
+it, and its ~25 GB peak does not fit the shared runtime. ACE-Step, Stable
+Audio, YuE2 and MiniMax Music 3 cover the music and sound-effect range
+without a separate Python stack.
+
 **Seed-VC** — zero-shot voice conversion on the shared audio.cpp runtime.
 It turns an existing recording into a target voice from the library while
 keeping the words and timing; the **Convert** page takes a source clip and a
@@ -435,9 +461,11 @@ with a negative slope.
 | Feature | Requirement |
 | --- | --- |
 | ONNX engines (ZipVoice, Kokoro, SenseVoice) | none beyond the app |
-| audio.cpp engines (dots, CosyVoice, VoxCPM2, IndexTTS-2, ACE-Step, Stable Audio, Seed-VC) | prebuilt CLI and resident server are downloaded |
+| audio.cpp engines (dots, CosyVoice, VoxCPM2, IndexTTS-2, ACE-Step, Stable Audio, YuE2, MiniMax Music 3, Seed-VC) | prebuilt CLI and resident server are downloaded |
 | ACE-Step music | 12 GB+ VRAM recommended; 8 GB cards use CPU/offload |
 | Stable Audio 3 | Small builds run comfortably on 8 GB; Medium needs roughly twice the memory |
+| YuE2 3B / MiniMax Music 3 | 12 GB / 16 GB of physical memory; the Models page disables the install below that |
+| YuE2 3B / MiniMax Music 3 | 12 GB / 16 GB of physical memory; the Models page disables the install below that |
 | Python engines (Qwen3-TTS, LongCat, Ming, Chatterbox) | Python 3.10–3.12; the scripts create an isolated venv |
 | MOSS-TTS | macOS/Linux only (not offered on Windows); prebuilt runtime is downloaded; Python 3 for the one-time tokenizer conversion |
 | In-app installs on Windows | `bash` from Git for Windows |

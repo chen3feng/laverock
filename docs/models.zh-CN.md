@@ -28,6 +28,8 @@ Laverock 的安装包不含模型权重：包里是应用本身，模型按需�
 ./scripts/download-mosstts.sh      # MOSS-TTS-Delay，仅 macOS/Linux，约 10 GB 权重
 ./scripts/download-ace-step.sh     # ACE-Step 1.5 Turbo 音乐，BF16 约 10 GB（共用运行时）
 ./scripts/download-stable-audio.sh # Stable Audio 3 Small Music，Q8_0 约 1.7 GB（共用运行时）
+./scripts/download-yue2.sh         # YuE2 3B 音乐，Q8_0 约 4.5 GB（CC BY-NC 4.0，共用运行时）
+./scripts/download-minimax-music.sh # MiniMax Music 3，Q4_0 约 8.4 GB（共用运行时）
 ./scripts/download-seedvc.sh       # Seed-VC 变声，Q8_0 约 3.1 GB（共用运行时）
 
 # 变体
@@ -41,6 +43,8 @@ DOTS_MODEL=dots.tts-mf ./scripts/download-dots.sh         # 4 步 MeanFlow 导�
 ACE_STEP_QUANT=q8_0 ./scripts/download-ace-step.sh        # 约 6.2 GB 音乐导出
 STABLE_AUDIO_VARIANT=sfx ./scripts/download-stable-audio.sh    # 音效，默认 8 秒
 STABLE_AUDIO_VARIANT=medium ./scripts/download-stable-audio.sh # 更大的音乐模型，约 3.6 GB
+YUE2_QUANT=q4_0 ./scripts/download-yue2.sh                     # 约 2.9 GB 音乐导出
+MINIMAX_MUSIC_QUANT=q8_0 ./scripts/download-minimax-music.sh   # 约 13.4 GB 音乐导出
 SEEDVC_QUANT=f16 ./scripts/download-seedvc.sh             # 约 3.6 GB 变声导出
 ```
 
@@ -79,6 +83,8 @@ SEEDVC_QUANT=f16 ./scripts/download-seedvc.sh             # 约 3.6 GB 变声导
 | `stable-audio-music` | Stable Audio 3 Small Music | 文字生成音乐、初始音频、局部重绘 | 英 | 约 1.7 GB（Q8_0）/ 约 2.4 GB（F16） |
 | `stable-audio-sfx` | Stable Audio 3 Small SFX | 音效 | 英 | 约 1.7 GB（Q8_0）/ 约 2.4 GB（F16） |
 | `stable-audio-medium` | Stable Audio 3 Medium | 文字生成音乐、初始音频、局部重绘 | 英 | 约 3.6 GB（Q8_0）/ 约 5.8 GB（F16） |
+| `yue2` | YuE2 3B | 文字生成音乐、歌词 | 英 | 约 4.5 GB（Q8_0）/ 约 2.9 GB（Q4_0） |
+| `minimax-music3` | MiniMax Music 3 | 文字生成音乐、歌词 | 中、英 | 约 8.4 GB（Q4_0）/ 约 13.4 GB（Q8_0） |
 | `seed-vc` | Seed-VC | 变声（`vc`） | 不限语言 | 约 3.1 GB（Q8_0）/ 约 3.6 GB（F16） |
 | `enhance` | 人声清理（GTCRN + BS-RoFormer） | 录音清理 | — | 约 165 MB |
 
@@ -225,6 +231,21 @@ ACE_STEP_LORA=/path/to/style.safetensors ACE_STEP_LORA_SCALE=0.8 \
 仅支持英文，输出 44.1 kHz 立体声。商用前请查看模型卡的许可；安装脚本的说明也会
 提示这一点。
 
+**高显存音乐模型** —— 另外两个音乐引擎需要比小模型更多的内存。`yue2`
+（YuE2 3B）把标题作为风格提示、歌词单独填写，并可选用思维链规划（`cot`）；
+其权重为 CC BY-NC 4.0，因此只要装了商用引擎，音乐页就不会默认选它。
+`minimax-music3` 必须填写歌词，支持中英文演唱，使用 MiniMax-Music3
+Community License。
+
+模型目录用 `min_memory_gb` 声明需求（YuE2 Q8_0 为 12 GB，MiniMax Q4_0 为
+16 GB）。内存不足时「模型」页会显示需求并禁用安装；判断依据是物理内存总量，
+在 Apple Silicon 上即统一内存，在 CUDA 机器上通常不低于显存。读不到总量时会
+跳过该限制，而不是阻止安装。
+
+HeartMuLa 经评估后不提供：audio.cpp 没有对应 family，且约 25 GB 的峰值不适合
+共享运行时。ACE-Step、Stable Audio、YuE2 与 MiniMax Music 3 已覆盖音乐与音效
+范围，无需额外的 Python 栈。
+
 **Seed-VC** —— 运行在共享 audio.cpp 运行时上的零样本变声模型。它把一段现成录音
 换成声音库里的目标音色，同时保留原本的说话内容与节奏；「变声」页接收源音频和已保存
 的声音。只需源音频和 3–10 秒的目标参考音，因此模型听过的语言都能转换。转换作为
@@ -355,9 +376,11 @@ INT8 模型没有可加速的算子。上表 Kokoro 一行仍是 INT8 的数字�
 | 功能 | 要求 |
 | --- | --- |
 | ONNX 引擎（ZipVoice、Kokoro、SenseVoice） | 除应用外无额外要求 |
-| audio.cpp 引擎（dots、CosyVoice、VoxCPM2、IndexTTS-2、ACE-Step、Stable Audio、Seed-VC） | 下载预编译 CLI 与常驻服务 |
+| audio.cpp 引擎（dots、CosyVoice、VoxCPM2、IndexTTS-2、ACE-Step、Stable Audio、YuE2、MiniMax Music 3、Seed-VC） | 下载预编译 CLI 与常驻服务 |
 | ACE-Step 音乐 | 建议 12 GB 以上显存；8 GB 显卡使用 CPU/offload |
 | Stable Audio 3 | 小模型在 8 GB 显存上即可运行；Medium 约需两倍内存 |
+| YuE2 3B / MiniMax Music 3 | 12 GB / 16 GB 物理内存；不足时「模型」页禁用安装 |
+| YuE2 3B / MiniMax Music 3 | 12 GB / 16 GB 物理内存；不足时「模型」页禁用安装 |
 | Python 引擎（Qwen3-TTS、LongCat、Ming、Chatterbox） | Python 3.10–3.12；脚本自动创建隔离 venv |
 | MOSS-TTS | 仅 macOS/Linux（Windows 上不提供）；下载预编译运行时；一次性转换分词器需要 Python 3 |
 | Windows 上应用内安装 | Git for Windows 提供的 `bash` |

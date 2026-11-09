@@ -282,6 +282,59 @@
     }
   },
   {
+    "id": "yue2",
+    "task": "music",
+    "dir": "yue2",
+    "name": "YuE2 3B (Q8_0)",
+    "description": {
+      "en": "YuE2 3B writes a song from a style prompt and lyrics, with optional chain-of-thought planning for stronger structure. English prompts, on audio.cpp's native Metal/CUDA runtime.",
+      "zh": "YuE2 3B 根据风格提示与歌词生成歌曲，可选用思维链规划改善结构。英文提示词，经 audio.cpp 原生 Metal/CUDA 运行时推理。"
+    },
+    "size": "~4.5 GB (Q8_0) / ~2.9 GB (Q4_0)",
+    "languages": [
+      "en"
+    ],
+    "capabilities": [
+      "music",
+      "lyrics"
+    ],
+    "license": { "name": "CC BY-NC 4.0", "url": "https://huggingface.co/audio-cpp/Yue2-3B-GGUF", "noncommercial": true },
+    "min_memory_gb": 12,
+    "script": "download-yue2.sh",
+    "env": {},
+    "note": {
+      "en": "The weights are non-commercial (CC BY-NC 4.0), so this is never the default music engine while a commercial one is installed. Needs 12 GB+ of memory; the first load takes a while.",
+      "zh": "权重为非商用许可（CC BY-NC 4.0），因此只要装了商用模型，它就不会成为默认音乐引擎。需要 12 GB 以上内存；首次加载较慢。"
+    }
+  },
+  {
+    "id": "minimax-music3",
+    "task": "music",
+    "dir": "minimax-music3",
+    "name": "MiniMax Music 3 (Q4_0)",
+    "description": {
+      "en": "MiniMax Music 3 generates a full song from a style caption and required lyrics, with Chinese and English vocals. The largest music model here, on audio.cpp's native Metal/CUDA runtime.",
+      "zh": "MiniMax Music 3 根据风格描述与必填歌词生成完整歌曲，支持中英文演唱。是这里最大的音乐模型，经 audio.cpp 原生 Metal/CUDA 运行时推理。"
+    },
+    "size": "~8.4 GB (Q4_0) / ~13.4 GB (Q8_0)",
+    "languages": [
+      "zh",
+      "en"
+    ],
+    "capabilities": [
+      "music",
+      "lyrics"
+    ],
+    "license": { "name": "MiniMax-Music3 Community License", "url": "https://huggingface.co/audio-cpp/MiniMax-Music3-GGUF", "noncommercial": false },
+    "min_memory_gb": 16,
+    "script": "download-minimax-music.sh",
+    "env": {},
+    "note": {
+      "en": "Lyrics are required. Needs 16 GB+ of memory and is only offered when the machine reports enough. The component package is the model; changing precision means reinstalling.",
+      "zh": "必须填写歌词。需要 16 GB 以上内存，仅在机器内存足够时提供安装。组件包本身就是模型；更换精度需要重新安装。"
+    }
+  },
+  {
     "id": "seed-vc",
     "task": "vc",
     "dir": "seed-vc",
