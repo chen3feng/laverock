@@ -160,7 +160,7 @@ function renderVoices() {
     // A voice is engine-agnostic: the engine is picked at synthesis, so
     // the engine it was first saved with is not shown as a binding.
     el.innerHTML = `
-      <div class="voice-top"><b>${esc(p.name)}</b>${p.capture_count > 1 ? `<span class="chip">${esc(t('voices.takes', { n: p.capture_count }))}</span>` : ''}</div>
+      <div class="voice-top"><b>${esc(p.name)}</b>${p.capture_count > 1 ? `<span class="chip">${esc(t('voices.takes', { n: p.capture_count }))}</span>` : ''}${p.reference_secs != null ? `<span class="chip">${esc(t('voices.reference_secs', { s: p.reference_secs }))}</span>` : ''}</div>
       <div class="voice-meta">${fmtDur(p.duration_secs)} · ${fmtBytes(p.bytes)} · ${fmtDate(p.created_at)}</div>
       ${warns.map((w) => `<div class="voice-warn">⚠ ${esc(w)}</div>`).join('')}
       <div class="voice-text">${esc(p.prompt_text)}</div>
@@ -215,6 +215,11 @@ function resetPreviewState() {
 }
 
 async function editProfile(p) {
+  const initialSecs = p.reference_secs ?? null;
+  // Round to the slider's 0.5 s step so an untouched slider compares
+  // equal to its starting position.
+  const defaultSecs =
+    initialSecs ?? Math.round(Math.min(Math.max(p.duration_secs || 5, 3), 10) * 2) / 2;
   const res = await showDialog({
     title: t("ui.edit_voice"),
     okText: t("ui.save"),
@@ -228,6 +233,30 @@ async function editProfile(p) {
         hint: t("ui.required_for_zipvoice_may_be"),
       },
       {
+        name: 'reference_secs',
+        label: t("ui.reference_secs"),
+        type: 'range',
+        min: 1,
+        max: 15,
+        step: 0.5,
+        value: defaultSecs,
+        hint: t("ui.reference_secs_hint"),
+        onInput: () => {
+          const full = document.getElementById('dialog-f-reference_full');
+          if (full && full.checked) {
+            full.checked = false;
+            full.dispatchEvent(new Event('change'));
+          }
+        },
+      },
+      {
+        name: 'reference_full',
+        label: t("ui.reference_secs_full"),
+        type: 'checkbox',
+        value: initialSecs == null,
+        disables: 'reference_secs',
+      },
+      {
         name: 'prompt',
         label: t("ui.replace_reference_clip_optional_3"),
         type: 'file',
@@ -236,7 +265,7 @@ async function editProfile(p) {
     ],
   });
   if (!res || !res.ok) return;
-  const { name, prompt_text, prompt } = res.values;
+  const { name, prompt_text, prompt, reference_secs, reference_full } = res.values;
   if (!name) {
     toast(t("ui.name_cannot_be_empty"), true);
     return;
@@ -244,9 +273,17 @@ async function editProfile(p) {
   const fd = new FormData();
   fd.append('name', name);
   fd.append('prompt_text', prompt_text || '');
+  // Only send the length when the user changed it: a plain rename must
+  // not re-trim and re-transcribe the voice.
+  if (reference_full) {
+    if (initialSecs != null) fd.append('reference_secs', '');
+  } else {
+    const secs = Number(reference_secs);
+    if (secs !== defaultSecs) fd.append('reference_secs', String(secs));
+  }
   if (prompt) fd.append('prompt', prompt, prompt.name || 'reference.wav');
   try {
-    await api(`/api/profiles/${encodeURIComponent(p.id)}`, { method: 'POST', body: fd });
+    await api(`/api/profiles/${encodeURIComponent(p.id)}`, { method: 'PUT', body: fd });
     toast(t('ui.updated_voice', { name }));
     await loadProfiles();
   } catch (e) {

@@ -126,6 +126,8 @@ function showDialog({ title, message = '', fields = [], okText, danger = false }
       label.htmlFor = 'dialog-f-' + f.name;
       wrap.appendChild(label);
       let input;
+      // An element rendered after the input (a range's live value).
+      let after = null;
       if (f.type === 'textarea') {
         input = document.createElement('textarea');
         input.rows = 3;
@@ -144,6 +146,30 @@ function showDialog({ title, message = '', fields = [], okText, danger = false }
         input.type = 'file';
         input.accept = f.accept || 'audio/wav,.wav';
         input.style.color = 'var(--muted)';
+      } else if (f.type === 'range') {
+        input = document.createElement('input');
+        input.type = 'range';
+        input.min = f.min ?? '1';
+        input.max = f.max ?? '15';
+        input.step = f.step ?? '0.5';
+        input.value = f.value ?? input.min;
+        const readout = document.createElement('span');
+        readout.className = 'hint';
+        readout.style.marginLeft = '10px';
+        const showValue = () => {
+          readout.textContent = t('dialog.seconds', { s: input.value });
+        };
+        input.oninput = () => {
+          showValue();
+          if (f.onInput) f.onInput(input);
+        };
+        showValue();
+        after = readout;
+      } else if (f.type === 'checkbox') {
+        input = document.createElement('input');
+        input.type = 'checkbox';
+        input.checked = !!f.value;
+        input.style.width = 'auto';
       } else if (f.type === 'audio') {
         // A row of play buttons for comparing two renditions of the same
         // clip. It carries no value: the buttons are not form fields, so
@@ -188,15 +214,29 @@ function showDialog({ title, message = '', fields = [], okText, danger = false }
         input.dataset.fieldType = f.type || 'text';
       }
       wrap.appendChild(input);
+      if (after) wrap.appendChild(after);
       appendHint(wrap, f);
       host.appendChild(wrap);
+    }
+
+    // A checkbox can switch another field on and off (e.g. "use the full
+    // clip" disables the length slider).
+    for (const f of fields) {
+      if (f.type !== 'checkbox' || !f.disables) continue;
+      const cb = document.getElementById('dialog-f-' + f.name);
+      const target = document.getElementById('dialog-f-' + f.disables);
+      if (!cb || !target) continue;
+      target.disabled = cb.checked;
+      cb.addEventListener('change', () => {
+        target.disabled = cb.checked;
+      });
     }
 
     const ok = $('dialogOk');
     ok.textContent = okText;
     ok.className = danger ? 'ghost danger' : '';
     $('dialogOverlay').classList.add('show');
-    (host.querySelector('input[type="text"], textarea, select') || ok).focus();
+    (host.querySelector('input[type="text"], input[type="number"], textarea, select') || ok).focus();
   });
 }
 
@@ -214,6 +254,8 @@ $('dialogOk').onclick = () => {
   for (const el of document.querySelectorAll('#dialogFields [data-field]')) {
     if (el.dataset.fieldType === 'file') {
       values[el.dataset.field] = el.files[0] || null;
+    } else if (el.dataset.fieldType === 'checkbox') {
+      values[el.dataset.field] = el.checked;
     } else {
       values[el.dataset.field] = el.value.trim();
     }

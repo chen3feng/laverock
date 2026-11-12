@@ -26,10 +26,10 @@ Cookie）；以下均指回环监听。
 | POST | `/api/jobs/:id/cancel` | 请求停止任务 → `202` |
 | GET | `/api/jobs/:id/files/:name` | 下载任务产物 |
 | GET | `/api/profiles` | 已保存声音及时长、大小、素材段数 |
-| POST | `/api/profiles` | multipart：`name`、`prompt_text`、`prompt`（WAV），或重复的 `capture` id → 保存声音 |
-| POST | `/api/profiles/:id` | multipart：`name`、`prompt_text`、可选 `prompt` → 编辑声音 |
+| POST | `/api/profiles` | multipart：`name`、`prompt_text`、`prompt`（WAV），或重复的 `capture` id → 保存声音；可选 `reference_secs` |
+| POST/PUT | `/api/profiles/:id` | multipart：`name`、`prompt_text`、可选 `prompt`、可选 `reference_secs` → 编辑声音 |
 | POST | `/api/profiles/:id/captures` | JSON `{captures: [id, …]}` → 替换该声音引用的素材 |
-| GET | `/api/profiles/:id/audio` | 该声音交给引擎的参考音频（`?engine=` 决定按哪个引擎的上限拼接） |
+| GET | `/api/profiles/:id/audio` | 该声音交给引擎的参考音频（`?engine=` 决定按哪个引擎的上限拼接，`?max_secs=` 预览更短的裁剪） |
 | DELETE | `/api/profiles/:id` | 删除已保存声音（其素材留在素材库） |
 | GET | `/api/profiles/:id/export` | 导出便携 `.lvvoice.zip`（清单 + WAV） |
 | POST | `/api/profiles/export` | JSON `{ids: [...]}` → 打包为单个 `.lvvoices.zip` |
@@ -86,6 +86,12 @@ Cookie）；以下均指回环监听。
 一条声音可以由素材库中的一段或多段**素材**组成：`POST /api/profiles` 重复传
 `capture` 字段即可；`GET /api/engines` 返回的 `reference_limit_secs` 是拼接时的
 长度上限，因为每个引擎只在那段长度内取条件。
+
+声音还可以自带 `reference_secs`（1–15 秒，且不超过引擎上限）。设置后会裁剪交给
+引擎的参考音频，并用已安装的语音识别模型重新转写裁剪后的片段，保证保存的文字与
+音频一致；清除它（`PUT /api/profiles/:id` 传空 `reference_secs`）则恢复完整音频
+和原始文字。合成接口不变：选中该声音时自动应用它的时长。修改声音的素材或替换
+参考音频会清空该设置，因为裁剪后的文字已不再匹配。
 
 带时间戳的转写来自已安装的语音识别模型：CTC 解码器会为每个 token 给出时间，
 服务端再聚合成句子级的分段。不提供 token 时间戳的模型则会按停顿切分音频兜底。

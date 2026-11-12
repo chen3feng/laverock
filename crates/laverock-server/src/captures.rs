@@ -489,7 +489,7 @@ impl CaptureStore {
 }
 
 /// Several captures joined into the single clip an engine is given.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct CombinedReference {
     pub wav: Vec<u8>,
     pub text: String,

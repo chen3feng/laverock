@@ -64,10 +64,12 @@ async fn unload(
         return Err(ApiError::not_found(format!("engine not found: {id}")));
     }
     state.manager.unload(&id);
+    state.profiles.clear_reference_cache();
     Ok(StatusCode::NO_CONTENT)
 }
 
 async fn unload_all(State(state): State<AppState>) -> StatusCode {
     state.manager.unload_all();
+    state.profiles.clear_reference_cache();
     StatusCode::NO_CONTENT
 }

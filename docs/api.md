@@ -28,10 +28,10 @@ describes the loopback listener.
 | POST | `/api/jobs/:id/cancel` | ask the worker to stop → `202` |
 | GET | `/api/jobs/:id/files/:name` | download a finished artifact |
 | GET | `/api/profiles` | saved voices with duration, size and take count |
-| POST | `/api/profiles` | multipart `name`, `prompt_text`, `prompt` (WAV), or repeated `capture` ids → saved voice |
-| POST | `/api/profiles/:id` | multipart `name`, `prompt_text`, optional `prompt` → edit a saved voice |
+| POST | `/api/profiles` | multipart `name`, `prompt_text`, `prompt` (WAV), or repeated `capture` ids → saved voice; optional `reference_secs` |
+| POST/PUT | `/api/profiles/:id` | multipart `name`, `prompt_text`, optional `prompt`, optional `reference_secs` → edit a saved voice |
 | POST | `/api/profiles/:id/captures` | JSON `{captures: [id, …]}` → replace the takes behind a voice |
-| GET | `/api/profiles/:id/audio` | reference clip a voice would hand an engine (`?engine=` sets the take limit) |
+| GET | `/api/profiles/:id/audio` | reference clip a voice would hand an engine (`?engine=` sets the take limit, `?max_secs=` previews a shorter cut) |
 | DELETE | `/api/profiles/:id` | delete a saved voice (its takes stay in the library) |
 | GET | `/api/profiles/:id/export` | portable `.lvvoice.zip` (manifest + WAV) |
 | POST | `/api/profiles/export` | JSON `{ids: [...]}` → one `.lvvoices.zip` batch archive |
@@ -89,6 +89,15 @@ A voice can be built from one or more **takes** in the recording library.
 `POST /api/profiles` with a repeated `capture` field creates such a voice;
 `GET /api/engines` reports `reference_limit_secs`, the length at which the
 joined reference is cut, because each engine only conditions on that much.
+
+A voice may also carry its own `reference_secs` (1–15 s, and never above the
+engine's limit). Setting it trims the clip the engine receives and
+re-transcribes the trimmed audio with the installed speech-to-text model, so
+the stored transcript still matches; clearing it (`reference_secs=` on
+`PUT /api/profiles/:id`) returns to the full clip and the original
+transcript. Synthesis endpoints are unchanged: the voice's length applies
+whenever it is selected. Changing a voice's takes or replacing its clip
+clears the setting, because the trimmed transcript no longer matches.
 
 Timed transcripts come from the installed speech-to-text model, whose CTC
 decoder reports a timestamp per token; the server aggregates them into
