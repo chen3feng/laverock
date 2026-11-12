@@ -8,8 +8,11 @@ use axum::{
     Json, Router,
 };
 
-use super::{ApiError, AppState};
-use crate::profiles::{ImportReport, ImportStrategy, ProfileMeta, ProfileView};
+use super::{request_lang, ApiError, AppState};
+use crate::profiles::{
+    self, ImportReport, ImportStrategy, ProfileMeta, ProfileView, MAX_REFERENCE_SECS,
+};
+use laverock_core::i18n::{Key, Message};
 
 pub(crate) fn router() -> Router<AppState> {
     Router::new()
@@ -20,7 +23,9 @@ pub(crate) fn router() -> Router<AppState> {
         )
         .route(
             "/api/profiles/{id}",
-            delete(delete_profile).post(update_profile),
+            delete(delete_profile)
+                .post(update_profile)
+                .put(update_profile),
         )
         .route("/api/profiles/{id}/audio", get(profile_audio))
         .route("/api/profiles/{id}/captures", post(set_profile_captures))
@@ -42,6 +47,7 @@ async fn create_profile(
     // Takes from the recording library, in order. When present they are
     // the voice's audio and `prompt` is not needed.
     let mut capture_ids: Vec<String> = Vec::new();
+    let mut reference_secs: Option<f32> = None;
 
     while let Some(field) = multipart
         .next_field()
@@ -77,6 +83,13 @@ async fn create_profile(
                         .map(str::to_string),
                 );
             }
+            Some("reference_secs") => {
+                let raw = field
+                    .text()
+                    .await
+                    .map_err(|e| ApiError::bad_request(format!("bad reference_secs: {e}")))?;
+                reference_secs = Some(parse_reference_secs(&raw)?);
+            }
             Some("prompt") | Some("audio") => {
                 wav = Some(
                     field
@@ -91,18 +104,63 @@ async fn create_profile(
     }
 
     let name = name.ok_or_else(|| ApiError::bad_request("missing required field: name"))?;
-    if !capture_ids.is_empty() {
+    let meta = if !capture_ids.is_empty() {
+        state.profiles.create_from_captures(&name, &capture_ids)?
+    } else {
+        let prompt_text = prompt_text
+            .ok_or_else(|| ApiError::bad_request("missing required field: prompt_text"))?;
+        let wav = wav.filter(|b| !b.is_empty()).ok_or_else(|| {
+            ApiError::bad_request("missing required field: prompt (WAV reference)")
+        })?;
+        state.profiles.create(&name, &prompt_text, &wav)?
+    };
+    if let Some(secs) = reference_secs {
         return Ok(Json(
-            state.profiles.create_from_captures(&name, &capture_ids)?,
+            apply_reference_secs(&state, &meta.id, secs, None).await?,
         ));
     }
-    let prompt_text =
-        prompt_text.ok_or_else(|| ApiError::bad_request("missing required field: prompt_text"))?;
-    let wav = wav
-        .filter(|b| !b.is_empty())
-        .ok_or_else(|| ApiError::bad_request("missing required field: prompt (WAV reference)"))?;
+    Ok(Json(meta))
+}
 
-    Ok(Json(state.profiles.create(&name, &prompt_text, &wav)?))
+/// Parse a `reference_secs` form field.
+fn parse_reference_secs(raw: &str) -> Result<f32, ApiError> {
+    raw.trim()
+        .parse::<f32>()
+        .map_err(|_| ApiError::bad_request("reference_secs must be a number of seconds"))
+}
+
+/// Trim a voice to `secs` and re-transcribe the trimmed clip, so the
+/// stored transcript still matches the audio every engine receives.
+async fn apply_reference_secs(
+    state: &AppState,
+    id: &str,
+    secs: f32,
+    engine: Option<&str>,
+) -> Result<ProfileMeta, ApiError> {
+    let engine_max = engine
+        .and_then(|engine| state.manager.reference_limit_secs(engine).ok())
+        .unwrap_or(MAX_REFERENCE_SECS);
+    profiles::validate_reference_secs(secs, engine_max)?;
+    if !state.transcriber.available() {
+        return Err(ApiError::bad_request(
+            Message::new(Key::ReferenceSecsNeedsStt).render(request_lang()),
+        ));
+    }
+    // Build from the full reference: raising the setting must not start
+    // from the previously trimmed clip.
+    let combined = state.profiles.reference_at(id, secs)?;
+    let transcriber = state.transcriber.clone();
+    let transcript =
+        tokio::task::spawn_blocking(move || transcriber.transcribe_detailed(&combined.wav, None))
+            .await
+            .map_err(|e| ApiError::internal(format!("transcribe task panicked: {e}")))??;
+    let text = transcript.text.trim().to_string();
+    if text.is_empty() {
+        return Err(ApiError::bad_request(
+            Message::new(Key::ReferenceSecsNoTranscript).render(request_lang()),
+        ));
+    }
+    Ok(state.profiles.set_reference_secs(id, secs, &text)?)
 }
 
 async fn update_profile(
@@ -113,6 +171,9 @@ async fn update_profile(
     let mut name = None;
     let mut prompt_text = None;
     let mut wav: Option<Vec<u8>> = None;
+    // `None` keeps the current setting, `Some(None)` clears it.
+    let mut reference_secs: Option<Option<f32>> = None;
+    let mut engine: Option<String> = None;
 
     while let Some(field) = multipart
         .next_field()
@@ -136,6 +197,25 @@ async fn update_profile(
                         .map_err(|e| ApiError::bad_request(format!("bad prompt_text: {e}")))?,
                 )
             }
+            Some("reference_secs") => {
+                let raw = field
+                    .text()
+                    .await
+                    .map_err(|e| ApiError::bad_request(format!("bad reference_secs: {e}")))?;
+                reference_secs = Some(if raw.trim().is_empty() {
+                    None
+                } else {
+                    Some(parse_reference_secs(&raw)?)
+                });
+            }
+            Some("engine") => {
+                engine = Some(
+                    field
+                        .text()
+                        .await
+                        .map_err(|e| ApiError::bad_request(format!("bad engine: {e}")))?,
+                )
+            }
             Some("prompt") => {
                 let bytes = field
                     .bytes()
@@ -153,12 +233,16 @@ async fn update_profile(
     let (current, _) = state.profiles.get(&id)?;
     let name = name.unwrap_or(current.name);
     let prompt_text = prompt_text.unwrap_or(current.prompt_text);
-    Ok(Json(state.profiles.update(
-        &id,
-        &name,
-        &prompt_text,
-        wav.as_deref(),
-    )?))
+    let meta = state
+        .profiles
+        .update(&id, &name, &prompt_text, wav.as_deref())?;
+    match reference_secs {
+        None => Ok(Json(meta)),
+        Some(None) => Ok(Json(state.profiles.clear_reference_secs(&id)?)),
+        Some(Some(secs)) => Ok(Json(
+            apply_reference_secs(&state, &id, secs, engine.as_deref()).await?,
+        )),
+    }
 }
 
 async fn delete_profile(
@@ -176,11 +260,16 @@ async fn profile_audio(
     Path(id): Path<String>,
     Query(q): Query<ProfileAudioQuery>,
 ) -> Result<Response, ApiError> {
-    let limit = q
+    let mut limit = q
         .engine
         .as_deref()
         .and_then(|engine| state.manager.reference_limit_secs(engine).ok())
-        .unwrap_or(15.0);
+        .unwrap_or(MAX_REFERENCE_SECS);
+    if let Some(max) = q.max_secs {
+        if max.is_finite() && max > 0.0 {
+            limit = limit.min(max);
+        }
+    }
     let combined = state.profiles.reference(&id, limit)?;
     Ok((
         StatusCode::OK,
@@ -193,6 +282,9 @@ async fn profile_audio(
 #[derive(serde::Deserialize)]
 struct ProfileAudioQuery {
     engine: Option<String>,
+    /// Preview a shorter clip than the engine would take, e.g. while
+    /// dragging the reference-length slider.
+    max_secs: Option<f32>,
 }
 
 #[derive(serde::Deserialize)]

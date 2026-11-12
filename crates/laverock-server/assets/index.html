@@ -1244,12 +1244,14 @@ addI18n({
     'voices.sub': '保存的声音可以复用到任何克隆引擎，也可以由素材库里的多段录音组成。',
     'voice.from_library': '要用多段录音拼成一个声音？去素材库勾选后新建。',
     'voices.takes': '{n} 段素材',
+    'voices.reference_secs': '{s} 秒参考',
   },
   en: {
     'voices.title': 'Voice library',
     'voices.sub': 'Saved voices work with any cloning engine, and can be built from several takes in the library.',
     'voice.from_library': 'Building a voice from several takes? Pick them in the library, then create it.',
     'voices.takes': '{n} takes',
+    'voices.reference_secs': '{s} s ref',
   },
 });
 
@@ -1602,12 +1604,14 @@ addI18n({
     'pair.msg': '在这台电脑上打开「设置 → 手机遥控 → 生成配对二维码」，然后用手机扫码。',
     'pair.code': '配对码', 'pair.code.ph': '6 位数字', 'pair.connect': '连接',
     'dialog.ok': '确定', 'dialog.cancel': '取消',
+    'dialog.seconds': '{s} 秒',
   },
   en: {
     'pair.title': 'Connect to Laverock',
     'pair.msg': 'On this computer open Settings → Phone remote → Show pairing QR code, then scan it with your phone.',
     'pair.code': 'Pairing code', 'pair.code.ph': '6-digit code', 'pair.connect': 'Connect',
     'dialog.ok': 'OK', 'dialog.cancel': 'Cancel',
+    'dialog.seconds': '{s} s',
   },
 });
 
@@ -1989,6 +1993,9 @@ addI18n({
     "ui.required_for_zipvoice_may_be": "ZipVoice 合成时必填；VoxCPM2 与 Qwen3-TTS 可以留空。",
     "ui.replace_reference_clip_optional_3": "替换参考音频（可选，3–10 秒干净人声）",
     "ui.leave_empty_to_keep_the": "不选则保留原音频。",
+    "ui.reference_secs": "参考音时长",
+    "ui.reference_secs_hint": "3–10 秒通常足够。参考音越长，合成首帧越慢；引擎自身的上限更低时会以引擎为准。",
+    "ui.reference_secs_full": "使用完整参考音（不裁剪）",
     "ui.name_cannot_be_empty": "名称不能为空",
     "ui.delete_voice": "删除声音",
     "ui.choose_or_record_a_reference": "请先选择或录制参考声音",
@@ -2120,6 +2127,9 @@ addI18n({
     "ui.required_for_zipvoice_may_be": "Required for ZipVoice; may be empty for VoxCPM2 and Qwen3-TTS.",
     "ui.replace_reference_clip_optional_3": "Replace reference clip (optional, 3\u201310 s clean speech)",
     "ui.leave_empty_to_keep_the": "Leave empty to keep the current audio.",
+    "ui.reference_secs": "Reference length",
+    "ui.reference_secs_hint": "3\u201310 s is usually enough. Longer references make the first frame slower; a lower engine limit wins when they differ.",
+    "ui.reference_secs_full": "Use the full reference clip (no trimming)",
     "ui.name_cannot_be_empty": "Name cannot be empty",
     "ui.delete_voice": "Delete voice",
     "ui.choose_or_record_a_reference": "Choose or record a reference voice first",
@@ -2503,6 +2513,8 @@ function showDialog({ title, message = '', fields = [], okText, danger = false }
       label.htmlFor = 'dialog-f-' + f.name;
       wrap.appendChild(label);
       let input;
+      // An element rendered after the input (a range's live value).
+      let after = null;
       if (f.type === 'textarea') {
         input = document.createElement('textarea');
         input.rows = 3;
@@ -2521,6 +2533,30 @@ function showDialog({ title, message = '', fields = [], okText, danger = false }
         input.type = 'file';
         input.accept = f.accept || 'audio/wav,.wav';
         input.style.color = 'var(--muted)';
+      } else if (f.type === 'range') {
+        input = document.createElement('input');
+        input.type = 'range';
+        input.min = f.min ?? '1';
+        input.max = f.max ?? '15';
+        input.step = f.step ?? '0.5';
+        input.value = f.value ?? input.min;
+        const readout = document.createElement('span');
+        readout.className = 'hint';
+        readout.style.marginLeft = '10px';
+        const showValue = () => {
+          readout.textContent = t('dialog.seconds', { s: input.value });
+        };
+        input.oninput = () => {
+          showValue();
+          if (f.onInput) f.onInput(input);
+        };
+        showValue();
+        after = readout;
+      } else if (f.type === 'checkbox') {
+        input = document.createElement('input');
+        input.type = 'checkbox';
+        input.checked = !!f.value;
+        input.style.width = 'auto';
       } else if (f.type === 'audio') {
         // A row of play buttons for comparing two renditions of the same
         // clip. It carries no value: the buttons are not form fields, so
@@ -2565,15 +2601,29 @@ function showDialog({ title, message = '', fields = [], okText, danger = false }
         input.dataset.fieldType = f.type || 'text';
       }
       wrap.appendChild(input);
+      if (after) wrap.appendChild(after);
       appendHint(wrap, f);
       host.appendChild(wrap);
+    }
+
+    // A checkbox can switch another field on and off (e.g. "use the full
+    // clip" disables the length slider).
+    for (const f of fields) {
+      if (f.type !== 'checkbox' || !f.disables) continue;
+      const cb = document.getElementById('dialog-f-' + f.name);
+      const target = document.getElementById('dialog-f-' + f.disables);
+      if (!cb || !target) continue;
+      target.disabled = cb.checked;
+      cb.addEventListener('change', () => {
+        target.disabled = cb.checked;
+      });
     }
 
     const ok = $('dialogOk');
     ok.textContent = okText;
     ok.className = danger ? 'ghost danger' : '';
     $('dialogOverlay').classList.add('show');
-    (host.querySelector('input[type="text"], textarea, select') || ok).focus();
+    (host.querySelector('input[type="text"], input[type="number"], textarea, select') || ok).focus();
   });
 }
 
@@ -2591,6 +2641,8 @@ $('dialogOk').onclick = () => {
   for (const el of document.querySelectorAll('#dialogFields [data-field]')) {
     if (el.dataset.fieldType === 'file') {
       values[el.dataset.field] = el.files[0] || null;
+    } else if (el.dataset.fieldType === 'checkbox') {
+      values[el.dataset.field] = el.checked;
     } else {
       values[el.dataset.field] = el.value.trim();
     }
@@ -3762,7 +3814,7 @@ function renderVoices() {
     // A voice is engine-agnostic: the engine is picked at synthesis, so
     // the engine it was first saved with is not shown as a binding.
     el.innerHTML = `
-      <div class="voice-top"><b>${esc(p.name)}</b>${p.capture_count > 1 ? `<span class="chip">${esc(t('voices.takes', { n: p.capture_count }))}</span>` : ''}</div>
+      <div class="voice-top"><b>${esc(p.name)}</b>${p.capture_count > 1 ? `<span class="chip">${esc(t('voices.takes', { n: p.capture_count }))}</span>` : ''}${p.reference_secs != null ? `<span class="chip">${esc(t('voices.reference_secs', { s: p.reference_secs }))}</span>` : ''}</div>
       <div class="voice-meta">${fmtDur(p.duration_secs)} · ${fmtBytes(p.bytes)} · ${fmtDate(p.created_at)}</div>
       ${warns.map((w) => `<div class="voice-warn">⚠ ${esc(w)}</div>`).join('')}
       <div class="voice-text">${esc(p.prompt_text)}</div>
@@ -3817,6 +3869,11 @@ function resetPreviewState() {
 }
 
 async function editProfile(p) {
+  const initialSecs = p.reference_secs ?? null;
+  // Round to the slider's 0.5 s step so an untouched slider compares
+  // equal to its starting position.
+  const defaultSecs =
+    initialSecs ?? Math.round(Math.min(Math.max(p.duration_secs || 5, 3), 10) * 2) / 2;
   const res = await showDialog({
     title: t("ui.edit_voice"),
     okText: t("ui.save"),
@@ -3830,6 +3887,30 @@ async function editProfile(p) {
         hint: t("ui.required_for_zipvoice_may_be"),
       },
       {
+        name: 'reference_secs',
+        label: t("ui.reference_secs"),
+        type: 'range',
+        min: 1,
+        max: 15,
+        step: 0.5,
+        value: defaultSecs,
+        hint: t("ui.reference_secs_hint"),
+        onInput: () => {
+          const full = document.getElementById('dialog-f-reference_full');
+          if (full && full.checked) {
+            full.checked = false;
+            full.dispatchEvent(new Event('change'));
+          }
+        },
+      },
+      {
+        name: 'reference_full',
+        label: t("ui.reference_secs_full"),
+        type: 'checkbox',
+        value: initialSecs == null,
+        disables: 'reference_secs',
+      },
+      {
         name: 'prompt',
         label: t("ui.replace_reference_clip_optional_3"),
         type: 'file',
@@ -3838,7 +3919,7 @@ async function editProfile(p) {
     ],
   });
   if (!res || !res.ok) return;
-  const { name, prompt_text, prompt } = res.values;
+  const { name, prompt_text, prompt, reference_secs, reference_full } = res.values;
   if (!name) {
     toast(t("ui.name_cannot_be_empty"), true);
     return;
@@ -3846,9 +3927,17 @@ async function editProfile(p) {
   const fd = new FormData();
   fd.append('name', name);
   fd.append('prompt_text', prompt_text || '');
+  // Only send the length when the user changed it: a plain rename must
+  // not re-trim and re-transcribe the voice.
+  if (reference_full) {
+    if (initialSecs != null) fd.append('reference_secs', '');
+  } else {
+    const secs = Number(reference_secs);
+    if (secs !== defaultSecs) fd.append('reference_secs', String(secs));
+  }
   if (prompt) fd.append('prompt', prompt, prompt.name || 'reference.wav');
   try {
-    await api(`/api/profiles/${encodeURIComponent(p.id)}`, { method: 'POST', body: fd });
+    await api(`/api/profiles/${encodeURIComponent(p.id)}`, { method: 'PUT', body: fd });
     toast(t('ui.updated_voice', { name }));
     await loadProfiles();
   } catch (e) {

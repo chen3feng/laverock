@@ -68,5 +68,7 @@ async fn reload_models(
         return Err(ApiError::forbidden());
     }
     let engines = state.models.reload()?;
+    // Engine prompt limits can change with the manifests.
+    state.profiles.clear_reference_cache();
     Ok(Json(serde_json::json!({ "engines": engines })))
 }

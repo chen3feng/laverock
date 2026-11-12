@@ -146,6 +146,15 @@ messages! {
         { en: "The reference transcript cannot be empty.", zh: "参考音频对应的文字不能为空。" },
     ReferenceTooLarge = "reference_too_large"
         { en: "The reference audio exceeds 20 MB.", zh: "参考音频超过 20 MB。" },
+    ReferenceSecsRange = "reference_secs_range"
+        { en: "Reference length must be between {min} and {max} seconds.",
+          zh: "参考音时长必须在 {min} 到 {max} 秒之间。" },
+    ReferenceSecsNeedsStt = "reference_secs_needs_stt"
+        { en: "Trimming a voice needs a speech-to-text model; download one from the Models page.",
+          zh: "裁剪参考音需要语音识别模型；请在「模型」页下载一个。" },
+    ReferenceSecsNoTranscript = "reference_secs_no_transcript"
+        { en: "Speech recognition found no words in the trimmed clip; try a longer length or a clearer take.",
+          zh: "裁剪后的片段里没有识别出文字；请调长时长或换一段更清晰的录音。" },
     EnhanceModelsMissing = "enhance_models_missing"
         { en: "Voice enhancement needs its models first; install them from the Models page (about 165 MB).",
           zh: "人声增强需要先安装模型；请在「模型」页下载（约 165 MB）。" },

@@ -18,12 +18,14 @@ use crate::reference::{
     ReferenceFacts, MAX_REFERENCE_BYTES,
 };
 use laverock_core::i18n::{self, Key};
-use laverock_core::{decode_wav, CoreError, Result};
+use laverock_core::{decode_wav, encode_wav, trim_reference, CoreError, Result};
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::{HashMap, HashSet},
+    borrow::Cow,
+    collections::{HashMap, HashSet, VecDeque},
     fs,
     path::{Path, PathBuf},
+    sync::{Arc, Mutex},
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -32,11 +34,35 @@ use std::{
 /// engine's own limit is applied at synthesis time.
 const EXPORT_MAX_REFERENCE_SECS: f32 = 60.0;
 
+/// Shortest and longest reference a voice may be trimmed to. The upper
+/// bound is the common cloning-engine ceiling; engines with a lower limit
+/// still cut the clip at synthesis time.
+pub const MIN_REFERENCE_SECS: f32 = 1.0;
+pub const MAX_REFERENCE_SECS: f32 = 15.0;
+
+/// Assembled reference clips kept per store. Synthesis calls this for
+/// every request, so a voice reused sentence by sentence should not pay
+/// the decode/join cost again.
+const REFERENCE_CACHE_ENTRIES: usize = 8;
+/// Requests longer than this (export packing) skip the cache; a voice
+/// reference is at most this long in normal use.
+const REFERENCE_CACHE_MAX_SECS: f32 = 30.0;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProfileMeta {
     pub id: String,
     pub name: String,
     pub prompt_text: String,
+    /// Reference length the user picked, in seconds. When set, the clip
+    /// handed to engines is trimmed to this length and `trimmed_text` —
+    /// its own transcript — replaces `prompt_text`, so zero-shot cloning
+    /// stays aligned. `None` keeps the full reference.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reference_secs: Option<f32>,
+    /// Transcript of the clip at `reference_secs`; `None` when the voice
+    /// uses its full reference.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trimmed_text: Option<String>,
     /// Unix seconds.
     pub created_at: u64,
     /// Missing on profiles created before ingest analysis existed.
@@ -64,6 +90,14 @@ pub struct ProfileView {
 pub struct ProfileStore {
     root: PathBuf,
     captures: CaptureStore,
+    /// Least-recently-used assembled references, keyed by profile,
+    /// effective limit and a fingerprint of its inputs.
+    reference_cache: Mutex<ReferenceCache>,
+}
+
+#[derive(Default)]
+struct ReferenceCache {
+    entries: VecDeque<(String, Arc<CombinedReference>)>,
 }
 
 /// Validated capture ids plus their clips, in order.
@@ -74,7 +108,11 @@ impl ProfileStore {
         let root = data_dir.as_ref().join("profiles");
         fs::create_dir_all(&root)?;
         let captures = CaptureStore::open(data_dir)?;
-        Ok(Self { root, captures })
+        Ok(Self {
+            root,
+            captures,
+            reference_cache: Mutex::new(ReferenceCache::default()),
+        })
     }
 
     /// The recording library voices are built from.
@@ -146,6 +184,11 @@ impl ProfileStore {
                 bytes += size;
             }
             meta.reference = Some(aggregate_facts(&takes));
+        }
+        // The library shows what synthesis will use, so a trimmed voice
+        // reports the trimmed length.
+        if let Some(secs) = meta.reference_secs {
+            duration_secs = duration_secs.min(secs);
         }
         ProfileView {
             meta,
@@ -283,6 +326,8 @@ impl ProfileStore {
             id: id.clone(),
             name: name.trim().to_string(),
             prompt_text: prompt_text.trim().to_string(),
+            reference_secs: None,
+            trimmed_text: None,
             created_at,
             reference: Some(facts),
             captures,
@@ -298,26 +343,186 @@ impl ProfileStore {
         Ok(meta)
     }
 
-    /// The clip an engine is given for this voice, joined up to `max_secs`.
-    /// A voice without captures (one not migrated yet) keeps its own
-    /// `reference.wav`; a single capture is returned byte-for-byte.
+    /// The clip an engine is given for this voice, joined up to `max_secs`
+    /// and to the voice's own `reference_secs` when set.
+    ///
+    /// Results are cached: synthesis calls this once per request, so a
+    /// voice reused sentence by sentence must not decode and join its
+    /// takes again every time. The key includes a fingerprint of the
+    /// profile and its takes, and mutations clear the cache explicitly.
     pub fn reference(&self, id: &str, max_secs: f32) -> Result<CombinedReference> {
-        let (meta, wav) = self.get(id)?;
+        let meta = self.meta(id)?;
+        let limit = match meta.reference_secs {
+            Some(secs) => max_secs.min(secs),
+            None => max_secs,
+        };
+        let dir = self.dir(id)?;
+        let clip = dir.join("reference.wav");
+        let key = self.reference_key(&meta, &clip, limit);
+        if let Some(hit) = self.cache_get(&key) {
+            tracing::debug!("voice {id}: reference cache hit at {limit:.2} s");
+            return Ok(hit);
+        }
+        tracing::debug!("voice {id}: reference cache miss at {limit:.2} s");
+        let built = self.build_reference(&meta, &clip, limit)?;
+        self.cache_put(key, &built, limit);
+        Ok(built)
+    }
+
+    /// Build the reference as if `max_secs` were the only limit, ignoring
+    /// the voice's current `reference_secs`. Used when (re)trimming a
+    /// voice: raising the setting must not build from the shorter clip.
+    pub fn reference_at(&self, id: &str, max_secs: f32) -> Result<CombinedReference> {
+        let meta = self.meta(id)?;
+        let clip = self.dir(id)?.join("reference.wav");
+        self.build_reference(&meta, &clip, max_secs)
+    }
+
+    /// The untrimmed clip and transcript for packing an archive. Cached
+    /// references are skipped: this is not a hot path.
+    fn reference_for_export(&self, meta: &ProfileMeta) -> Result<CombinedReference> {
+        let clip = self.dir(&meta.id)?.join("reference.wav");
+        let mut combined = self.build_reference(meta, &clip, EXPORT_MAX_REFERENCE_SECS)?;
+        combined.text = meta.prompt_text.clone();
+        Ok(combined)
+    }
+
+    fn meta(&self, id: &str) -> Result<ProfileMeta> {
+        let raw = fs::read_to_string(self.dir(id)?.join("profile.json"))?;
+        Ok(serde_json::from_str(&raw)?)
+    }
+
+    fn build_reference(
+        &self,
+        meta: &ProfileMeta,
+        clip: &Path,
+        max_secs: f32,
+    ) -> Result<CombinedReference> {
         let clips: Vec<(CaptureMeta, Vec<u8>)> = meta
             .captures
             .iter()
             .filter_map(|cid| self.captures.get(cid).ok())
             .collect();
-        if clips.len() > 1 {
-            return captures::combine(&clips, max_secs);
+        let mut combined = if clips.len() > 1 {
+            captures::combine(&clips, max_secs)?
+        } else {
+            // One take, or a voice with no takes yet: the engine limit
+            // applies here too. Under the limit the bytes pass through
+            // untouched, so nothing is re-encoded needlessly.
+            let wav = match clips.first() {
+                Some((_, bytes)) => bytes.clone(),
+                None => fs::read(clip)?,
+            };
+            single_reference(wav, max_secs, meta.prompt_text.clone())?
+        };
+        // A voice trimmed at ingest uses the transcript of the shorter
+        // clip. It stays valid while the engine limit does not cut below
+        // the configured length.
+        if let (Some(secs), Some(text)) = (meta.reference_secs, meta.trimmed_text.as_deref()) {
+            if max_secs + 0.001 >= secs && !text.trim().is_empty() {
+                combined.text = text.trim().to_string();
+            }
         }
-        let wav = clips.first().map(|(_, bytes)| bytes.clone()).unwrap_or(wav);
-        Ok(CombinedReference {
-            wav,
-            text: meta.prompt_text,
-            used: 1,
-            dropped: 0,
-        })
+        Ok(combined)
+    }
+
+    /// Fingerprint of everything the assembled clip depends on. Capture
+    /// metadata carries a content hash, so a replaced take changes it
+    /// without reading the audio; legacy voices fall back to the stored
+    /// clip's size and mtime.
+    fn reference_key(&self, meta: &ProfileMeta, clip: &Path, limit: f32) -> String {
+        let mut raw = String::new();
+        raw.push_str(&meta.id);
+        raw.push('\u{1f}');
+        raw.push_str(&format!("{limit:.4}"));
+        raw.push('\u{1f}');
+        raw.push_str(meta.prompt_text.trim());
+        raw.push('\u{1f}');
+        raw.push_str(meta.trimmed_text.as_deref().unwrap_or(""));
+        raw.push('\u{1f}');
+        if let Some(secs) = meta.reference_secs {
+            raw.push_str(&format!("{secs:.4}"));
+        }
+        raw.push('\u{1f}');
+        for cid in &meta.captures {
+            raw.push_str(cid);
+            raw.push(':');
+            if let Ok(take) = self.captures.meta(cid) {
+                raw.push_str(&take.sha256);
+                raw.push(':');
+                raw.push_str(take.prompt_text.trim());
+            }
+            raw.push('\u{1f}');
+        }
+        if meta.captures.is_empty() {
+            raw.push_str(&file_stamp(clip));
+        }
+        sha256_hex(raw.as_bytes())
+    }
+
+    fn cache_get(&self, key: &str) -> Option<CombinedReference> {
+        let mut cache = self.reference_cache.lock().ok()?;
+        let pos = cache.entries.iter().position(|(k, _)| k == key)?;
+        let entry = cache.entries.remove(pos)?;
+        let value = Arc::clone(&entry.1);
+        cache.entries.push_back(entry);
+        Some((*value).clone())
+    }
+
+    fn cache_put(&self, key: String, value: &CombinedReference, limit: f32) {
+        // Export packing asks for the full clip; it is not a hot path and
+        // would only evict the clips synthesis is reusing.
+        if limit > REFERENCE_CACHE_MAX_SECS {
+            return;
+        }
+        let Ok(mut cache) = self.reference_cache.lock() else {
+            return;
+        };
+        cache.entries.retain(|(k, _)| k != &key);
+        cache.entries.push_back((key, Arc::new(value.clone())));
+        while cache.entries.len() > REFERENCE_CACHE_ENTRIES {
+            cache.entries.pop_front();
+        }
+    }
+
+    /// Drop every assembled reference. Called on voice/take edits and
+    /// engine reloads; the fingerprint alone would make stale entries
+    /// unreachable, this releases them immediately.
+    pub fn clear_reference_cache(&self) {
+        if let Ok(mut cache) = self.reference_cache.lock() {
+            cache.entries.clear();
+        }
+    }
+
+    /// Trim this voice to `secs` and store the transcript of the trimmed
+    /// clip. Callers re-transcribe the audio first (see the profiles
+    /// route); storing both keeps zero-shot audio and text aligned.
+    pub fn set_reference_secs(&self, id: &str, secs: f32, text: &str) -> Result<ProfileMeta> {
+        validate_reference_secs(secs, MAX_REFERENCE_SECS)?;
+        let dir = self.dir(id)?;
+        let mut meta = self.meta(id)?;
+        meta.reference_secs = Some(secs);
+        meta.trimmed_text = Some(text.trim().to_string());
+        write_atomic(
+            &dir.join("profile.json"),
+            &serde_json::to_vec_pretty(&meta)?,
+        )?;
+        self.clear_reference_cache();
+        Ok(meta)
+    }
+
+    /// Go back to the full reference clip and its original transcript.
+    pub fn clear_reference_secs(&self, id: &str) -> Result<ProfileMeta> {
+        let dir = self.dir(id)?;
+        let mut meta = self.meta(id)?;
+        meta.reference_secs = None;
+        meta.trimmed_text = None;
+        write_atomic(
+            &dir.join("profile.json"),
+            &serde_json::to_vec_pretty(&meta)?,
+        )?;
+        self.clear_reference_cache();
+        Ok(meta)
     }
 
     /// Replace the captures a voice is built from, in order. The voice's
@@ -329,10 +534,15 @@ impl ProfileStore {
         let mut meta: ProfileMeta = serde_json::from_str(&raw)?;
         meta.prompt_text = self.joined_transcript(&ids).unwrap_or(meta.prompt_text);
         meta.captures = ids;
+        // The clip changed, so a trim made from the old takes no longer
+        // matches its transcript.
+        meta.reference_secs = None;
+        meta.trimmed_text = None;
         write_atomic(
             &dir.join("profile.json"),
             &serde_json::to_vec_pretty(&meta)?,
         )?;
+        self.clear_reference_cache();
         Ok(meta)
     }
 
@@ -364,6 +574,7 @@ impl ProfileStore {
                 &serde_json::to_vec_pretty(&voice)?,
             )?;
         }
+        self.clear_reference_cache();
         Ok(meta)
     }
 
@@ -377,12 +588,15 @@ impl ProfileStore {
                 continue;
             }
             meta.captures.retain(|cid| cid != id);
+            meta.reference_secs = None;
+            meta.trimmed_text = None;
             let dir = self.dir(&meta.id)?;
             write_atomic(
                 &dir.join("profile.json"),
                 &serde_json::to_vec_pretty(&meta)?,
             )?;
         }
+        self.clear_reference_cache();
         Ok(())
     }
 
@@ -418,6 +632,7 @@ impl ProfileStore {
                 &serde_json::to_vec_pretty(&meta)?,
             )?;
         }
+        self.clear_reference_cache();
         Ok(remap.len())
     }
 
@@ -578,6 +793,8 @@ impl ProfileStore {
                 .capture_facts(&captures)
                 .or(Some(reference.facts.clone()));
             meta.captures = captures;
+            meta.reference_secs = None;
+            meta.trimmed_text = None;
         }
 
         meta.name = name.trim().to_string();
@@ -586,11 +803,13 @@ impl ProfileStore {
             &dir.join("profile.json"),
             &serde_json::to_vec_pretty(&meta)?,
         )?;
+        self.clear_reference_cache();
         Ok(meta)
     }
     pub fn delete(&self, id: &str) -> Result<()> {
         let dir = self.dir(id)?;
         fs::remove_dir_all(dir)?;
+        self.clear_reference_cache();
         Ok(())
     }
 
@@ -604,7 +823,9 @@ impl ProfileStore {
         use zip::{write::SimpleFileOptions, CompressionMethod, ZipWriter};
 
         let (meta, stored) = self.get(id)?;
-        let combined = self.reference(id, EXPORT_MAX_REFERENCE_SECS)?;
+        // An archive carries the voice's full material, not the trimmed
+        // clip synthesis would use, so it can be re-trimmed later.
+        let combined = self.reference_for_export(&meta)?;
         let takes = self.export_takes(&meta, &stored)?;
         let exported_at = now_secs();
         let manifest = serde_json::json!({
@@ -896,6 +1117,55 @@ pub struct ImportReport {
     pub skipped: usize,
     pub overwritten: usize,
     pub failed: Vec<String>,
+}
+
+/// Trim a single clip to `max_secs`, leaving bytes untouched when it is
+/// already short enough. Engines reject over-long prompts, and a single
+/// take used to bypass that limit.
+fn single_reference(wav: Vec<u8>, max_secs: f32, text: String) -> Result<CombinedReference> {
+    let (samples, rate) = decode_wav(&wav)?;
+    let rate = rate.max(1) as u32;
+    let mut wav = wav;
+    if let Cow::Owned(trimmed) = trim_reference(&samples, rate, max_secs) {
+        wav = encode_wav(&trimmed, rate as i32)?;
+    }
+    Ok(CombinedReference {
+        wav,
+        text,
+        used: 1,
+        dropped: 0,
+    })
+}
+
+/// Size and mtime of the legacy `reference.wav`, for cache keys of voices
+/// saved before takes existed.
+fn file_stamp(path: &Path) -> String {
+    match fs::metadata(path) {
+        Ok(meta) => {
+            let mtime = meta
+                .modified()
+                .ok()
+                .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+                .map(|d| d.as_nanos())
+                .unwrap_or(0);
+            format!("{}:{mtime}", meta.len())
+        }
+        Err(_) => String::new(),
+    }
+}
+
+/// Check a voice's `reference_secs` against the library bounds and the
+/// engine's own prompt limit, which can be lower.
+pub fn validate_reference_secs(secs: f32, engine_max_secs: f32) -> Result<()> {
+    let max = engine_max_secs.min(MAX_REFERENCE_SECS);
+    if !secs.is_finite() || secs < MIN_REFERENCE_SECS || secs > max {
+        return Err(CoreError::UserError(
+            i18n::Message::new(Key::ReferenceSecsRange)
+                .arg("min", MIN_REFERENCE_SECS)
+                .arg("max", max),
+        ));
+    }
+    Ok(())
 }
 
 fn validate_name(name: &str) -> Result<()> {
@@ -1462,6 +1732,127 @@ mod tests {
         assert_eq!(survivors.len(), 1, "one duplicate take should remain");
         assert_eq!(meta.captures, survivors, "voice should follow the survivor");
         assert!(first.id == survivors[0] || second.id == survivors[0]);
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    fn duration_of(wav: &[u8]) -> f32 {
+        let (samples, rate) = decode_wav(wav).expect("decode");
+        samples.len() as f32 / rate.max(1) as f32
+    }
+
+    #[test]
+    fn single_take_is_trimmed_to_the_engine_limit() {
+        let (store, dir) = temp_store();
+        let meta = store
+            .create("Long", "文字", &take(6.0, 220.0))
+            .expect("create");
+
+        let full = store.reference(&meta.id, 10.0).expect("full");
+        let (_, stored) = store.get(&meta.id).expect("get");
+        assert_eq!(full.wav, stored, "under the limit the bytes pass through");
+
+        let short = store.reference(&meta.id, 2.0).expect("short");
+        let secs = duration_of(&short.wav);
+        assert!(secs <= 2.05 && secs > 1.0, "trimmed to ~2 s, got {secs}");
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn reference_secs_shortens_the_clip_and_its_transcript() {
+        let (store, dir) = temp_store();
+        let meta = store
+            .create("Voice", "原始文字", &take(6.0, 220.0))
+            .expect("create");
+
+        let trimmed = store
+            .set_reference_secs(&meta.id, 2.0, "裁剪文字")
+            .expect("set");
+        assert_eq!(trimmed.reference_secs, Some(2.0));
+
+        // The engine limit is above the configured length: use the
+        // transcript of the trimmed clip.
+        let clip = store.reference(&meta.id, 10.0).expect("reference");
+        assert_eq!(clip.text, "裁剪文字");
+        let secs = duration_of(&clip.wav);
+        assert!(secs <= 2.05 && secs > 1.0, "got {secs}");
+
+        // A tighter engine limit wins, and the stored text no longer
+        // describes the clip, so the original transcript is used.
+        let tighter = store.reference(&meta.id, 1.0).expect("tighter");
+        assert_eq!(tighter.text, "原始文字");
+
+        let cleared = store.clear_reference_secs(&meta.id).expect("clear");
+        assert_eq!(cleared.reference_secs, None);
+        let full = store.reference(&meta.id, 10.0).expect("full");
+        assert_eq!(full.text, "原始文字");
+        assert!(duration_of(&full.wav) > 5.0);
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn reference_secs_is_validated() {
+        let (store, dir) = temp_store();
+        let meta = store
+            .create("Voice", "文字", &take(2.0, 220.0))
+            .expect("create");
+        for secs in [0.0, 0.5, 20.0, f32::NAN] {
+            let err = store
+                .set_reference_secs(&meta.id, secs, "文字")
+                .expect_err("out of range");
+            assert!(matches!(err, CoreError::UserError(_)), "{secs}: {err}");
+        }
+        store
+            .set_reference_secs(&meta.id, 1.0, "文字")
+            .expect("lower bound is accepted");
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn changing_takes_clears_the_trim() {
+        let (store, dir) = temp_store();
+        let a = store
+            .captures()
+            .create("a", "第一段", &take(2.0, 220.0), false)
+            .expect("a");
+        let b = store
+            .captures()
+            .create("b", "第二段", &take(2.0, 330.0), false)
+            .expect("b");
+        let voice = store
+            .create_from_captures("Duo", &[a.id.clone(), b.id.clone()])
+            .expect("create");
+        store
+            .set_reference_secs(&voice.id, 2.0, "裁剪文字")
+            .expect("set");
+
+        let updated = store
+            .set_captures(&voice.id, std::slice::from_ref(&a.id))
+            .expect("set captures");
+        assert_eq!(updated.reference_secs, None);
+        assert_eq!(updated.trimmed_text, None);
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn reference_is_cached_until_invalidated() {
+        let (store, dir) = temp_store();
+        let meta = store
+            .create("Voice", "文字", &take(2.0, 220.0))
+            .expect("create");
+        let first = store.reference(&meta.id, 10.0).expect("first");
+
+        // Change the audio behind the store's back. The cached entry must
+        // still be served: that is the hit path.
+        let capture = &meta.captures[0];
+        let clip = dir.join("captures").join(capture).join("capture.wav");
+        fs::write(&clip, take(1.0, 440.0)).expect("replace clip");
+        let hit = store.reference(&meta.id, 10.0).expect("hit");
+        assert_eq!(hit.wav, first.wav, "cache hit should not re-read the clip");
+
+        store.clear_reference_cache();
+        let miss = store.reference(&meta.id, 10.0).expect("miss");
+        assert_ne!(miss.wav, first.wav, "after a clear the new clip is read");
+        assert!((duration_of(&miss.wav) - 1.0).abs() < 0.1);
         fs::remove_dir_all(&dir).ok();
     }
 }

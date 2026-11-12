@@ -555,6 +555,11 @@ impl SpeechEngine for AudioCppEngine {
         std::fs::create_dir_all(&tmp).map_err(CoreError::from)?;
         let out_wav = tmp.join("out.wav");
         let ref_wav = if has_prompt {
+            // audio.cpp takes the prompt as a WAV path on every request and
+            // encodes it into model features inside the resident server; it
+            // exposes no way to reuse those features between requests. The
+            // voice layer caches the assembled clip, but this per-request
+            // conditioning cost remains the latency floor.
             let path = tmp.join("reference.wav");
             // VoxCPM2's AudioVAE encoder tensor holds 240000 samples at 16 kHz
             // (15 s, with patch padding) and the runtime ignores
